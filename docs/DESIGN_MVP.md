@@ -1,9 +1,6 @@
 # dLLM plugin — MVP design
 
-This document describes the **MVP architecture** for [`vllm-project/dllm-plugin`](https://github.com/vllm-project/dllm-plugin). It aligns with:
-
-- RFC discussion [vllm#36155](https://github.com/vllm-project/vllm/issues/36155) (spec-decode path reuse, minimal core change).
-- Public RFC/spec text: [`specs/002-dllm-plugin/rfc-dllm-plugin-standalone-v2.md`](https://github.com/vllm-project/vllm/blob/main/specs/002-dllm-plugin/rfc-dllm-plugin-standalone-v2.md) on the vLLM repository.
+This document describes the **MVP architecture** for [`vllm-project/dllm-plugin`](https://github.com/vllm-project/dllm-plugin). It aligns with the public design discussion in [vllm#36155](https://github.com/vllm-project/vllm/issues/36155) (spec-decode path reuse, minimal core change).
 
 **Audience:** implementers and reviewers of the plugin and the minimal vLLM core hook.
 
@@ -13,7 +10,7 @@ This document describes the **MVP architecture** for [`vllm-project/dllm-plugin`
 
 | Goal | Notes |
 |------|--------|
-| **One diffusion step = one worker schedule = one model forward** | Same abstraction as the RFC; continuous batching stays aligned across requests. |
+| **One diffusion step = one worker schedule = one model forward** | Same abstraction as in that discussion; continuous batching stays aligned across requests. |
 | **Block size `DRAFT_SIZE`** | Fixed per model (e.g. 32 for LLaDA2.0); one input block in, variable **Committed** (0..DRAFT_SIZE) + fixed **next-step input block** out. |
 | **Reuse spec-decode fields** | No new core tensor types; overload meaning when plugin scheduler + worker are active. |
 | **Custom scheduler + worker + registered model** | Loaded via `--scheduler-cls` / `--worker-cls` and `vllm.general_plugins` model registration. |
@@ -22,7 +19,7 @@ This document describes the **MVP architecture** for [`vllm-project/dllm-plugin`
 | **First architecture** | LLaDA2.0 inference path end-to-end. |
 | **Validation** | Fail fast if a dLLM model is used without the plugin scheduler/worker (or wrong classes). |
 
-**Out of MVP** (see [ROADMAP.md](ROADMAP.md)): grammar/structured outputs beyond “do not break AR grammar on next block”, block-specific CUDA kernels, prefix caching under semi-causal masks, extra architectures, draft streaming UX, and advanced grammar integrations.
+**Out of MVP** (see [ROADMAP.md](ROADMAP.md)): grammar/structured outputs beyond “do not break AR grammar on next block”, bespoke CUDA attention kernels where **virtual non-causal chunks** on existing FlashAttention paths are insufficient ([§9](#9-attention-and-execution-mvp)), prefix caching under semi-causal masks, extra architectures, draft streaming UX, and advanced grammar integrations.
 
 ---
 
@@ -82,7 +79,7 @@ flowchart TB
   DllmWork -->|"ModelRunnerOutput"| Engine
 ```
 
-**Core dependency:** After the RFC lands, `Hook` runs whenever a model step executed and draft IDs exist—not only when `speculative_config` is set. Until then, document a **minimum vLLM version or git SHA** once integration tests pin it (`pyproject.toml` currently allows `vllm>=0.14` as the optional extra; the exact release containing the hook is tracked via [vllm#36155](https://github.com/vllm-project/vllm/issues/36155) and should be mirrored in the README when known).
+**Core dependency:** After the upstream hook lands in vLLM, `Hook` runs whenever a model step executed and draft IDs exist—not only when `speculative_config` is set. Until then, document a **minimum vLLM version or git SHA** once integration tests pin it (`pyproject.toml` currently allows `vllm>=0.14` as the optional extra; the exact release containing the hook is tracked via [vllm#36155](https://github.com/vllm-project/vllm/issues/36155) and should be mirrored in the README when known).
 
 ---
 
@@ -110,7 +107,7 @@ flowchart LR
 ```
 
 - **Registration** mirrors [bart-plugin](https://github.com/vllm-project/bart-plugin): one entry point that registers architecture names → qualified model class strings.
-- **Runtime** mirrors the RFC: scheduler owns request state for `spec_token_ids`; worker maps `scheduled_spec_decode_tokens` to the forward and fills `sampled_token_ids` + draft return path.
+- **Runtime** uses the same split of responsibilities: scheduler owns request state for `spec_token_ids`; worker maps `scheduled_spec_decode_tokens` to the forward and fills `sampled_token_ids` + draft return path.
 
 ---
 
@@ -140,11 +137,11 @@ sequenceDiagram
   DllmSched->>DllmSched: spec_token_ids equals next block
 ```
 
-**Commit-0:** In `update_from_output`, if `sampled_token_ids` is empty for a request, the scheduler rolls back `num_computed_tokens` by the number of tokens scheduled that step (typically `DRAFT_SIZE` per RFC).
+**Commit-0:** In `update_from_output`, if `sampled_token_ids` is empty for a request, the scheduler rolls back `num_computed_tokens` by the number of tokens scheduled that step (typically `DRAFT_SIZE` in this MVP design).
 
 ---
 
-## 7. Field mapping (RFC contract)
+## 7. Field mapping (MVP contract)
 
 | vLLM field / API | Role when plugin stack is active |
 |------------------|----------------------------------|
@@ -184,7 +181,62 @@ flowchart TB
 
 ## 9. Attention and execution (MVP)
 
-- **Baseline:** Prefer **FlexAttention** (or a model forward that uses vLLM attention with a **custom mask**) for semi-causal “block attends to committed prefix” patterns, per maintainer discussion on [#36155](https://github.com/vllm-project/vllm/issues/36155).
+### 9.1 Virtual sub-requests (reference pattern in vLLM)
+
+vLLM’s **chunked local attention** implements a non-standard attention layout by decomposing a logical sequence into several **virtual requests**. Each virtual request runs **ordinary causal** attention on its own contiguous key range, so existing causal kernels apply. Implementation entry points:
+
+- [`vllm/model_executor/layers/attention/chunked_local_attention.py`](https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/layers/attention/chunked_local_attention.py)
+- Backend wiring (commit-pinned line range): [`vllm/v1/attention/backends/utils.py` @ `4ed51308`](https://github.com/vllm-project/vllm/blob/4ed51308c8826619459be858a6dc4333206f41c1/vllm/v1/attention/backends/utils.py#L167-L359)
+
+The dLLM plugin can mirror that **decomposition idea** with a different per-chunk mask: see below.
+
+### 9.2 Mask shapes (schematic, model-dependent)
+
+Exact geometry is architecture-specific; the following ASCII sketches contrast the **chunked-local** staggered window with a **dense block-style** mask common among dLLMs (both shown for six token positions; `1` = allowed attention).
+
+**Chunked local (staggered local windows):**
+
+```text
+k_toks >   0 1 2 3 4 5
+q_toks v  _____________
+       0 | 1
+       1 | 1 1
+       2 |     1
+       3 |     1 1
+       4 |         1
+       5 |         1 1
+```
+
+**Many dLLMs (prefix / block visibility grows by step):**
+
+```text
+k_toks >   0 1 2 3 4 5
+q_toks v  _____________
+       0 | 1 1
+       1 | 1 1
+       2 | 1 1 1 1
+       3 | 1 1 1 1
+       4 | 1 1 1 1 1 1
+       5 | 1 1 1 1 1 1
+```
+
+### 9.3 Decomposition: causal chunks vs non-causal chunks
+
+**Chunked local** effectively splits into virtual requests that each look like a tiny **causal** problem, e.g. keys `{0,1}` for queries `{0,1}`, then keys `{2,3}` for `{2,3}`, then `{4,5}` for `{4,5}`—each sub-matrix is lower-triangular.
+
+**Block-style dLLM masks** can be split analogously into virtual requests where each sub-problem is **fully connected among its allowed (q, k) pairs**—i.e. **standard non-causal** attention on that key/query subset—for example:
+
+```text
+virtual req 0 (q,k over {0,1}):   virtual req 1 (over {2,3}):   virtual req 2 (over {4,5}):
+       0 | 1 1                         2 | 1 1 1 1                     4 | 1 1 1 1 1 1
+       1 | 1 1                         3 | 1 1 1 1                     5 | 1 1 1 1 1 1
+```
+
+**FlashAttention** is used with **`is_causal=False`** on these chunks; that path is a normal non-causal workload and is **not** inherently less optimized than other non-causal attention (per upstream attention/maintainer discussion). A **blocked** or arbitrary sparse mask can therefore often be served by **composition of virtual non-causal (and, where needed, causal) chunks** plus FlexAttention or explicit mask metadata—**before** investing in bespoke CUDA.
+
+### 9.4 MVP baseline
+
+- Prefer **FlexAttention**, **FlashAttention with non-causal virtual chunks**, and/or **custom masks** consistent with the public design thread [#36155](https://github.com/vllm-project/vllm/issues/36155).
 - **Worker responsibility:** Keep **`num_spec_tokens` / draft buffers** consistent with what `take_draft_token_ids` expects.
 
 ---
@@ -198,7 +250,7 @@ vllm serve <model> \
   --worker-cls vllm_dllm_plugin.worker:DllmWorker
 ```
 
-FQCNs are placeholders until the MVP classes land. Before the first decode schedule, `request.spec_token_ids` must hold the first input block (`DRAFT_SIZE` tokens); the plugin scheduler or worker initializes it (prompt suffix + mask padding per RFC).
+FQCNs are placeholders until the MVP classes land. Before the first decode schedule, `request.spec_token_ids` must hold the first input block (`DRAFT_SIZE` tokens); the plugin scheduler or worker initializes it (prompt suffix + mask padding per this MVP design).
 
 ---
 
