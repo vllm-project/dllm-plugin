@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import importlib.util
+import logging
+
 __version__ = "0.1.0"
+
+_logger = logging.getLogger(__name__)
 
 
 def register() -> None:
@@ -11,9 +16,11 @@ def register() -> None:
     Registers plugin components when vLLM is importable. Safe to call from tests
     without vLLM (no-op).
     """
-    import importlib.util
-
     if importlib.util.find_spec("vllm") is None:
         return
     # Stub: avoid importing vllm here (expensive at load time). Add lazy/targeted
     # imports when model/scheduler/worker registration is implemented.
+    _logger.debug(
+        "vllm-dllm-plugin (dllm): vLLM is importable but register() is still a "
+        "skeleton — no models, schedulers, or workers registered yet.",
+    )

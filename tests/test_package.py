@@ -2,9 +2,22 @@
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 import vllm_dllm_plugin
+
+
+def _dllm_plugin_entry_points():
+    """Return ``dllm`` entry points in group ``vllm.general_plugins``."""
+    from importlib.metadata import entry_points
+
+    if sys.version_info >= (3, 13):
+        return tuple(entry_points(group="vllm.general_plugins", name="dllm"))
+    return tuple(
+        entry_points().select(group="vllm.general_plugins", name="dllm"),
+    )
 
 
 def test_version() -> None:
@@ -27,13 +40,20 @@ def test_register_with_vllm_if_installed() -> None:
     vllm_dllm_plugin.register()
 
 
+def test_register_debug_stub_when_vllm_present(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    pytest.importorskip("vllm")
+    import logging
+
+    caplog.set_level(logging.DEBUG, logger="vllm_dllm_plugin")
+    vllm_dllm_plugin.register()
+    assert "skeleton" in caplog.text.lower()
+
+
 def test_entry_point_resolves_dllm() -> None:
     """``dllm`` entry point loads and targets ``vllm_dllm_plugin:register``."""
-    from importlib.metadata import entry_points
-
-    eps = tuple(
-        entry_points().select(group="vllm.general_plugins", name="dllm"),
-    )
+    eps = _dllm_plugin_entry_points()
     assert len(eps) == 1
     ep = eps[0]
     assert ep.value == "vllm_dllm_plugin:register"

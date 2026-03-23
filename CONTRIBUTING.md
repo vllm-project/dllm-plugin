@@ -12,6 +12,8 @@ Commits should include a **`Signed-off-by:`** line (per [DCO 1.1](https://develo
 
 `default_install_hook_types` in `.pre-commit-config.yaml` includes **`prepare-commit-msg`** so **`pre-commit install`** registers both **`pre-commit`** and **`prepare-commit-msg`** hooks.
 
+The **vllm-project** org may require the **DCO** GitHub check to pass on PRs. The local hook helps consistency but does **not** replace that check — ensure every commit on the PR branch includes **`Signed-off-by:`**.
+
 ## Environment
 
 - Install **[uv](https://docs.astral.sh/uv/)** and Python **3.10+** (CI covers **3.10–3.13**). The repo includes **`.python-version`** (default **3.12**) so local `uv`/pyenv pick a consistent interpreter; change it locally if needed.
@@ -64,6 +66,16 @@ uv run pre-commit run --all-files
 ## CI parity
 
 GitHub Actions runs **`uv sync --locked --group dev`**, then **`uv run pre-commit run --all-files`**, then **`uv run pytest`**. Do not duplicate Ruff/`ty` in the workflow; keep checks in pre-commit.
+
+**Default CI does not install `--extra vllm`**, so tests that need an importable **`vllm`** package are skipped there. That avoids CUDA/wheel pain on every PR. For an optional integration check, maintainers can run the **Optional vLLM smoke** workflow ( **`workflow_dispatch`** in `.github/workflows/optional-vllm-smoke.yml` ), which syncs with **`--extra vllm`** and runs pytest.
+
+## Bash for pre-commit
+
+Local hook **`entry`** lines use **`bash`** / **`sh`**. Use an environment where **Bash** is available (Linux, macOS, or **Git Bash** on Windows). Native **cmd.exe** without Bash is not supported for these hooks.
+
+## PR descriptions
+
+Keep GitHub PR bodies aligned with the branch — see **[docs/TOOLING.md](docs/TOOLING.md)** for an accurate summary (e.g. pre-commit uses **`uv run`**, not **`uvx`**, for Ruff and `ty`).
 
 ## Manual checks (optional)
 
