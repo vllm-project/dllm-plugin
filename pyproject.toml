@@ -1,0 +1,83 @@
+# Assisted by: Cursor AI
+
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vllm-dllm-plugin"
+version = "0.1.0"
+description = "vLLM plugin for block-based diffusion language model (dLLM) support"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "vLLM dLLM plugin contributors" }]
+keywords = ["vllm", "dllm", "diffusion", "language-model", "inference", "plugin"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = []
+
+# Full plugin runtime requires vLLM (Linux/CUDA wheels). Omit on platforms where
+# vLLM is unavailable (e.g. macOS dev); use ``uv sync --extra vllm`` on Linux/CI.
+[project.optional-dependencies]
+vllm = ["vllm>=0.14.0"]
+
+[project.urls]
+Homepage = "https://github.com/vllm-project/dllm-plugin"
+Repository = "https://github.com/vllm-project/dllm-plugin"
+Documentation = "https://github.com/vllm-project/dllm-plugin#readme"
+"Bug Tracker" = "https://github.com/vllm-project/dllm-plugin/issues"
+
+[project.entry-points."vllm.general_plugins"]
+dllm = "vllm_dllm_plugin:register"
+
+[dependency-groups]
+dev = [
+    "pre-commit>=3.5",
+    "pytest>=7.0",
+    "ruff>=0.8",
+    "ty>=0.0.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["vllm_dllm_plugin*"]
+
+[tool.setuptools.package-data]
+vllm_dllm_plugin = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+extend-exclude = [".venv", "venv", "build", "dist"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # Pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "W",   # pycodestyle warnings
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.ty]
+# Rely on defaults; vLLM is an optional runtime dependency (see ``[project.optional-dependencies]``).

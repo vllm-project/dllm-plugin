@@ -1,0 +1,39 @@
+# Ruff and ty run via uvx; lockfile drift is caught with uv sync --locked.
+# Requires `uv` on PATH. See CONTRIBUTING.md.
+#
+# Ruff targets explicit paths so a nested ``dllm-plugin/`` checkout under the
+# main ``vllm`` repo does not lint the parent tree.
+repos:
+  - repo: local
+    hooks:
+      - id: uv-sync-locked
+        name: uv sync --locked (dev)
+        entry: bash -c 'if [ -f dllm-plugin/pyproject.toml ]; then (cd dllm-plugin && uv sync --locked --group dev); else uv sync --locked --group dev; fi'
+        language: system
+        pass_filenames: false
+        files: ^(dllm-plugin/)?(pyproject\.toml|uv\.lock)$
+      - id: ruff-check
+        name: ruff check
+        entry: bash -c 'if [ -f dllm-plugin/pyproject.toml ]; then uvx ruff check dllm-plugin/vllm_dllm_plugin dllm-plugin/tests; else uvx ruff check vllm_dllm_plugin tests; fi'
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: ruff-format
+        name: ruff format --check
+        entry: bash -c 'if [ -f dllm-plugin/pyproject.toml ]; then uvx ruff format --check dllm-plugin/vllm_dllm_plugin dllm-plugin/tests; else uvx ruff format --check vllm_dllm_plugin tests; fi'
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: ty-check
+        name: ty check
+        entry: bash -c 'if [ -f dllm-plugin/pyproject.toml ]; then uvx ty check --project dllm-plugin; else uvx ty check; fi'
+        language: system
+        pass_filenames: false
+        always_run: true
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.7
+    hooks:
+      - id: actionlint
+        files: ^(\.github/workflows/|dllm-plugin/\.github/workflows/).*\.ya?ml$
+
+# Assisted by: Cursor AI
