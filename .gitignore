@@ -25,3 +25,6 @@ htmlcov/
 .vscode/
 *.swp
 .DS_Store
+
+# Local review notes (not for the public repo)
+PR-*-local-review.md
