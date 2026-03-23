@@ -27,14 +27,16 @@ def test_register_with_vllm_if_installed() -> None:
     vllm_dllm_plugin.register()
 
 
-def test_entry_point_target_callable() -> None:
-    """``dllm`` entry resolves to the same callable as ``register``."""
+def test_entry_point_resolves_dllm() -> None:
+    """``dllm`` entry point loads and targets ``vllm_dllm_plugin:register``."""
     from importlib.metadata import entry_points
 
     eps = tuple(
         entry_points().select(group="vllm.general_plugins", name="dllm"),
     )
     assert len(eps) == 1
-    fn = eps[0].load()
+    ep = eps[0]
+    assert ep.value == "vllm_dllm_plugin:register"
+    fn = ep.load()
     assert callable(fn)
-    assert fn is vllm_dllm_plugin.register
+    fn()  # smoke: same behavior as register() for the stub

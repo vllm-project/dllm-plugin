@@ -1,4 +1,4 @@
-# Ruff and ty run via uvx; lockfile drift is caught with uv sync --locked.
+# Ruff and ty run via ``uv run`` (versions from uv.lock); lockfile drift via uv sync --locked.
 # Requires `uv` on PATH. See CONTRIBUTING.md.
 #
 # Ruff targets explicit paths so a nested ``dllm-plugin/`` checkout under the
@@ -17,19 +17,19 @@ repos:
         files: ^(dllm-plugin/)?(pyproject\.toml|uv\.lock)$
       - id: ruff-check
         name: ruff check
-        entry: bash -c 'if [ -f dllm-plugin/pyproject.toml ]; then uvx ruff check dllm-plugin/vllm_dllm_plugin dllm-plugin/tests; else uvx ruff check vllm_dllm_plugin tests; fi'
+        entry: bash -c 'if [ -f dllm-plugin/pyproject.toml ]; then (cd dllm-plugin && uv run ruff check vllm_dllm_plugin tests); else uv run ruff check vllm_dllm_plugin tests; fi'
         language: system
         pass_filenames: false
         always_run: true
       - id: ruff-format
         name: ruff format --check
-        entry: bash -c 'if [ -f dllm-plugin/pyproject.toml ]; then uvx ruff format --check dllm-plugin/vllm_dllm_plugin dllm-plugin/tests; else uvx ruff format --check vllm_dllm_plugin tests; fi'
+        entry: bash -c 'if [ -f dllm-plugin/pyproject.toml ]; then (cd dllm-plugin && uv run ruff format --check vllm_dllm_plugin tests); else uv run ruff format --check vllm_dllm_plugin tests; fi'
         language: system
         pass_filenames: false
         always_run: true
       - id: ty-check
         name: ty check
-        entry: bash -c 'if [ -f dllm-plugin/pyproject.toml ]; then uvx ty check --project dllm-plugin; else uvx ty check; fi'
+        entry: bash -c 'if [ -f dllm-plugin/pyproject.toml ]; then (cd dllm-plugin && uv run ty check); else uv run ty check; fi'
         language: system
         pass_filenames: false
         always_run: true

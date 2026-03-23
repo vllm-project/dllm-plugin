@@ -82,7 +82,7 @@ flowchart TB
   DllmWork -->|"ModelRunnerOutput"| Engine
 ```
 
-**Core dependency:** After the RFC lands, `Hook` runs whenever a model step executed and draft IDs exist—not only when `speculative_config` is set. Until then the plugin documents the required vLLM version or commit.
+**Core dependency:** After the RFC lands, `Hook` runs whenever a model step executed and draft IDs exist—not only when `speculative_config` is set. Until then, document a **minimum vLLM version or git SHA** once integration tests pin it (`pyproject.toml` currently allows `vllm>=0.14` as the optional extra; the exact release containing the hook is tracked via [vllm#36155](https://github.com/vllm-project/vllm/issues/36155) and should be mirrored in the README when known).
 
 ---
 

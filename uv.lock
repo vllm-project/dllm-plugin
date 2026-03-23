@@ -5077,8 +5077,8 @@ provides-extras = ["vllm"]
 dev = [
     { name = "pre-commit", specifier = ">=3.5" },
     { name = "pytest", specifier = ">=7.0" },
-    { name = "ruff", specifier = ">=0.8" },
-    { name = "ty", specifier = ">=0.0.24" },
+    { name = "ruff", specifier = ">=0.15.7,<0.16" },
+    { name = "ty", specifier = ">=0.0.24,<0.1" },
 ]
 
 [[package]]

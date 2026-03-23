@@ -39,15 +39,17 @@ Commits should include a **`Signed-off-by:`** line (per [DCO 1.1](https://develo
 
 That is **intentional** for reproducible **`uv sync --extra vllm`** installs. Expect large diffs when dependencies change; reviewers can skim lock updates and rely on CI + `uv lock --check` semantics via the pre-commit **`uv sync --locked`** hook.
 
+**Alternative (not used here):** a smaller lock that omits optional extras trades away reproducibility for `uv sync --locked --extra vllm` unless maintainers adopt a separate lock or install-time resolution policy.
+
 ## Pre-commit (single source of truth for lint / format / types / lockfile)
 
 Hooks use **`uv`** on your `PATH`:
 
 1. **`uv sync --locked --group dev`** when `pyproject.toml` or `uv.lock` changes — fails if the lockfile is out of date. After dependency edits, run **`uv lock`** and commit **`uv.lock`**.
-2. **`uvx ruff check`** and **`uvx ruff format --check`** on `vllm_dllm_plugin/` and `tests/`.
-3. **`uvx ty check`** for the project (`ty check --project dllm-plugin` when this repo lives under a parent git tree as `dllm-plugin/`).
+2. **`uv run ruff check`** and **`uv run ruff format --check`** on `vllm_dllm_plugin/` and `tests/` (same versions as **`uv.lock`**; nested layout uses `cd dllm-plugin && …`).
+3. **`uv run ty check`** from the project root (nested: under `dllm-plugin/`).
 
-**`uvx` vs `uv run`:** Pre-commit uses **`uvx`** so hooks work without activating the project venv. **`uv run ruff` / `uv run ty`** (below) use versions pinned in **`uv.lock`**. Versions may differ slightly from **`uvx`**’s latest-compatible tool installs; for strict parity, run **`uv run …`** before pushing, or pin tool versions in **`uvx`** (e.g. `uvx ruff@…`) to match the lockfile.
+Run **`uv sync --group dev`** once locally so **`uv run`** can resolve tools without extra network work during commits.
 
 Optional: **`rhysd/actionlint`** on workflow YAML.
 
