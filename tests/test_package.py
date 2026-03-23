@@ -1,4 +1,3 @@
-# Assisted by: Cursor AI
 """Smoke tests for package import, version, and plugin registration stub."""
 
 from __future__ import annotations

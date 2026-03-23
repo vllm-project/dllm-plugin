@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-# Assisted by: Cursor AI
 name: CI
 
 on:

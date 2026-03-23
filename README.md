@@ -8,7 +8,7 @@ The approach follows the public RFC discussion [vllm#36155](https://github.com/v
 
 ## Install (development)
 
-Requires Python **3.10+** and [uv](https://docs.astral.sh/uv/). CI tests **3.10** through **3.13**.
+Requires Python **3.10+** and [uv](https://docs.astral.sh/uv/). CI tests **3.10** through **3.13**. A [`.python-version`](.python-version) file pins the default local interpreter for `uv`/pyenv; override as needed for the matrix.
 
 ```bash
 git clone https://github.com/vllm-project/dllm-plugin.git
@@ -23,6 +23,8 @@ uv run pre-commit install
 # Linux / CUDA-capable environments
 uv sync --group dev --extra vllm
 ```
+
+`pyproject.toml` requires **`vllm>=0.14`**; **`uv.lock`** may resolve a **newer** compatible release when you use the extra (see **Lockfile** in [CONTRIBUTING.md](CONTRIBUTING.md)).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for pre-commit, CI parity, and contribution norms.
 
@@ -47,5 +49,3 @@ Until those classes exist, this is **documentation-only**; the `register()` entr
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE).
-
-<!-- Assisted by: Cursor AI -->

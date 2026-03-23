@@ -8,9 +8,6 @@ __pycache__/
 venv/
 ENV/
 
-# uv
-.python-version
-
 # Packaging
 *.egg-info/
 vllm_dllm_plugin.egg-info/
@@ -28,5 +25,3 @@ htmlcov/
 .vscode/
 *.swp
 .DS_Store
-
-# Assisted by: Cursor AI

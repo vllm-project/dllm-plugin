@@ -1,4 +1,3 @@
-# Assisted by: Cursor AI
 """vLLM dLLM plugin: block-based diffusion LM support (skeleton)."""
 
 from __future__ import annotations
@@ -16,5 +15,5 @@ def register() -> None:
 
     if importlib.util.find_spec("vllm") is None:
         return
-    importlib.import_module("vllm")
-    # Stub: future model / scheduler / worker registration lives here.
+    # Stub: avoid importing vllm here (expensive at load time). Add lazy/targeted
+    # imports when model/scheduler/worker registration is implemented.

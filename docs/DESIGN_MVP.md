@@ -47,7 +47,7 @@ vllm_dllm_plugin/
   remasking/
     __init__.py
     base.py                # RemaskingPolicy protocol / ABC
-    llada2_default.py        # MVP default for LLaDA2.0
+    llada2_default.py       # MVP default for LLaDA2.0
   models/
     __init__.py
     llada2.py              # vLLM model module for LLaDA2.0 (HF mapping, forward)
@@ -210,5 +210,3 @@ FQCNs are placeholders until the MVP classes land. Before the first decode sched
 | Draft hook not in release | Document minimum vLLM from SHA or nightly until released. |
 | Structured output + async queue | Implement scheduler overrides early; defer full PDA post-MVP where possible. |
 | Wrong worker/scheduler pairing | `validation.py` at model load or worker init. |
-
-<!-- Assisted by: Cursor AI -->

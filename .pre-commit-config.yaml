@@ -3,6 +3,9 @@
 #
 # Ruff targets explicit paths so a nested ``dllm-plugin/`` checkout under the
 # main ``vllm`` repo does not lint the parent tree.
+default_install_hook_types:
+  - pre-commit
+  - prepare-commit-msg
 repos:
   - repo: local
     hooks:
@@ -30,10 +33,20 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+      - id: git-signoff
+        name: git-signoff (commit message)
+        description: Adds a 'Signed-off-by:' trailer to the commit message (DCO).
+        # Standalone clone: scripts/ at repo root. Nested ``dllm-plugin/`` layout: same script under subdirectory.
+        entry: bash
+        args:
+          - -c
+          - 'if [ -f dllm-plugin/scripts/add-signoff.sh ]; then exec sh dllm-plugin/scripts/add-signoff.sh "$1"; else exec sh scripts/add-signoff.sh "$1"; fi'
+          - --
+        language: system
+        always_run: true
+        stages: [prepare-commit-msg]
   - repo: https://github.com/rhysd/actionlint
     rev: v1.7.7
     hooks:
       - id: actionlint
         files: ^(\.github/workflows/|dllm-plugin/\.github/workflows/).*\.ya?ml$
-
-# Assisted by: Cursor AI

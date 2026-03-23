@@ -14,5 +14,3 @@ Phased work after the **repository skeleton**. Each item should link to **public
 | **Benchmarking & reports** | Reproducible scripts, comparison to AR baselines, published numbers. |
 
 Contributions should follow [Contributing to vLLM](https://docs.vllm.ai/en/latest/contributing/) norms (sign-off, PR hygiene) and this repo’s [CONTRIBUTING.md](../CONTRIBUTING.md).
-
-<!-- Assisted by: Cursor AI -->
