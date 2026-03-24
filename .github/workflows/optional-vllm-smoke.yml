@@ -6,10 +6,19 @@
 #   Sync or tests may fail if no compatible wheel exists for this runner.
 # - Maintainers: run workflow_dispatch once after changing the vllm extra and
 #   record the outcome in PR notes or release docs if this becomes a gate.
+#
+# TEMPORARY (remove after recording a run): ``pull_request`` with ``paths`` only
+# on this file exercises ``ubuntu-latest`` before the workflow exists on ``main``
+# (``workflow_dispatch`` is unavailable until then). Revert to ``workflow_dispatch``
+# only once the run URL is documented on the PR.
 name: Optional vLLM smoke
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main, master]
+    paths:
+      - ".github/workflows/optional-vllm-smoke.yml"
 
 permissions:
   contents: read
