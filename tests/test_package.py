@@ -36,7 +36,7 @@ def test_public_api(attr: str) -> None:
 
 def test_register_with_vllm_if_installed() -> None:
     pytest.importorskip("vllm")
-    # When vLLM is present, registration hook should still complete without error.
+    # With vLLM importable, the entry point must still complete without error.
     vllm_dllm_plugin.register()
 
 
@@ -52,7 +52,12 @@ def test_register_debug_stub_when_vllm_present(
 
 
 def test_entry_point_resolves_dllm() -> None:
-    """``dllm`` entry point loads and targets ``vllm_dllm_plugin:register``."""
+    """``dllm`` entry point loads and targets ``vllm_dllm_plugin:register``.
+
+    Expects exactly one provider named ``dllm`` in ``vllm.general_plugins`` (normal
+    install). Unusual environments with multiple distributions registering the same
+    name are out of scope for this test.
+    """
     eps = _dllm_plugin_entry_points()
     assert len(eps) == 1
     ep = eps[0]

@@ -6,7 +6,7 @@ Thank you for helping improve the dLLM plugin. This project follows the same spi
 
 Commits should include a **`Signed-off-by:`** line (per [DCO 1.1](https://developercertificate.org/)). After installing pre-commit (below), a **`prepare-commit-msg`** hook runs **`scripts/add-signoff.sh`** to append that trailer automatically using `git config user.name` / `user.email`.
 
-- Ensure **`git config user.name`** and **`git config user.email`** are set correctly before committing.
+- Ensure **`git config user.name`** and **`git config user.email`** are set correctly before committing (non-empty). The **`prepare-commit-msg`** hook **fails** if either is missing so you do not get a malformed **`Signed-off-by:`** trailer. Example: **`git config --global user.name 'Your Name'`** and **`git config --global user.email 'you@example.com'`**.
 - For one-off commits without the hook: **`git commit -s`**.
 - If you amend or squash, re-check that the final commit message still contains **`Signed-off-by:`** so DCO checks pass.
 
@@ -48,8 +48,8 @@ That is **intentional** for reproducible **`uv sync --extra vllm`** installs. Ex
 Hooks use **`uv`** on your `PATH`:
 
 1. **`uv sync --locked --group dev`** when `pyproject.toml` or `uv.lock` changes — fails if the lockfile is out of date. After dependency edits, run **`uv lock`** and commit **`uv.lock`**.
-2. **`uv run ruff check`** and **`uv run ruff format --check`** on `vllm_dllm_plugin/` and `tests/` (same versions as **`uv.lock`**).
-3. **`uv run ty check`** from the project root.
+2. **`uv run ruff check`** and **`uv run ruff format --check`** on `vllm_dllm_plugin/` and `tests/` when those paths or **`pyproject.toml`** change (same versions as **`uv.lock`**; avoids running on doc-only commits).
+3. **`uv run ty check`** when **`vllm_dllm_plugin/**/*.py`** or **`pyproject.toml`** changes.
 
 Run **`uv sync --group dev`** once locally so **`uv run`** can resolve tools without extra network work during commits.
 
@@ -68,6 +68,8 @@ uv run pre-commit run --all-files
 GitHub Actions runs **`uv sync --locked --group dev`**, then **`uv run pre-commit run --all-files`**, then **`uv run pytest`**. Do not duplicate Ruff/`ty` in the workflow; keep checks in pre-commit.
 
 **Default CI does not install `--extra vllm`**, so tests that need an importable **`vllm`** package are skipped there. That avoids CUDA/wheel pain on every PR. For an optional integration check, maintainers can run the **Optional vLLM smoke** workflow ( **`workflow_dispatch`** in `.github/workflows/optional-vllm-smoke.yml` ), which syncs with **`--extra vllm`** and runs pytest.
+
+**Optional vLLM smoke** is **best-effort** on **`ubuntu-latest`**: **`uv sync --extra vllm`** may fail if PyPI has no suitable wheel or pins break on that image (see header comments in the workflow YAML). Dispatch it after lock/extra changes and note success or failure for the team until behavior is stable.
 
 ## Shell for pre-commit
 

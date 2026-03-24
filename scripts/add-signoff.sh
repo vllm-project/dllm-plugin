@@ -6,4 +6,12 @@ if [ -z "$1" ]; then
     exit 1
 fi
 
-git interpret-trailers --if-exists doNothing --trailer "Signed-off-by: $(git config user.name) <$(git config user.email)>" --in-place "$1"
+name=$(git config user.name)
+email=$(git config user.email)
+if [ -z "$name" ] || [ -z "$email" ]; then
+    echo "Error: git config user.name and user.email must be non-empty for DCO Signed-off-by." >&2
+    echo "Set them once, e.g.: git config --global user.name 'Your Name' && git config --global user.email 'you@example.com'" >&2
+    exit 1
+fi
+
+git interpret-trailers --if-exists doNothing --trailer "Signed-off-by: ${name} <${email}>" --in-place "$1"

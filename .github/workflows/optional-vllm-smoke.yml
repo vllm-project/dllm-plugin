@@ -1,5 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # Manual run: plugin + optional vLLM extra (default CI skips --extra vllm).
+#
+# Known limitations (cpu-only ubuntu-latest):
+# - Success depends on vLLM's published wheels and version pins in uv.lock.
+#   Sync or tests may fail if no compatible wheel exists for this runner.
+# - Maintainers: run workflow_dispatch once after changing the vllm extra and
+#   record the outcome in PR notes or release docs if this becomes a gate.
 name: Optional vLLM smoke
 
 on:
@@ -14,6 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Install uv
+        # Pinned release: https://github.com/astral-sh/setup-uv/releases/tag/v6.8.0
         uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
         with:
           python-version: "3.12"

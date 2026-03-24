@@ -28,6 +28,7 @@ dependencies = []
 # Full plugin runtime requires vLLM (Linux/CUDA wheels). Omit on platforms where
 # vLLM is unavailable (e.g. macOS dev); use ``uv sync --extra vllm`` on Linux/CI.
 [project.optional-dependencies]
+# Floor for skeleton; bump to a release/SHA that includes the draft-token hook + APIs you need (track vllm#36155, DESIGN_MVP §4).
 vllm = ["vllm>=0.14.0"]
 
 [project.urls]
@@ -44,7 +45,7 @@ dev = [
     "pre-commit>=3.5",
     "pytest>=7.0",
     "ruff>=0.15.7,<0.16",
-    "ty>=0.0.24,<0.1",
+    "ty>=0.0.24,<0.1",  # 0.x minors can still break; expect lock churn until ty stabilizes
 ]
 
 [tool.setuptools.packages.find]

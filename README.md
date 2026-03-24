@@ -4,7 +4,7 @@
 
 **vllm-dllm-plugin** is a [vLLM](https://github.com/vllm-project/vllm) plugin for **block-based diffusion language models (dLLMs)**. This repository is currently a **skeleton**: an importable package, a `vllm.general_plugins` entry point (`dllm`), tests, and public design/roadmap docs. Scheduler, worker, and LLaDA2.0 model logic will land in later milestones (see [docs/ROADMAP.md](docs/ROADMAP.md)).
 
-**Important:** Even if you set `VLLM_PLUGINS=dllm` and have vLLM installed, **`register()` does not register models, schedulers, or workers yet** — it only detects that `vllm` is importable and returns (see debug log in `vllm_dllm_plugin`). Do not expect inference behavior until the MVP stack lands.
+**Important:** Even if you set `VLLM_PLUGINS=dllm` and a `vllm` distribution is on your `sys.path`, **`register()` does not register models, schedulers, or workers yet** — it uses `importlib.util.find_spec("vllm")` (discoverability, not a full import), may emit a **DEBUG** log, and returns. That can succeed even when `import vllm` would fail (e.g. broken native deps). Do not expect inference behavior until the MVP stack lands.
 
 The approach follows the public RFC discussion [vllm#36155](https://github.com/vllm-project/vllm/issues/36155) and reuses spec-decode-shaped fields so batching and executor paths stay aligned.
 
@@ -41,7 +41,7 @@ vllm serve <model> \
   --worker-cls vllm_dllm_plugin.worker:DllmWorker
 ```
 
-Until those classes exist, this is **documentation-only**; the `register()` entry point is a no-op when vLLM is absent and a **silent stub** (plus a **DEBUG** log line) when vLLM is present.
+Until those classes exist, this is **documentation-only**; the `register()` entry point is a no-op when no `vllm` spec is found and a **silent stub** (plus a **DEBUG** log line) when `find_spec("vllm")` succeeds.
 
 ## Docs
 
