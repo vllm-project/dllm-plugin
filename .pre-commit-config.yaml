@@ -1,8 +1,6 @@
 # Ruff and ty run via ``uv run`` (versions from uv.lock); lockfile drift via uv sync --locked.
-# Requires `uv` on PATH. See CONTRIBUTING.md.
-#
-# Ruff targets explicit paths so a nested ``dllm-plugin/`` checkout under the
-# main ``vllm`` repo does not lint the parent tree.
+# Requires `uv` on PATH. Run pre-commit from the plugin repo root (``cd dllm-plugin`` if needed).
+# See CONTRIBUTING.md.
 default_install_hook_types:
   - pre-commit
   - prepare-commit-msg
@@ -11,37 +9,33 @@ repos:
     hooks:
       - id: uv-sync-locked
         name: uv sync --locked (dev)
-        entry: bash -c 'if [ -f dllm-plugin/pyproject.toml ]; then (cd dllm-plugin && uv sync --locked --group dev); else uv sync --locked --group dev; fi'
+        entry: uv sync --locked --group dev
         language: system
         pass_filenames: false
-        files: ^(dllm-plugin/)?(pyproject\.toml|uv\.lock)$
+        files: ^(pyproject\.toml|uv\.lock)$
       - id: ruff-check
         name: ruff check
-        entry: bash -c 'if [ -f dllm-plugin/pyproject.toml ]; then (cd dllm-plugin && uv run ruff check vllm_dllm_plugin tests); else uv run ruff check vllm_dllm_plugin tests; fi'
+        entry: uv run ruff check vllm_dllm_plugin tests
         language: system
         pass_filenames: false
         always_run: true
       - id: ruff-format
         name: ruff format --check
-        entry: bash -c 'if [ -f dllm-plugin/pyproject.toml ]; then (cd dllm-plugin && uv run ruff format --check vllm_dllm_plugin tests); else uv run ruff format --check vllm_dllm_plugin tests; fi'
+        entry: uv run ruff format --check vllm_dllm_plugin tests
         language: system
         pass_filenames: false
         always_run: true
       - id: ty-check
         name: ty check
-        entry: bash -c 'if [ -f dllm-plugin/pyproject.toml ]; then (cd dllm-plugin && uv run ty check); else uv run ty check; fi'
+        entry: uv run ty check
         language: system
         pass_filenames: false
         always_run: true
       - id: git-signoff
         name: git-signoff (commit message)
         description: Adds a 'Signed-off-by:' trailer to the commit message (DCO).
-        # Standalone clone: scripts/ at repo root. Nested ``dllm-plugin/`` layout: same script under subdirectory.
-        entry: bash
-        args:
-          - -c
-          - 'if [ -f dllm-plugin/scripts/add-signoff.sh ]; then exec sh dllm-plugin/scripts/add-signoff.sh "$1"; else exec sh scripts/add-signoff.sh "$1"; fi'
-          - --
+        entry: sh
+        args: [scripts/add-signoff.sh]
         language: system
         always_run: true
         stages: [prepare-commit-msg]
@@ -49,4 +43,4 @@ repos:
     rev: v1.7.7
     hooks:
       - id: actionlint
-        files: ^(\.github/workflows/|dllm-plugin/\.github/workflows/).*\.ya?ml$
+        files: ^\.github/workflows/.*\.ya?ml$

@@ -48,14 +48,14 @@ That is **intentional** for reproducible **`uv sync --extra vllm`** installs. Ex
 Hooks use **`uv`** on your `PATH`:
 
 1. **`uv sync --locked --group dev`** when `pyproject.toml` or `uv.lock` changes — fails if the lockfile is out of date. After dependency edits, run **`uv lock`** and commit **`uv.lock`**.
-2. **`uv run ruff check`** and **`uv run ruff format --check`** on `vllm_dllm_plugin/` and `tests/` (same versions as **`uv.lock`**; nested layout uses `cd dllm-plugin && …`).
-3. **`uv run ty check`** from the project root (nested: under `dllm-plugin/`).
+2. **`uv run ruff check`** and **`uv run ruff format --check`** on `vllm_dllm_plugin/` and `tests/` (same versions as **`uv.lock`**).
+3. **`uv run ty check`** from the project root.
 
 Run **`uv sync --group dev`** once locally so **`uv run`** can resolve tools without extra network work during commits.
 
 Optional: **`rhysd/actionlint`** on workflow YAML.
 
-If you clone **only** this repository, hooks run from the repo root. If you work inside a **parent** repository (e.g. the main `vllm` tree with `dllm-plugin/` as a subdirectory), the same `.pre-commit-config.yaml` detects that layout and only touches the plugin paths.
+Install and run pre-commit from this repository’s root. If the plugin lives inside a parent tree (e.g. `vllm/dllm-plugin/`), **`cd` into that directory** before **`pre-commit install`** or **`uv run pre-commit run`** so hooks resolve `uv`, `pyproject.toml`, and paths correctly.
 
 Run all hooks on every file (matches CI):
 
@@ -69,9 +69,9 @@ GitHub Actions runs **`uv sync --locked --group dev`**, then **`uv run pre-commi
 
 **Default CI does not install `--extra vllm`**, so tests that need an importable **`vllm`** package are skipped there. That avoids CUDA/wheel pain on every PR. For an optional integration check, maintainers can run the **Optional vLLM smoke** workflow ( **`workflow_dispatch`** in `.github/workflows/optional-vllm-smoke.yml` ), which syncs with **`--extra vllm`** and runs pytest.
 
-## Bash for pre-commit
+## Shell for pre-commit
 
-Local hook **`entry`** lines use **`bash`** / **`sh`**. Use an environment where **Bash** is available (Linux, macOS, or **Git Bash** on Windows). Native **cmd.exe** without Bash is not supported for these hooks.
+The **DCO** hook runs **`sh scripts/add-signoff.sh`** (POSIX **`sh`**). Use Linux, macOS, **Git Bash**, or **WSL** so **`sh`** is available. Ruff, `ty`, and **`uv sync`** use plain **`entry`** commands (no bash).
 
 ## PR descriptions
 

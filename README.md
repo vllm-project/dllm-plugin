@@ -47,7 +47,7 @@ Until those classes exist, this is **documentation-only**; the `register()` entr
 
 - [docs/DESIGN_MVP.md](docs/DESIGN_MVP.md) — MVP architecture, field mapping, diagrams (public references only).
 - [docs/ROADMAP.md](docs/ROADMAP.md) — phased future work.
-- [docs/TOOLING.md](docs/TOOLING.md) — accurate tooling summary (pre-commit uses **`uv run`**, Bash requirement, DCO/CI notes) for contributors and PR descriptions.
+- [docs/TOOLING.md](docs/TOOLING.md) — accurate tooling summary (pre-commit uses **`uv run`**, DCO/`sh`, run-from-root note, CI) for contributors and PR descriptions.
 
 ## License
 
