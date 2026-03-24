@@ -7,18 +7,15 @@
 # - Maintainers: run workflow_dispatch once after changing the vllm extra and
 #   record the outcome in PR notes or release docs if this becomes a gate.
 #
-# TEMPORARY (remove after recording a run): ``pull_request`` with ``paths`` only
-# on this file exercises ``ubuntu-latest`` before the workflow exists on ``main``
-# (``workflow_dispatch`` is unavailable until then). Revert to ``workflow_dispatch``
-# only once the run URL is documented on the PR.
+# Verifying before merge: ``workflow_dispatch`` is not available until this file
+# is on the default branch. To exercise ``ubuntu-latest`` from a PR, you can
+# temporarily add ``on: pull_request`` with ``paths: [this file]``, push, record
+# the Actions run URL on the PR, then revert to ``workflow_dispatch`` only (see
+# CONTRIBUTING.md).
 name: Optional vLLM smoke
 
 on:
   workflow_dispatch:
-  pull_request:
-    branches: [main, master]
-    paths:
-      - ".github/workflows/optional-vllm-smoke.yml"
 
 permissions:
   contents: read

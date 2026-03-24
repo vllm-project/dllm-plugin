@@ -71,6 +71,17 @@ GitHub Actions runs **`uv sync --locked --group dev`**, then **`uv run pre-commi
 
 **Optional vLLM smoke** is **best-effort** on **`ubuntu-latest`**: **`uv sync --extra vllm`** may fail if PyPI has no suitable wheel or pins break on that image (see header comments in the workflow YAML). Dispatch it after lock/extra changes and note success or failure for the team until behavior is stable.
 
+**Before the workflow exists on `main`**, **`workflow_dispatch`** cannot be triggered (GitHub has no registered workflow yet). To get an **`ubuntu-latest`** run from a PR, maintainers may **temporarily** add to **`optional-vllm-smoke.yml`**:
+
+```yaml
+pull_request:
+  branches: [main, master]
+  paths:
+    - ".github/workflows/optional-vllm-smoke.yml"
+```
+
+so only edits to that workflow file start the job (not every doc commit). Push, copy the **Actions** run URL/conclusion into the PR description, then **remove** the `pull_request` block and leave **`workflow_dispatch`** only. The run may stay **queued** until org runners pick it up—check the **Actions** tab if it does not start.
+
 ## Shell for pre-commit
 
 The **DCO** hook runs **`sh scripts/add-signoff.sh`** (POSIX **`sh`**). Use Linux, macOS, **Git Bash**, or **WSL** so **`sh`** is available. Ruff, `ty`, and **`uv sync`** use plain **`entry`** commands (no bash).
