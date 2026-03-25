@@ -1,0 +1,91 @@
+[build-system]
+requires = ["setuptools>=61", "wheel", "setuptools-scm[toml]>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vllm-dllm-plugin"
+dynamic = ["version"]
+description = "vLLM plugin for block-based diffusion language model (dLLM) support"
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "vLLM dLLM plugin contributors" }]
+keywords = ["vllm", "dllm", "diffusion", "language-model", "inference", "plugin"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = []
+
+# Full plugin runtime requires vLLM (Linux/CUDA wheels). Omit on platforms where
+# vLLM is unavailable (e.g. macOS dev); use ``uv sync --extra vllm`` on Linux/CI.
+[project.optional-dependencies]
+# Bounded like bart-plugin: vLLM API churn is real. Widen intentionally when tested
+# (optional smoke workflow + lock refresh). Track draft-token hook: vllm#36155, DESIGN_MVP §4.
+vllm = ["vllm>=0.14.0,<0.15"]
+
+[project.urls]
+Homepage = "https://github.com/vllm-project/dllm-plugin"
+Repository = "https://github.com/vllm-project/dllm-plugin"
+Documentation = "https://github.com/vllm-project/dllm-plugin#readme"
+"Bug Tracker" = "https://github.com/vllm-project/dllm-plugin/issues"
+
+[project.entry-points."vllm.general_plugins"]
+dllm = "vllm_dllm_plugin:register_dllm"
+
+[dependency-groups]
+dev = [
+    "pre-commit>=3.5",
+    "pytest>=7.0",
+    "ruff>=0.15.7,<0.16",
+    "setuptools-scm>=8",
+    "ty>=0.0.24,<0.1",  # 0.x minors can still break; expect lock churn until ty stabilizes
+]
+
+[tool.setuptools_scm]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["vllm_dllm_plugin*"]
+
+[tool.setuptools.package-data]
+vllm_dllm_plugin = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+extend-exclude = [".venv", "venv", "build", "dist"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # Pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "W",   # pycodestyle warnings
+    "B",   # flake8-bugbear
+    "G",   # flake8-logging-format
+    "ISC", # flake8-implicit-str-concat
+    "SIM", # flake8-simplify
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
+[tool.ty]
+# Rely on defaults; vLLM is an optional runtime dependency (see ``[project.optional-dependencies]``).
