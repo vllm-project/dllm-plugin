@@ -1,11 +1,19 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """vLLM dLLM plugin: block-based diffusion LM support (skeleton)."""
 
 from __future__ import annotations
 
 import importlib.util
 import logging
+from importlib.metadata import PackageNotFoundError, version
 
-__version__ = "0.1.0"
+try:
+    __version__ = version("vllm-dllm-plugin")
+except PackageNotFoundError:
+    # Editable / unpacked tree without installed dist metadata (tests use pythonpath).
+    __version__ = "0.1.0"
+
 
 _logger = logging.getLogger(__name__)
 

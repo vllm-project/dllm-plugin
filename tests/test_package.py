@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Smoke tests for package import, version, and plugin registration stub."""
 
 from __future__ import annotations

@@ -10,7 +10,7 @@ The approach follows the public RFC discussion [vllm#36155](https://github.com/v
 
 ## Install (development)
 
-Requires Python **3.10+** and [uv](https://docs.astral.sh/uv/). CI tests **3.10** through **3.13**. A [`.python-version`](.python-version) file pins the default local interpreter for `uv`/pyenv; override as needed for the matrix.
+Requires Python **3.10–3.13** (metadata: `requires-python = ">=3.10,<3.14"`, aligned with current vLLM expectations) and [uv](https://docs.astral.sh/uv/). CI tests **3.10** through **3.13**. A [`.python-version`](.python-version) file pins the default local interpreter for `uv`/pyenv; override as needed for the matrix.
 
 ```bash
 git clone https://github.com/vllm-project/dllm-plugin.git
@@ -26,7 +26,7 @@ uv run pre-commit install
 uv sync --group dev --extra vllm
 ```
 
-`pyproject.toml` requires **`vllm>=0.14`**; **`uv.lock`** may resolve a **newer** compatible release when you use the extra (see **Lockfile** in [CONTRIBUTING.md](CONTRIBUTING.md)).
+The optional extra pins **`vllm>=0.14,<0.15`** (API-churn guard, bart-plugin-style). **`uv.lock`** resolves a concrete version in that range when you sync with **`--extra vllm`** (see **Lockfile** in [CONTRIBUTING.md](CONTRIBUTING.md)). Widen the bound only after testing (e.g. optional smoke workflow + lock refresh).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for pre-commit, CI parity, and contribution norms.
 

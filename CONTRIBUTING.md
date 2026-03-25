@@ -16,14 +16,14 @@ The **vllm-project** org may require the **DCO** GitHub check to pass on PRs. Th
 
 ## Environment
 
-- Install **[uv](https://docs.astral.sh/uv/)** and Python **3.10+** (CI covers **3.10–3.13**). The repo includes **`.python-version`** (default **3.12**) so local `uv`/pyenv pick a consistent interpreter; change it locally if needed.
+- Install **[uv](https://docs.astral.sh/uv/)** and Python **3.10–3.13** (`requires-python` is **`>=3.10,<3.14`**, consistent with current vLLM). CI covers **3.10–3.13**. The repo includes **`.python-version`** (default **3.12**) so local `uv`/pyenv pick a consistent interpreter; change it locally if needed.
 - Create a venv and install dev dependencies:
 
   ```bash
   uv sync --group dev
   ```
 
-- **Runtime vLLM** is an **optional extra** (`vllm>=0.14`) so macOS and other environments without CUDA wheels can still develop and run tests that skip vLLM-specific cases. On Linux (e.g. CI or GPU dev boxes), install with:
+- **Runtime vLLM** is an **optional extra** with a **bounded** spec (`vllm>=0.14,<0.15`) so installs stay on tested API lines; widen only with lock refresh + optional smoke. macOS and other environments without CUDA wheels can still develop and run tests that skip vLLM-specific cases. On Linux (e.g. CI or GPU dev boxes), install with:
 
   ```bash
   uv sync --group dev --extra vllm
@@ -112,6 +112,22 @@ Use `# ty: ignore` sparingly; prefer fixing types or narrowing stubs.
 ## AI-assisted contributions
 
 There is no separate upstream “AI policy” file in the vLLM tree. If you use AI tools for a **substantive** change, **say so in the PR description**. You remain responsible for correctness, security, and licensing. If this repo uses **Signed-off-by** (DCO), your sign-off must still reflect that you are submitting the work you understand you have the right to submit.
+
+Put **tooling / attribution noise** in the PR body, not in commit messages, so history stays readable for bisect and changelog.
+
+## SPDX headers (Python)
+
+New **`.py`** files under **`vllm_dllm_plugin/`** and **`tests/`** should start with the same SPDX lines as vLLM core:
+
+```text
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+```
+
+## Maintainer alignment notes
+
+- **`ty` without `mypy`:** intentional for this small package; see **[docs/TOOLING.md](docs/TOOLING.md)**.
+- **Tracked `uv.lock`:** includes optional **`vllm`** resolution on purpose (large lockfile tradeoff documented under **Lockfile** above).
 
 ## RFC / design context
 
