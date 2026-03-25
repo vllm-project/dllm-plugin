@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61", "wheel"]
+requires = ["setuptools>=61", "wheel", "setuptools-scm[toml]>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "vllm-dllm-plugin"
-version = "0.1.0"
+dynamic = ["version"]
 description = "vLLM plugin for block-based diffusion language model (dLLM) support"
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
@@ -39,15 +39,18 @@ Documentation = "https://github.com/vllm-project/dllm-plugin#readme"
 "Bug Tracker" = "https://github.com/vllm-project/dllm-plugin/issues"
 
 [project.entry-points."vllm.general_plugins"]
-dllm = "vllm_dllm_plugin:register"
+dllm = "vllm_dllm_plugin:register_dllm"
 
 [dependency-groups]
 dev = [
     "pre-commit>=3.5",
     "pytest>=7.0",
     "ruff>=0.15.7,<0.16",
+    "setuptools-scm>=8",
     "ty>=0.0.24,<0.1",  # 0.x minors can still break; expect lock churn until ty stabilizes
 ]
+
+[tool.setuptools_scm]
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -75,12 +78,14 @@ select = [
     "W",   # pycodestyle warnings
     "B",   # flake8-bugbear
     "G",   # flake8-logging-format
+    "ISC", # flake8-implicit-str-concat
     "SIM", # flake8-simplify
 ]
 
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
+docstring-code-format = true
 
 [tool.ty]
 # Rely on defaults; vLLM is an optional runtime dependency (see ``[project.optional-dependencies]``).

@@ -7,18 +7,25 @@ from __future__ import annotations
 import importlib.util
 import logging
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 
 try:
     __version__ = version("vllm-dllm-plugin")
 except PackageNotFoundError:
-    # Editable / unpacked tree without installed dist metadata (tests use pythonpath).
-    __version__ = "0.1.0"
+    # No dist metadata (e.g. bare ``pytest`` on PYTHONPATH). Prefer ``uv sync`` /
+    # editable install so ``importlib.metadata`` resolves the version.
+    try:
+        from setuptools_scm import get_version
+
+        __version__ = get_version(root=str(Path(__file__).resolve().parents[1]))
+    except (ImportError, LookupError):
+        __version__ = "0.0.0+unknown"
 
 
 _logger = logging.getLogger(__name__)
 
 
-def register() -> None:
+def register_dllm() -> None:
     """Entry point for ``vllm.general_plugins`` (``dllm``).
 
     Skeleton: does **not** register models, schedulers, or workers. If a ``vllm``
@@ -34,6 +41,7 @@ def register() -> None:
     # Stub: avoid importing vllm here (expensive at load time). Add lazy/targeted
     # imports when model/scheduler/worker registration is implemented.
     _logger.debug(
-        "vllm-dllm-plugin (dllm): vLLM is discoverable on sys.path but register() "
-        "is still a skeleton — no models, schedulers, or workers registered yet.",
+        "vllm-dllm-plugin (dllm): vLLM is discoverable on sys.path but "
+        "register_dllm() is still a skeleton — no models, schedulers, or workers "
+        "registered yet.",
     )

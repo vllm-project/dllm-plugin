@@ -4,7 +4,7 @@ Phased work after the **repository skeleton**. Each item should link to **public
 
 | Phase | Focus |
 |-------|--------|
-| **Skeleton** | Importable package, `register()` stub, CI, docs (current milestone). |
+| **Skeleton** | Importable package, `register_dllm()` stub, CI, docs (current milestone). |
 | **Core hook + plugin stack** | `DllmScheduler` / `DllmWorker`, validation, integration with the vLLM draft-token hook from [vllm#36155](https://github.com/vllm-project/vllm/issues/36155). |
 | **LLaDA2.0** | End-to-end model module, default remasking, first operator docs. |
 | **Grammar / structured output** | Safer interaction with structured output and async paths; scheduler overrides. |

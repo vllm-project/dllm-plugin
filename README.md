@@ -4,9 +4,13 @@
 
 **vllm-dllm-plugin** is a [vLLM](https://github.com/vllm-project/vllm) plugin for **block-based diffusion language models (dLLMs)**. This repository is currently a **skeleton**: an importable package, a `vllm.general_plugins` entry point (`dllm`), tests, and public design/roadmap docs. Scheduler, worker, and LLaDA2.0 model logic will land in later milestones (see [docs/ROADMAP.md](docs/ROADMAP.md)).
 
-**Important:** Even if you set `VLLM_PLUGINS=dllm` and a `vllm` distribution is on your `sys.path`, **`register()` does not register models, schedulers, or workers yet** — it uses `importlib.util.find_spec("vllm")` (discoverability, not a full import), may emit a **DEBUG** log, and returns. That can succeed even when `import vllm` would fail (e.g. broken native deps). Do not expect inference behavior until the MVP stack lands.
+**Important:** Even if you set `VLLM_PLUGINS=dllm` and a `vllm` distribution is on your `sys.path`, **`register_dllm()` does not register models, schedulers, or workers yet** — it uses `importlib.util.find_spec("vllm")` (discoverability, not a full import), may emit a **DEBUG** log, and returns. That can succeed even when `import vllm` would fail (e.g. broken native deps). Do not expect inference behavior until the MVP stack lands.
 
 The approach follows the public RFC discussion [vllm#36155](https://github.com/vllm-project/vllm/issues/36155) and reuses spec-decode-shaped fields so batching and executor paths stay aligned.
+
+**AI-assisted work:** If tools materially helped with your change, disclose that (PR description is the default; commits may carry a short factual note when appropriate). See **AI-assisted contributions** in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+**Optional `vllm` vs bart-style plugins:** Many vLLM plugins (for example [bart-plugin](https://github.com/vllm-project/bart-plugin)) declare **vLLM as a hard install-time dependency**. This repo keeps **`vllm` in an optional extra** on purpose so contributors on macOS or without CUDA can run the default dev hooks and tests (`uv sync --group dev`). Full integration with a real vLLM install remains **`uv sync --group dev --extra vllm`** (and the optional CI workflow).
 
 ## Install (development)
 
@@ -41,7 +45,7 @@ vllm serve <model> \
   --worker-cls vllm_dllm_plugin.worker:DllmWorker
 ```
 
-Until those classes exist, this is **documentation-only**; the `register()` entry point is a no-op when no `vllm` spec is found and a **silent stub** (plus a **DEBUG** log line) when `find_spec("vllm")` succeeds.
+Until those classes exist, this is **documentation-only**; the `register_dllm()` entry point is a no-op when no `vllm` spec is found and a **silent stub** (plus a **DEBUG** log line) when `find_spec("vllm")` succeeds.
 
 ## Docs
 

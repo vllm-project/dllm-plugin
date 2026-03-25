@@ -36,7 +36,7 @@ This document describes the **MVP architecture** for [`vllm-project/dllm-plugin`
 
 ```text
 vllm_dllm_plugin/
-  __init__.py              # register() entry for vllm.general_plugins
+  __init__.py              # register_dllm() entry for vllm.general_plugins
   config.py                # DRAFT_SIZE, model id constants, feature flags
   validation.py            # assert_compatible_stack(vllm_config)
   scheduler.py             # DllmScheduler (v1 scheduler interface)
@@ -79,7 +79,7 @@ flowchart TB
   DllmWork -->|"ModelRunnerOutput"| Engine
 ```
 
-**Core dependency:** After the upstream hook lands in vLLM, `Hook` runs whenever a model step executed and draft IDs exist—not only when `speculative_config` is set. Until then, document a **minimum vLLM version or git SHA** once integration tests pin it (`pyproject.toml` currently allows `vllm>=0.14` as the optional extra; the exact release containing the hook is tracked via [vllm#36155](https://github.com/vllm-project/vllm/issues/36155) and should be mirrored in the README when known).
+**Core dependency:** After the upstream hook lands in vLLM, `Hook` runs whenever a model step executed and draft IDs exist—not only when `speculative_config` is set. Until then, document a **minimum vLLM version or git SHA** once integration tests pin it (`pyproject.toml` currently allows `vllm>=0.14` as the **optional** extra—unlike bart-style plugins that often require vLLM at install time; see README). The exact release containing the hook is tracked via [vllm#36155](https://github.com/vllm-project/vllm/issues/36155) and should be mirrored in the README when known.
 
 ---
 
@@ -90,7 +90,7 @@ flowchart LR
   subgraph registration [Discovery]
     EP[vllm.general_plugins]
     MR[ModelRegistry]
-    EP --> RegFn[register]
+    EP --> RegFn[register_dllm]
     RegFn --> MR
   end
   subgraph runtime [Runtime stack]

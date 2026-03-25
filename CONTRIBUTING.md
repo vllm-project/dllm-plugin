@@ -88,7 +88,7 @@ The **DCO** hook runs **`sh scripts/add-signoff.sh`** (POSIX **`sh`**). Use Linu
 
 ## PR descriptions
 
-Keep GitHub PR bodies aligned with the branch — see **[docs/TOOLING.md](docs/TOOLING.md)** for an accurate summary (e.g. pre-commit uses **`uv run`**, not **`uvx`**, for Ruff and `ty`).
+Keep GitHub PR bodies aligned with the branch — see **[docs/TOOLING.md](docs/TOOLING.md)** for an accurate summary (e.g. pre-commit uses **`uv run`**, not **`uvx`**, for Ruff and `ty`). Do **not** paste paths to **local-only** review or planning files; link **public** issues, RFCs, or this repo’s **`docs/`** instead.
 
 ## Manual checks (optional)
 
@@ -111,9 +111,24 @@ Use `# ty: ignore` sparingly; prefer fixing types or narrowing stubs.
 
 ## AI-assisted contributions
 
-There is no separate upstream “AI policy” file in the vLLM tree. If you use AI tools for a **substantive** change, **say so in the PR description**. You remain responsible for correctness, security, and licensing. If this repo uses **Signed-off-by** (DCO), your sign-off must still reflect that you are submitting the work you understand you have the right to submit.
+There is no separate upstream “AI policy” file in the vLLM tree. If you use AI tools for a **substantive** change (material help with design, code, tests, or docs), **disclose that clearly** in at least one appropriate place:
 
-Put **tooling / attribution noise** in the PR body, not in commit messages, so history stays readable for bisect and changelog.
+- **Pull request:** Prefer a short **PR description** section (what you used, for which parts, and how you validated the result). This is the default place for narrative disclosure.
+- **Commits:** When a **single commit** is substantially AI-assisted, you **may** add a brief factual note in the commit body (e.g. tool + scope). Keep the **subject line** human-focused (**what** / **why**); avoid empty marketing or unrelated trailers.
+- **Issues / discussions:** When filing bugs, questions, or design threads that rely on AI-generated analysis, note that so reviewers can calibrate.
+
+You remain responsible for correctness, security, and licensing. If this repo uses **Signed-off-by** (DCO), your sign-off must still reflect that you are submitting the work you understand you have the right to submit.
+
+**Optional:** maintainers may squash or rewrite history for bisect-friendly narrative; that is **not** required solely to remove AI disclosure.
+
+## Versioning (setuptools-scm)
+
+The distribution version is **derived from git** via **[setuptools-scm](https://github.com/pypa/setuptools_scm)** (no static `version` field in `pyproject.toml`).
+
+- **Releases:** tag with **`vMAJOR.MINOR.PATCH`** (e.g. **`v0.1.0`**). Builds and **`importlib.metadata.version("vllm-dllm-plugin")`** use that tag.
+- **Between tags:** installs report **PEP 440** dev/local versions (e.g. **`0.2.0.dev3+gabcdef`**) from commit distance and hash — expected for development.
+- **CI / clones:** shallow checkouts can break SCM version resolution; this repo’s **CI** fetches **full git history** for the workflow so **`setuptools-scm`** can run.
+- Until the **first** release tag exists, versions are **development-shaped**; that is normal for a pre-1.0 skeleton.
 
 ## SPDX headers (Python)
 
@@ -128,6 +143,10 @@ New **`.py`** files under **`vllm_dllm_plugin/`** and **`tests/`** should start 
 
 - **`ty` without `mypy`:** intentional for this small package; see **[docs/TOOLING.md](docs/TOOLING.md)**.
 - **Tracked `uv.lock`:** includes optional **`vllm`** resolution on purpose (large lockfile tradeoff documented under **Lockfile** above).
+
+## CODEOWNERS (org routing)
+
+If **`.github/CODEOWNERS`** is not present yet, add one once **vllm-project** provides a **GitHub team** or **maintainer list** for this repository (see [GitHub CODEOWNERS](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners)). Until then, use **PR reviewers** explicitly.
 
 ## RFC / design context
 
