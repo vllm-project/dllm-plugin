@@ -30,7 +30,9 @@ uv run pre-commit install
 uv sync --group dev --extra vllm
 ```
 
-The optional extra pins **`vllm>=0.14,<0.15`** (API-churn guard, bart-plugin-style). **`uv.lock`** resolves a concrete version in that range when you sync with **`--extra vllm`** (see **Lockfile** in [CONTRIBUTING.md](CONTRIBUTING.md)). Widen the bound only after testing (e.g. optional smoke workflow + lock refresh).
+The optional extra pins **`vllm>=0.14.0,<0.15`** (API-churn guard, bart-plugin-style). **`uv.lock`** resolves a concrete version in that range when you sync with **`--extra vllm`** (see **Lockfile** in [CONTRIBUTING.md](CONTRIBUTING.md)). Widen the bound only after testing (e.g. optional smoke workflow + lock refresh).
+
+**Upstream hook status (Phase 0):** dLLM draft-token hook alignment is tracked in [vllm#36155](https://github.com/vllm-project/vllm/issues/36155). Until the hook is confirmed in a pinned release for this plugin path, treat this bound as a compatibility guard and keep docs + `pyproject.toml` synchronized through issue [#2](https://github.com/vllm-project/dllm-plugin/issues/2).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for pre-commit, CI parity, and contribution norms.
 
