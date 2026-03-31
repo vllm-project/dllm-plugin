@@ -13,3 +13,4 @@ Use this checklist when opening or updating pull requests so the **GitHub PR des
 | **Where to run pre-commit** | From this repo root; if embedded under another tree, **`cd`** into the plugin directory first. |
 | **DCO sign-off** | Local **`prepare-commit-msg`** hook appends **`Signed-off-by:`**; the **vllm-project** org may still enforce the **DCO** status check on GitHub — both matter. |
 | **CI default** | **`uv sync --locked --group dev`** only (no **`--extra vllm`**). Optional **`workflow_dispatch`** job can install **`vllm`** for manual runs (may fail on stock runners depending on wheels; see workflow comments). |
+| **Optional vLLM bound** | `pyproject.toml` is the canonical source for the optional `vllm` bound. Keep docs consistent with that file; keep upstream hook tracking context in README and plugin issue [#2](https://github.com/vllm-project/dllm-plugin/issues/2), with upstream reference [vllm#36155](https://github.com/vllm-project/vllm/issues/36155). |

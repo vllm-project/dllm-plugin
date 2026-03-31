@@ -79,7 +79,7 @@ flowchart TB
   DllmWork -->|"ModelRunnerOutput"| Engine
 ```
 
-**Core dependency:** After the upstream hook lands in vLLM, `Hook` runs whenever a model step executed and draft IDs exist—not only when `speculative_config` is set. Until then, document a **minimum vLLM version or git SHA** once integration tests pin it (`pyproject.toml` currently allows `vllm>=0.14` as the **optional** extra—unlike bart-style plugins that often require vLLM at install time; see README). The exact release containing the hook is tracked via [vllm#36155](https://github.com/vllm-project/vllm/issues/36155) and should be mirrored in the README when known.
+**Core dependency:** After the upstream hook lands in vLLM, `Hook` runs whenever a model step executed and draft IDs exist—not only when `speculative_config` is set. Until then, document a **minimum vLLM version or git SHA** once integration tests pin it (the canonical optional-extra bound lives in `pyproject.toml`; unlike bart-style plugins that often require vLLM at install time, this repo keeps vLLM optional for contributor ergonomics). The exact release containing the hook is tracked via [vllm#36155](https://github.com/vllm-project/vllm/issues/36155), with human-readable tracking context maintained in README and plugin issue [#2](https://github.com/vllm-project/dllm-plugin/issues/2).
 
 ---
 
