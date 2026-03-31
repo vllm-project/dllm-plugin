@@ -5,7 +5,7 @@
 
 ## Milestone Checklist (MVP LLaDA2.0)
 
-- [ ] Issue + phase declared (example: `Closes #20`, `Phase 0`)
+- [ ] Issue + phase declared (example: `Related: #20`, `Phase 0`)
 - [ ] HARD dependencies listed and status noted
 - [ ] SOFT dependencies listed and status noted
 - [ ] In-scope work stated
@@ -15,7 +15,8 @@
 
 ### Issue and Phase
 
-- Closes: #
+- Related issue(s): #
+- Closing keyword (only if fully resolved): Closes #
 - Phase: 0-6
 
 ### Dependencies
