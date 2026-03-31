@@ -90,6 +90,8 @@ The **DCO** hook runs **`sh scripts/add-signoff.sh`** (POSIX **`sh`**). Use Linu
 
 Keep GitHub PR bodies aligned with the branch — see **[docs/TOOLING.md](docs/TOOLING.md)** for an accurate summary (e.g. pre-commit uses **`uv run`**, not **`uvx`**, for Ruff and `ty`). Do **not** paste paths to **local-only** review or planning files; link **public** issues, RFCs, or this repo’s **`docs/`** instead.
 
+For milestone work, use the repository PR template at **`.github/PULL_REQUEST_TEMPLATE.md`** and fill the **Issue + Phase**, **HARD/SOFT dependencies**, **scope**, **validation evidence**, and **docs impact** sections.
+
 ## Manual checks (optional)
 
 From the synced environment (lockfile-pinned tool versions):
