@@ -4,7 +4,7 @@
 
 Invariants align with ``docs/DESIGN_MVP.md`` section 8 (remasking composability)
 and use :data:`~vllm_dllm_plugin.config.DRAFT_SIZE` for next-block length.
-Concrete policies (e.g. LLaDA2.0 default) live in separate modules (issue #7).
+Concrete policies live in separate modules (e.g. ``llada2_default`` for LLaDA2.0).
 """
 
 from __future__ import annotations

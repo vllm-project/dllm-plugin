@@ -34,3 +34,13 @@ DLLM_MOCK_MODEL_CLASS_FQCN: Final[str] = (
 #: scheduler / worker / model combinations as errors once that module exists.
 #: Operators or tests may override via future config wiring; this is the default.
 DLLM_STRICT_STACK_VALIDATION_DEFAULT: Final[bool] = True
+
+#: Placeholder **mask** token id for :mod:`~vllm_dllm_plugin.remasking.llada2_default`
+#: ``next_input_block`` remasked positions until real HF config lands (Phase 7 / #12).
+LLADA2_DEFAULT_MASK_TOKEN_ID: Final[int] = 1
+
+#: Default minimum softmax probability on the per-position argmax token required to
+#: **commit** that position (issue #7). Tuned so the Phase 2 mock stub logits
+#: (zeros + ``1.0`` at index ``0``, ``docs/MOCK_STACK_MODEL.md``) commit under
+#: default settings for stack tests.
+LLADA2_DEFAULT_COMMIT_CONFIDENCE_THRESHOLD: Final[float] = 0.01

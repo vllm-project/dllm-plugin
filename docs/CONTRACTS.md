@@ -79,6 +79,11 @@ against `vllm_dllm_plugin.config.DRAFT_SIZE` only. If the stack ever uses a
 per-request block length, this helper must gain an explicit length parameter (or
 a replacement); otherwise it becomes misleading.
 
+**LLaDA2 default policy (`Llada2DefaultRemaskingPolicy`, issue #7):** optional
+`remasking_config` keys `commit_confidence_threshold` (float) and `mask_token_id`
+(int); defaults in `vllm_dllm_plugin.config`. See module docstring in
+`vllm_dllm_plugin.remasking.llada2_default`.
+
 ## See also
 
 - `docs/DESIGN_MVP.md` sections 6-8 (canonical diagrams and tables)

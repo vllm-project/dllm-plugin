@@ -190,7 +190,7 @@ flowchart TB
 
 **Protocol runtime checks:** `RemaskingPolicy` is `@runtime_checkable`; `isinstance(obj, RemaskingPolicy)` only checks for a callable `apply`, not full signature compliance or return types. Use tests and static typing for the real contract.
 
-**LLaDA2.0 default** implements one concrete policy (e.g. confidence-based commit + remask rest); additional policies can plug in as new `RemaskingPolicy` implementations without changing the worker’s engine contract.
+**LLaDA2.0 default** is `vllm_dllm_plugin.remasking.llada2_default.Llada2DefaultRemaskingPolicy` (softmax confidence on the per-position argmax vs threshold, remask with `mask_token_id`; issue #7). Optional `remasking_config` keys and defaults are summarized in `docs/CONTRACTS.md`. Additional policies can plug in as new `RemaskingPolicy` implementations without changing the worker’s engine contract.
 
 ---
 
