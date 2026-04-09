@@ -6,10 +6,13 @@ This is **not** production LLaDA2 inference. Real HF weights and attention live
 in issue #12 (Phase 7). Requires a working ``vllm`` + ``torch`` install.
 
 **Outputs:** ``forward`` returns last-hidden-shaped tensors; ``compute_logits``
-returns deterministic logits (mass on token id 0) with shape
-``[num_tokens, vocab_size]`` on the last pipeline stage, ``None`` otherwise—
-sufficient for worker/remask wiring tests that consume logits shape without a
-real language prior.
+returns a **non-normalized** logit vector (zeros plus a 1.0 at index 0)—fine for
+shape / device / dtype / argmax-bias checks, not for tests that assume a proper
+softmax distribution or diverse sampling.
+
+There is **no** ``make_empty_intermediate_tensors``; PP-shaped executor paths may
+fail before ``forward`` until DllmWorker / model parity work (milestone issue
+#10) adds factory hooks or an early error when PP > 1.
 
 **HF config:** ``architectures`` must include a name registered in
 ``register_dllm()`` (see ``vllm_dllm_plugin.config`` and ``docs/MOCK_STACK_MODEL.md``).
@@ -34,7 +37,10 @@ from vllm.sequence import IntermediateTensors
 
 
 class DllmMockLlada2ForCausalLM(nn.Module):
-    """Minimal causal-LM-shaped module for plugin stack integration tests."""
+    """Minimal causal-LM-shaped module for plugin stack integration tests.
+
+    No ``make_empty_intermediate_tensors``; see module docstring for PP caveats.
+    """
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = "") -> None:
         super().__init__()
@@ -82,6 +88,7 @@ class DllmMockLlada2ForCausalLM(nn.Module):
     def compute_logits(self, hidden_states: torch.Tensor) -> torch.Tensor | None:
         if not get_pp_group().is_last_rank:
             return None
+        # Stub logits: not log-prob / softmax-normalized (shape and argmax bias only).
         logits = torch.zeros(
             hidden_states.shape[0],
             self.vocab_size,
@@ -92,5 +99,6 @@ class DllmMockLlada2ForCausalLM(nn.Module):
         return logits
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
+        # Weightless mock: empty set means nothing to load (not a load failure).
         del weights
         return set()

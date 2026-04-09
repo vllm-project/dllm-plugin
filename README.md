@@ -4,7 +4,7 @@
 
 **vllm-dllm-plugin** is a [vLLM](https://github.com/vllm-project/vllm) plugin for **block-based diffusion language models (dLLMs)**. The package provides a `vllm.general_plugins` entry point (`dllm`), Phase 1 contracts (`config`, `remasking`), and a **mock registered model** for stack testing (Phases 2–6). Scheduler, worker, and production LLaDA2.0 logic are still in progress (see [docs/ROADMAP.md](docs/ROADMAP.md)).
 
-**Important:** With `VLLM_PLUGINS=dllm` and an importable `vllm`, **`register_dllm()` registers two architecture names** with vLLM’s `ModelRegistry`, both targeting the **mock** implementation in `vllm_dllm_plugin.models.mock_llada2` (not real inference—see [docs/MOCK_STACK_MODEL.md](docs/MOCK_STACK_MODEL.md)). If `vllm` is missing or `import vllm` fails, registration is skipped (no crash). Schedulers and workers are not registered yet.
+**Important:** `register_dllm()` first checks `importlib.util.find_spec("vllm")`; if `vllm` is not discoverable on `sys.path`, it returns without registering. If the spec exists but `from vllm import ModelRegistry` still fails, registration is skipped and a **DEBUG** traceback is logged. When that import succeeds, **`register_dllm()` registers two architecture names** with vLLM’s `ModelRegistry`, both targeting the **mock** in `vllm_dllm_plugin.models.mock_llada2` (not real inference—see [docs/MOCK_STACK_MODEL.md](docs/MOCK_STACK_MODEL.md)). Schedulers and workers are not registered yet.
 
 The approach follows the public RFC discussion [vllm#36155](https://github.com/vllm-project/vllm/issues/36155) and reuses spec-decode-shaped fields so batching and executor paths stay aligned.
 

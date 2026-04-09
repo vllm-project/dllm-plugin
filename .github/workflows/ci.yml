@@ -53,7 +53,6 @@ jobs:
           python-version: "3.12"
       - name: Sync environment (locked, dev, vllm extra)
         run: uv sync --locked --group dev --extra vllm
-      - name: Pre-commit (lint, format, types, lockfile)
-        run: uv run pre-commit run --all-files
+      # Lint/types already run in the ``ci`` job; this job only adds vLLM + pytest signal.
       - name: Tests
         run: uv run pytest -q

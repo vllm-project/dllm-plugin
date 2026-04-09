@@ -89,10 +89,8 @@ docstring-code-format = true
 
 [tool.ty]
 # Rely on defaults; vLLM is an optional runtime dependency (see ``[project.optional-dependencies]``).
+# ``vllm_dllm_plugin/models/mock_llada2.py`` is checked with allowed-unresolved-imports below.
 
 [tool.ty.analysis]
 # Dev/CI default sync omits ``torch``/``vllm``; imports are runtime-gated or skipped in tests.
 allowed-unresolved-imports = ["torch.**", "vllm.**"]
-
-[tool.ty.src]
-# Mock module is type-checked using ``allowed-unresolved-imports`` for optional vLLM/torch.

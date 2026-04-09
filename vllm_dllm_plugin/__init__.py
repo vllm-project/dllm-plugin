@@ -39,9 +39,10 @@ def register_dllm() -> None:
     Uses lazy ``"<module>:<Class>"`` registration so importing this package does
     not pull ``torch``/CUDA until the model class is needed.
 
-    If ``vllm`` is absent or fails to import, returns without raising (no-op).
-    ``importlib.util.find_spec("vllm")`` can succeed when ``import vllm`` would
-    still fail; in that case we log at DEBUG and skip registration.
+    If ``vllm`` is not discoverable (``find_spec`` is ``None``), returns without
+    registering. If the spec exists but importing ``ModelRegistry`` fails, logs
+    DEBUG with ``exc_info`` and returns. (``find_spec`` can succeed when a full
+    ``import vllm`` would still fail.)
     """
     if importlib.util.find_spec("vllm") is None:
         return

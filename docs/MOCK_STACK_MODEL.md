@@ -31,8 +31,10 @@ it will **not** override core.
 
 The mock branches on `get_pp_group()` for basic staging, but non-last ranks use a
 **zero residual** stub and there is **no** `make_empty_intermediate_tensors` (or
-related helpers) yet. Treat PP > 1 as **unsupported** for this stub until a
-follow-up wires real residuals and PP factory hooks.
+related helpers) yet. Executor code may expect those hooks **before** `forward`
+runs. Treat PP > 1 as **unsupported** for this stub.
+
+**Follow-up (not Phase 2):** milestone issue [#10](https://github.com/vllm-project/dllm-plugin/issues/10) / later model work should either add minimal PP factory parity with vLLM causal models or fail fast when pipeline-parallel world size > 1.
 
 ## HuggingFace `config.json` surface (minimal)
 
@@ -53,17 +55,20 @@ Sizes are hints for tensor shapes; the mock does not implement a real transforme
 ## Forward / logits contract (for #10 / #13)
 
 - **Last PP stage:** `compute_logits` returns a 2-D float tensor
-  `[num_tokens, vocab_size]` with deterministic mass on token index `0`.
+  `[num_tokens, vocab_size]` with a **non-normalized** stub (zeros plus `1.0` at
+  index `0`). Suitable for shape/device/dtype checks and degenerate argmax bias;
+  not a proper probability distribution for logprob or diversity assertions.
 - **Non-last PP stage:** `compute_logits` returns `None` (vLLM convention).
 - **`forward`:** returns hidden states (or `IntermediateTensors` for PP) with
   hidden width `hidden_size`.
+- **`load_weights`:** returns an empty set intentionally (no parameters to load).
 
 ## Operator expectations
 
 Requires `VLLM_PLUGINS=dllm` and a vLLM build that loads general plugins.
 
 **CI:** The default workflow runs lint/tests without the `vllm` extra; a second
-job syncs with `--extra vllm` on Python 3.12 and runs the full test suite so
-registration and mock import are exercised on PRs. If that job fails (e.g. no
-wheel for the runner), use the **Optional vLLM smoke** workflow or
-`uv sync --group dev --extra vllm` locally.
+job syncs with `--extra vllm` on Python 3.12 and runs **pytest** (lint already
+ran in the main matrix) so registration and mock import are exercised on PRs. If
+that job fails (e.g. no wheel for the runner), use the **Optional vLLM smoke**
+workflow or `uv sync --group dev --extra vllm` locally.
