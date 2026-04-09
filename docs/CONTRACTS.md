@@ -1,0 +1,57 @@
+# MVP field mapping (contributor reference)
+
+Copy-friendly summary of **`docs/DESIGN_MVP.md` section 7** (field mapping) and
+related invariants. Keep this file ASCII-only for terminals and PR review.
+
+## Spec-decode-shaped fields (plugin stack active)
+
+| vLLM field / API | Role when dLLM plugin scheduler + worker are active |
+|------------------|-----------------------------------------------------|
+| `Request.spec_token_ids` | **Next-step input block** for the upcoming schedule. Length **`DRAFT_SIZE`** (see `vllm_dllm_plugin.config.DRAFT_SIZE`). |
+| `SchedulerOutput.scheduled_spec_decode_tokens` | **Input block** for **this** step's forward. Length **`DRAFT_SIZE`**. |
+| `SchedulerOutput.num_scheduled_tokens` (per request) | Set to **`DRAFT_SIZE`** for decode steps on the block path. |
+| `ModelRunnerOutput.sampled_token_ids` | **Committed** token IDs only; length **0..`DRAFT_SIZE`** (may be empty). |
+| Worker `take_draft_token_ids()` | Returns the **next-step input block** as `DraftTokenIds` for engine -> scheduler. |
+| Scheduler `update_draft_token_ids` / `update_draft_token_ids_in_output` | Store the next block into `spec_token_ids`. **Must not** apply AR draft grammar to dLLM blocks (scheduler overrides for structured output / async). |
+
+## Commit-0 rollback
+
+If no tokens are committed in a step, the plugin scheduler rolls back
+`num_computed_tokens` by the number of tokens scheduled that step (typically
+**`DRAFT_SIZE`**). See `DESIGN_MVP.md` section 6 (sequence diagram) and section 1
+(Commit-0 goal).
+
+## Mutual exclusion
+
+True speculative decoding on the same requests must **not** be combined with the
+dLLM plugin stack (same run mode). See `DESIGN_MVP.md` section 7 (last paragraph).
+
+## One decode step (ASCII)
+
+```text
+Engine -> DllmScheduler: read spec_token_ids (next block)
+DllmScheduler -> DllmScheduler: set scheduled_spec_decode_tokens,
+                num_scheduled_tokens == DRAFT_SIZE
+Engine -> DllmWorker: SchedulerOutput
+DllmWorker -> Model: forward one block (+ KV)
+Model -> RemaskingPolicy: logits / scores
+RemaskingPolicy -> DllmWorker: committed_token_ids (0..DRAFT_SIZE),
+                     next_input_block (length DRAFT_SIZE)
+DllmWorker -> Engine: sampled_token_ids = Committed;
+              DraftTokenIds for next block
+Engine -> DllmScheduler: update_from_output; commit-0 rollback if empty commit
+Engine -> Engine: post_step take_draft_token_ids / update_draft_token_ids
+DllmScheduler -> DllmScheduler: spec_token_ids := next block
+```
+
+## Remasking handoff (section 8)
+
+`RemaskingPolicy.apply` consumes the current **input block** and model outputs,
+and returns **committed** ids plus a **fixed-length** next input block
+(`RemaskStepResult` in `vllm_dllm_plugin.remasking.base`). Length of
+`next_input_block` must equal **`DRAFT_SIZE`**.
+
+## See also
+
+- `docs/DESIGN_MVP.md` sections 6-8 (canonical diagrams and tables)
+- `vllm_dllm_plugin.config` for `DRAFT_SIZE` and related constants

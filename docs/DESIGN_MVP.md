@@ -50,6 +50,10 @@ vllm_dllm_plugin/
     llada2.py              # vLLM model module for LLaDA2.0 (HF mapping, forward)
 ```
 
+**Implemented defaults:** `DRAFT_SIZE` (32 for LLaDA2.0 MVP), model identifier
+constants, and feature flags live in `vllm_dllm_plugin.config` with docstrings as
+the implementer-facing source of truth (milestone issue #3).
+
 Naming is illustrative; the PyPI distribution is **`vllm-dllm-plugin`**.
 
 ---
