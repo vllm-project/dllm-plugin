@@ -47,7 +47,7 @@ def register_dllm() -> None:
         return
 
     try:
-        from vllm.model_executor.models.registry import ModelRegistry
+        from vllm import ModelRegistry
     except ImportError:
         _logger.debug(
             "vllm-dllm-plugin (dllm): vLLM spec found but import failed; "
@@ -71,7 +71,7 @@ def register_dllm() -> None:
             )
             continue
         ModelRegistry.register_model(arch, DLLM_MOCK_MODEL_CLASS_FQCN)
-        _logger.info(
+        _logger.debug(
             "dLLM plugin: registered architecture %r -> %s",
             arch,
             DLLM_MOCK_MODEL_CLASS_FQCN,

@@ -95,5 +95,4 @@ docstring-code-format = true
 allowed-unresolved-imports = ["torch.**", "vllm.**"]
 
 [tool.ty.src]
-# Optional vLLM/torch imports; checked in environments with ``--extra vllm`` / optional smoke.
-exclude = ["vllm_dllm_plugin/models/mock_llada2.py"]
+# Mock module is type-checked using ``allowed-unresolved-imports`` for optional vLLM/torch.

@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
+# Default job: dev group only (no vLLM wheel). Second job installs ``--extra vllm``
+# on Python 3.12 so registration + mock import tests run in PR CI (see PR #27 review).
 name: CI
 
 on:
@@ -34,6 +36,23 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Sync environment (locked, dev)
         run: uv sync --locked --group dev
+      - name: Pre-commit (lint, format, types, lockfile)
+        run: uv run pre-commit run --all-files
+      - name: Tests
+        run: uv run pytest -q
+
+  # Exercise plugin code paths that require an installable vLLM (see docs/MOCK_STACK_MODEL.md).
+  vllm-extra:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          python-version: "3.12"
+      - name: Sync environment (locked, dev, vllm extra)
+        run: uv sync --locked --group dev --extra vllm
       - name: Pre-commit (lint, format, types, lockfile)
         run: uv run pre-commit run --all-files
       - name: Tests

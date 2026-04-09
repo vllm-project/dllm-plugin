@@ -15,8 +15,11 @@ real language prior.
 ``register_dllm()`` (see ``vllm_dllm_plugin.config`` and ``docs/MOCK_STACK_MODEL.md``).
 ``hidden_size`` and ``vocab_size`` should be set; defaults below apply if absent.
 
-Pipeline-parallel middle stages are handled with trivial residual passthrough;
-focus is single-GPU / non-PP bring-up.
+Pipeline-parallel staging is only **partially** mimicked: non-last ranks return
+``IntermediateTensors`` with a **zero** residual (not a real transformer
+residual). **PP > 1 is unsupported** for this milestone—use single-GPU /
+non-PP bring-up until ``make_empty_intermediate_tensors`` and real residuals are
+added.
 """
 
 from __future__ import annotations
