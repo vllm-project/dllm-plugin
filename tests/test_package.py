@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""Smoke tests for package import, version, and plugin registration stub."""
+"""Smoke tests for package import, version, and plugin registration."""
 
 from __future__ import annotations
 
@@ -44,15 +44,28 @@ def test_register_with_vllm_if_installed() -> None:
     vllm_dllm_plugin.register_dllm()
 
 
-def test_register_debug_stub_when_vllm_present(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
+def test_register_dllm_registers_architectures_when_vllm_present() -> None:
     pytest.importorskip("vllm")
-    import logging
+    from vllm import ModelRegistry
 
-    caplog.set_level(logging.DEBUG, logger="vllm_dllm_plugin")
+    from vllm_dllm_plugin.config import (
+        DLLM_MOCK_STACK_MODEL_ID,
+        LLADA2_ARCHITECTURE_NAME,
+    )
+
     vllm_dllm_plugin.register_dllm()
-    assert "skeleton" in caplog.text.lower()
+    archs = ModelRegistry.get_supported_archs()
+    assert LLADA2_ARCHITECTURE_NAME in archs
+    assert DLLM_MOCK_STACK_MODEL_ID in archs
+
+
+def test_mock_model_class_importable_when_vllm_present() -> None:
+    pytest.importorskip("vllm")
+    import torch.nn as nn
+
+    from vllm_dllm_plugin.models.mock_llada2 import DllmMockLlada2ForCausalLM
+
+    assert issubclass(DllmMockLlada2ForCausalLM, nn.Module)
 
 
 def test_entry_point_resolves_dllm() -> None:

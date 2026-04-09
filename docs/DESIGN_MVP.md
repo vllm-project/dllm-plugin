@@ -47,7 +47,8 @@ vllm_dllm_plugin/
     llada2_default.py       # MVP default for LLaDA2.0
   models/
     __init__.py
-    llada2.py              # vLLM model module for LLaDA2.0 (HF mapping, forward)
+    mock_llada2.py         # stack-test stub (Phases 2–6); not production inference
+    llada2.py              # real vLLM model module (HF mapping) — Phase 7 / issue #12
 ```
 
 **Implemented defaults:** `DRAFT_SIZE` (32 for LLaDA2.0 MVP), model identifier

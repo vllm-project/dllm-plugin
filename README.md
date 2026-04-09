@@ -2,9 +2,9 @@
 
 [![CI](https://github.com/vllm-project/dllm-plugin/actions/workflows/ci.yml/badge.svg)](https://github.com/vllm-project/dllm-plugin/actions/workflows/ci.yml)
 
-**vllm-dllm-plugin** is a [vLLM](https://github.com/vllm-project/vllm) plugin for **block-based diffusion language models (dLLMs)**. This repository is currently a **skeleton**: an importable package, a `vllm.general_plugins` entry point (`dllm`), tests, and public design/roadmap docs. Scheduler, worker, and LLaDA2.0 model logic will land in later milestones (see [docs/ROADMAP.md](docs/ROADMAP.md)).
+**vllm-dllm-plugin** is a [vLLM](https://github.com/vllm-project/vllm) plugin for **block-based diffusion language models (dLLMs)**. The package provides a `vllm.general_plugins` entry point (`dllm`), Phase 1 contracts (`config`, `remasking`), and a **mock registered model** for stack testing (Phases 2–6). Scheduler, worker, and production LLaDA2.0 logic are still in progress (see [docs/ROADMAP.md](docs/ROADMAP.md)).
 
-**Important:** Even if you set `VLLM_PLUGINS=dllm` and a `vllm` distribution is on your `sys.path`, **`register_dllm()` does not register models, schedulers, or workers yet** — it uses `importlib.util.find_spec("vllm")` (discoverability, not a full import), may emit a **DEBUG** log, and returns. That can succeed even when `import vllm` would fail (e.g. broken native deps). Do not expect inference behavior until the MVP stack lands.
+**Important:** With `VLLM_PLUGINS=dllm` and an importable `vllm`, **`register_dllm()` registers two architecture names** with vLLM’s `ModelRegistry`, both targeting the **mock** implementation in `vllm_dllm_plugin.models.mock_llada2` (not real inference—see [docs/MOCK_STACK_MODEL.md](docs/MOCK_STACK_MODEL.md)). If `vllm` is missing or `import vllm` fails, registration is skipped (no crash). Schedulers and workers are not registered yet.
 
 The approach follows the public RFC discussion [vllm#36155](https://github.com/vllm-project/vllm/issues/36155) and reuses spec-decode-shaped fields so batching and executor paths stay aligned.
 
@@ -47,11 +47,12 @@ vllm serve <model> \
   --worker-cls vllm_dllm_plugin.worker:DllmWorker
 ```
 
-Until those classes exist, this is **documentation-only**; the `register_dllm()` entry point is a no-op when no `vllm` spec is found and a **silent stub** (plus a **DEBUG** log line) when `find_spec("vllm")` succeeds.
+Scheduler and worker classes are not implemented yet. **`register_dllm()`** already registers the **mock** model architectures when `vllm` imports successfully; end-to-end serving still needs the scheduler/worker stack from later milestones.
 
 ## Docs
 
 - [docs/DESIGN_MVP.md](docs/DESIGN_MVP.md) — MVP architecture, field mapping, diagrams (public references only).
+- [docs/MOCK_STACK_MODEL.md](docs/MOCK_STACK_MODEL.md) — mock registered model ids and HF config surface (Phases 2–6).
 - [docs/CONTRACTS.md](docs/CONTRACTS.md) — copy-friendly field mapping / invariants for contributors (see DESIGN_MVP section 7).
 - [docs/ROADMAP.md](docs/ROADMAP.md) — phased future work.
 - [docs/TOOLING.md](docs/TOOLING.md) — accurate tooling summary (pre-commit uses **`uv run`**, DCO/`sh`, run-from-root note, CI) for contributors and PR descriptions.

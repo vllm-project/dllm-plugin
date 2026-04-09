@@ -24,6 +24,11 @@ LLADA2_ARCHITECTURE_NAME: Final[str] = "LLaDA2ForCausalLM"
 #: testing (deterministic outputs; see milestone issue #24).
 DLLM_MOCK_STACK_MODEL_ID: Final[str] = "DllmMockLlada2StackTest"
 
+#: Lazy import target for :func:`register_dllm` (``<module>:<Class>``).
+DLLM_MOCK_MODEL_CLASS_FQCN: Final[str] = (
+    "vllm_dllm_plugin.models.mock_llada2:DllmMockLlada2ForCausalLM"
+)
+
 #: When ``True``, ``validation.py`` (issue #4) should treat incompatible
 #: scheduler / worker / model combinations as errors once that module exists.
 #: Operators or tests may override via future config wiring; this is the default.
