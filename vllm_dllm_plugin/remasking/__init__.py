@@ -4,6 +4,14 @@
 
 from __future__ import annotations
 
-from vllm_dllm_plugin.remasking.base import RemaskingPolicy, RemaskStepResult
+from vllm_dllm_plugin.remasking.base import (
+    RemaskingPolicy,
+    RemaskStepResult,
+    validate_remask_step_result,
+)
 
-__all__ = ["RemaskStepResult", "RemaskingPolicy"]
+__all__ = [
+    "RemaskStepResult",
+    "RemaskingPolicy",
+    "validate_remask_step_result",
+]

@@ -158,6 +158,8 @@ sequenceDiagram
 
 Mutually exclusive with true speculative decoding on the same requests: operators must not enable spec-decode + dLLM plugin stack together for the same run mode.
 
+**Contributor copy:** The ASCII summary `docs/CONTRACTS.md` tracks this section (and related timing in section 6). Update both places together when field names or semantics change so they do not drift.
+
 ---
 
 ## 8. Remasking composability (MVP)
@@ -178,6 +180,8 @@ flowchart TB
 
 - **Input:** Current input block, logits (or equivalent), optional request config (e.g. threshold).
 - **Output:** `committed_token_ids: list[int]` (0..N), `next_input_block: list[int]` (length `DRAFT_SIZE`), and internal mask/draft state for logging.
+
+**Shape checks:** `RemaskStepResult` (see `vllm_dllm_plugin.remasking`) does not validate lengths at construction. After `RemaskingPolicy.apply`, the worker or policy boundary should run `validate_remask_step_result()` (same package) or the concrete policy should raise `ValueError` for invalid shapes, consistent with the protocol docstring on `apply`.
 
 **LLaDA2.0 default** implements one concrete policy (e.g. confidence-based commit + remask rest); additional policies can plug in as new `RemaskingPolicy` implementations without changing the worker’s engine contract.
 

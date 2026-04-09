@@ -3,6 +3,12 @@
 Copy-friendly summary of **`docs/DESIGN_MVP.md` section 7** (field mapping) and
 related invariants. Keep this file ASCII-only for terminals and PR review.
 
+**Keeping docs aligned:** Edits to the field-mapping table or invariants in
+`DESIGN_MVP.md` section 7 (and closely related sections 6 and 8) should be
+mirrored here, and substantive changes here should be reflected back in
+`DESIGN_MVP.md`, so contributor copy and the canonical design doc do not drift
+silently.
+
 ## Spec-decode-shaped fields (plugin stack active)
 
 | vLLM field / API | Role when dLLM plugin scheduler + worker are active |
@@ -48,8 +54,10 @@ DllmScheduler -> DllmScheduler: spec_token_ids := next block
 
 `RemaskingPolicy.apply` consumes the current **input block** and model outputs,
 and returns **committed** ids plus a **fixed-length** next input block
-(`RemaskStepResult` in `vllm_dllm_plugin.remasking.base`). Length of
-`next_input_block` must equal **`DRAFT_SIZE`**.
+(`RemaskStepResult` from `vllm_dllm_plugin.remasking`). Length of
+`next_input_block` must equal **`DRAFT_SIZE`**. The dataclass does not enforce
+that at construction; call `validate_remask_step_result()` after `apply`
+returns at the worker/policy boundary (see `DESIGN_MVP.md` section 8).
 
 ## See also
 

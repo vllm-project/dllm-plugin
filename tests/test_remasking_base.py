@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from vllm_dllm_plugin.config import DRAFT_SIZE
-from vllm_dllm_plugin.remasking.base import (
+from vllm_dllm_plugin.remasking import (
     RemaskingPolicy,
     RemaskStepResult,
     validate_remask_step_result,
@@ -37,8 +37,18 @@ class _StubPolicy:
 def test_remasking_policy_structural_subtype() -> None:
     stub = _StubPolicy()
     assert isinstance(stub, RemaskingPolicy)
-    out = stub.apply(input_block=(1, 2) * (DRAFT_SIZE // 2))
+    out = stub.apply(input_block=tuple(range(DRAFT_SIZE)))
     validate_remask_step_result(out)
+
+
+def test_validate_accepts_committed_length_equal_draft_size() -> None:
+    """Upper inclusive bound: len(committed_token_ids) == DRAFT_SIZE is valid."""
+    full_committed = tuple(range(DRAFT_SIZE))
+    ok = RemaskStepResult(
+        committed_token_ids=full_committed,
+        next_input_block=(0,) * DRAFT_SIZE,
+    )
+    validate_remask_step_result(ok)
 
 
 def test_validate_remask_step_result_rejects_wrong_next_block_length() -> None:

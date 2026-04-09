@@ -18,7 +18,12 @@ from vllm_dllm_plugin.config import DRAFT_SIZE
 
 @dataclass(frozen=True, slots=True)
 class RemaskStepResult:
-    """Structured output of a single remasking step."""
+    """Structured output of a single remasking step.
+
+    Length invariants are **not** enforced here; invalid instances are possible
+    until :func:`validate_remask_step_result` runs (call it at the worker or
+    policy boundary after ``apply`` returns, or validate inside concrete policies).
+    """
 
     committed_token_ids: tuple[int, ...]
     """Token ids committed this step; length in ``0..DRAFT_SIZE`` (inclusive).
@@ -37,7 +42,7 @@ class RemaskStepResult:
 
 @runtime_checkable
 class RemaskingPolicy(Protocol):
-    """Composable remasking policy after one block forward (``DESIGN_MVP`` §8).
+    """Composable remasking policy after one block forward (``DESIGN_MVP`` section 8).
 
     **MVP contract (conceptual, section 8):**
 
@@ -63,7 +68,8 @@ class RemaskingPolicy(Protocol):
         Args:
             input_block: This step's **input block** (length typically
                 ``DRAFT_SIZE`` for decode), aligned with
-                ``SchedulerOutput.scheduled_spec_decode_tokens`` (``DESIGN_MVP`` §7).
+                ``SchedulerOutput.scheduled_spec_decode_tokens``
+                (``DESIGN_MVP`` section 7).
             logits: Model output for the block (tensor or equivalent); optional
                 for testing or stub forwards.
             remasking_config: Optional policy parameters (e.g. thresholds).
@@ -79,7 +85,12 @@ class RemaskingPolicy(Protocol):
 
 
 def validate_remask_step_result(result: RemaskStepResult) -> None:
-    """Assert MVP shape constraints; for use by implementations and tests."""
+    """Assert MVP shape constraints using module-level ``DRAFT_SIZE``.
+
+    Compare :data:`~vllm_dllm_plugin.config.DRAFT_SIZE`. For per-model block sizes
+    in the future, this helper would need a length parameter or a different entry
+    point; MVP assumes a single global draft size.
+    """
 
     if len(result.next_input_block) != DRAFT_SIZE:
         msg = (
