@@ -9,6 +9,12 @@ mirrored here, and substantive changes here should be reflected back in
 `DESIGN_MVP.md`, so contributor copy and the canonical design doc do not drift
 silently.
 
+**Upstream vLLM identifiers:** The table below uses vLLM type and member names as
+they appear for the **bounded** optional `vllm` dependency in `pyproject.toml`.
+Those names can change in newer vLLM releases. When raising or widening that
+pin, re-check upstream APIs and update this file and `DESIGN_MVP.md` together
+(see plugin issue #2 for hook / minimum-version tracking).
+
 ## Spec-decode-shaped fields (plugin stack active)
 
 | vLLM field / API | Role when dLLM plugin scheduler + worker are active |
@@ -58,6 +64,20 @@ and returns **committed** ids plus a **fixed-length** next input block
 `next_input_block` must equal **`DRAFT_SIZE`**. The dataclass does not enforce
 that at construction; call `validate_remask_step_result()` after `apply`
 returns at the worker/policy boundary (see `DESIGN_MVP.md` section 8).
+
+**Tuples vs lists:** `RemaskStepResult` fields are `tuple[int, ...]` for
+immutability. Design prose may say `list[int]`; worker code should convert at
+vLLM / engine boundaries when an API expects a mutable list.
+
+**`isinstance` and `RemaskingPolicy`:** With `@runtime_checkable`, `isinstance(x,
+RemaskingPolicy)` only confirms that `apply` exists and is callable. It does not
+prove keyword-only calling conventions, return types, or correct behavior; rely
+on tests and type checkers for that.
+
+**Validator and dynamic block size:** `validate_remask_step_result()` compares
+against `vllm_dllm_plugin.config.DRAFT_SIZE` only. If the stack ever uses a
+per-request block length, this helper must gain an explicit length parameter (or
+a replacement); otherwise it becomes misleading.
 
 ## See also
 

@@ -160,6 +160,8 @@ Mutually exclusive with true speculative decoding on the same requests: operator
 
 **Contributor copy:** The ASCII summary `docs/CONTRACTS.md` tracks this section (and related timing in section 6). Update both places together when field names or semantics change so they do not drift.
 
+**Upstream drift:** vLLM API identifiers above are accurate for the revision range implied by `pyproject.toml` (optional `vllm` extra). They are not continuously validated against vLLM `main`; when the pin moves, reconcile this table and `docs/CONTRACTS.md` (plugin issue #2 tracks minimum-version / hook context).
+
 ---
 
 ## 8. Remasking composability (MVP)
@@ -182,6 +184,10 @@ flowchart TB
 - **Output:** `committed_token_ids: list[int]` (0..N), `next_input_block: list[int]` (length `DRAFT_SIZE`), and internal mask/draft state for logging.
 
 **Shape checks:** `RemaskStepResult` (see `vllm_dllm_plugin.remasking`) does not validate lengths at construction. After `RemaskingPolicy.apply`, the worker or policy boundary should run `validate_remask_step_result()` (same package) or the concrete policy should raise `ValueError` for invalid shapes, consistent with the protocol docstring on `apply`.
+
+**Lists vs tuples:** Conceptual output above uses `list[int]`; the implemented `RemaskStepResult` uses immutable `tuple[int, ...]`. Worker code should convert where vLLM/engine APIs require lists.
+
+**Protocol runtime checks:** `RemaskingPolicy` is `@runtime_checkable`; `isinstance(obj, RemaskingPolicy)` only checks for a callable `apply`, not full signature compliance or return types. Use tests and static typing for the real contract.
 
 **LLaDA2.0 default** implements one concrete policy (e.g. confidence-based commit + remask rest); additional policies can plug in as new `RemaskingPolicy` implementations without changing the worker’s engine contract.
 

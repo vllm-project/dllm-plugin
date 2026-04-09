@@ -54,6 +54,12 @@ class RemaskingPolicy(Protocol):
 
     Implementations must not mutate caller-owned sequences unless documented;
     prefer returning new tuples in :class:`RemaskStepResult`.
+
+    With ``typing.runtime_checkable``, ``isinstance(obj, RemaskingPolicy)`` only
+    checks that ``apply`` exists and is callable; it does **not** verify
+    keyword-only parameters, return types, or behavior. Treat that check as a
+    shallow guard, not a substitute for unit tests or static typing against this
+    contract.
     """
 
     def apply(
@@ -87,9 +93,10 @@ class RemaskingPolicy(Protocol):
 def validate_remask_step_result(result: RemaskStepResult) -> None:
     """Assert MVP shape constraints using module-level ``DRAFT_SIZE``.
 
-    Compare :data:`~vllm_dllm_plugin.config.DRAFT_SIZE`. For per-model block sizes
-    in the future, this helper would need a length parameter or a different entry
-    point; MVP assumes a single global draft size.
+    Compare :data:`~vllm_dllm_plugin.config.DRAFT_SIZE`. For per-model or
+    per-request block sizes, this helper would need an explicit length argument or
+    a different entry point; calling it when the live block size differs from
+    ``config.DRAFT_SIZE`` would be incorrect (MVP assumes one global draft size).
     """
 
     if len(result.next_input_block) != DRAFT_SIZE:

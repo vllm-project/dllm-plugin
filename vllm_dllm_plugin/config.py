@@ -16,7 +16,8 @@ DRAFT_SIZE: Final[int] = 32
 
 #: Primary registered architecture key for the real LLaDA2.0 vLLM model module
 #: (HF mapping). Exact registry string may be refined when ``register()`` lands
-#: (see milestone issue #5).
+#: (see milestone issue #5). Prefer importing this constant instead of
+#: duplicating the string elsewhere until registration is finalized.
 LLADA2_ARCHITECTURE_NAME: Final[str] = "LLaDA2ForCausalLM"
 
 #: Registered model id for the **mock / stub** forward used in Phases 2-6 stack
