@@ -46,7 +46,7 @@ class RemaskingPolicy(Protocol):
 
     **MVP contract (conceptual, section 8):**
 
-    - **Input:** current input block, logits or equivalent scores, optional
+    - **Input:** current input draft, logits or equivalent scores, optional
       policy knobs (threshold, top-k, etc.).
     - **Output:** committed ids (subset of positions), next input block of length
       ``DRAFT_SIZE``, and (in concrete implementations) internal mask/draft
@@ -65,14 +65,14 @@ class RemaskingPolicy(Protocol):
     def apply(
         self,
         *,
-        input_block: Sequence[int],
+        input_draft: Sequence[int],
         logits: Any | None = None,
         remasking_config: Mapping[str, Any] | None = None,
     ) -> RemaskStepResult:
         """Run one remasking step for the current block.
 
         Args:
-            input_block: This step's **input block** (length typically
+            input_draft: This step's **input draft** (length typically
                 ``DRAFT_SIZE`` for decode), aligned with
                 ``SchedulerOutput.scheduled_spec_decode_tokens``
                 (``DESIGN_MVP`` section 7).

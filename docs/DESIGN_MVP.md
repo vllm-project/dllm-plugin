@@ -129,7 +129,7 @@ sequenceDiagram
   DllmSched->>DllmSched: schedule read spec_token_ids
   DllmSched->>DllmSched: set scheduled_spec_decode_tokens num_scheduled_tokens equals DRAFT_SIZE
   Engine->>DllmWork: SchedulerOutput
-  DllmWork->>DllmWork: build batch from input block
+  DllmWork->>DllmWork: build batch from input draft
   DllmWork->>Model: forward one block plus KV context
   Model->>Remask: logits or per-position scores
   Remask->>DllmWork: committed_token_ids zero_to_DRAFT_SIZE
@@ -144,6 +144,8 @@ sequenceDiagram
 
 **Commit-0:** In `update_from_output`, if `sampled_token_ids` is empty for a request, the scheduler rolls back `num_computed_tokens` by the number of tokens scheduled that step (typically `DRAFT_SIZE` in this MVP design).
 
+**dLLM inner denoise:** `Llada2DefaultRemaskingPolicy` intentionally returns **empty** `committed_token_ids` on every step while the output draft still contains the mask token; only when the block is fully unmasked does it return the full `DRAFT_SIZE` tuple and an all-mask `next_input_block` for the next block. That means empty commits are **expected** during in-block refinement. `DllmWorker` (issue #10) must either complete the inner denoise loop **before** emitting one engine step, or the stack defines an explicit exception to commit-0 for this mode so the scheduler does not roll back mid-block.
+
 ---
 
 ## 7. Field mapping (MVP contract)
@@ -151,7 +153,7 @@ sequenceDiagram
 | vLLM field / API | Role when plugin stack is active |
 |------------------|----------------------------------|
 | `Request.spec_token_ids` | **Next-step input block** (length `DRAFT_SIZE`) for the upcoming schedule. |
-| `SchedulerOutput.scheduled_spec_decode_tokens` | **Input block** (length `DRAFT_SIZE`) for this step’s forward. |
+| `SchedulerOutput.scheduled_spec_decode_tokens` | **Input draft** / block (length `DRAFT_SIZE`) for this step’s forward; aligns with `RemaskingPolicy.apply(..., input_draft=...)`. |
 | `SchedulerOutput.num_scheduled_tokens` (per request) | Set to `DRAFT_SIZE` for decode steps using the block path. |
 | `ModelRunnerOutput.sampled_token_ids` | **Committed** token IDs only, length 0..`DRAFT_SIZE` (may be empty). |
 | Worker `take_draft_token_ids()` | Returns **next-step input block** packaged as `DraftTokenIds` for engine → scheduler. |
@@ -181,7 +183,7 @@ flowchart TB
 
 **MVP contract (conceptual):**
 
-- **Input:** Current input block, logits (or equivalent), optional request config (e.g. threshold).
+- **Input:** Current **input draft** (`input_draft` on `RemaskingPolicy.apply`), logits (or equivalent), optional request config (threshold, mask id, denoise step index, etc.).
 - **Output:** `committed_token_ids: list[int]` (0..N), `next_input_block: list[int]` (length `DRAFT_SIZE`), and internal mask/draft state for logging.
 
 **Shape checks:** `RemaskStepResult` (see `vllm_dllm_plugin.remasking`) does not validate lengths at construction. After `RemaskingPolicy.apply`, the worker or policy boundary should run `validate_remask_step_result()` (same package) or the concrete policy should raise `ValueError` for invalid shapes, consistent with the protocol docstring on `apply`.
@@ -190,7 +192,7 @@ flowchart TB
 
 **Protocol runtime checks:** `RemaskingPolicy` is `@runtime_checkable`; `isinstance(obj, RemaskingPolicy)` only checks for a callable `apply`, not full signature compliance or return types. Use tests and static typing for the real contract.
 
-**LLaDA2.0 default** is `vllm_dllm_plugin.remasking.llada2_default.Llada2DefaultRemaskingPolicy` (softmax confidence on the per-position argmax vs threshold, remask with `mask_token_id`; issue #7). Optional `remasking_config` keys and defaults are summarized in `docs/CONTRACTS.md`. Additional policies can plug in as new `RemaskingPolicy` implementations without changing the worker’s engine contract.
+**LLaDA2.0 default** is `vllm_dllm_plugin.remasking.llada2_default.Llada2DefaultRemaskingPolicy` (issue #7): per-position argmax and softmax probability at that token; only **mask** positions join confidence-based transfers; decoded positions are preserved; a **transfer-count schedule** over `denoise_steps` (or a `num_transfer` override) combines **inclusive** thresholding (`confidence >= commit_confidence_threshold`) with a top‑k fallback on masked positions when too few meet the threshold. While the output draft still contains `mask_token_id`, `committed_token_ids` is **empty** and progress is carried in `next_input_block`; when no mask remains, the policy returns the full decoded block as `committed_token_ids` and sets `next_input_block` to an all-mask draft for the following block. Optional `remasking_config` keys and defaults are summarized in `docs/CONTRACTS.md`. Additional policies can plug in as new `RemaskingPolicy` implementations without changing the worker’s engine contract.
 
 ---
 

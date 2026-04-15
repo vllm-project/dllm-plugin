@@ -33,6 +33,12 @@ If no tokens are committed in a step, the plugin scheduler rolls back
 **`DRAFT_SIZE`**). See `DESIGN_MVP.md` section 6 (sequence diagram) and section 1
 (Commit-0 goal).
 
+**dLLM default remasking:** `Llada2DefaultRemaskingPolicy` may return **empty**
+`committed_token_ids` on inner denoise steps while the draft still contains the
+configured mask token. That is **not** a failed step; the worker must not surface
+those inner steps to commit-0 without an explicit contract exception, or it must
+batch the inner loop into one engine step (see `DESIGN_MVP.md` section 6).
+
 ## Mutual exclusion
 
 True speculative decoding on the same requests must **not** be combined with the
@@ -58,7 +64,7 @@ DllmScheduler -> DllmScheduler: spec_token_ids := next block
 
 ## Remasking handoff (section 8)
 
-`RemaskingPolicy.apply` consumes the current **input block** and model outputs,
+`RemaskingPolicy.apply` consumes the current **input draft** (`input_draft`) and model outputs,
 and returns **committed** ids plus a **fixed-length** next input block
 (`RemaskStepResult` from `vllm_dllm_plugin.remasking`). Length of
 `next_input_block` must equal **`DRAFT_SIZE`**. The dataclass does not enforce
@@ -80,8 +86,9 @@ per-request block length, this helper must gain an explicit length parameter (or
 a replacement); otherwise it becomes misleading.
 
 **LLaDA2 default policy (`Llada2DefaultRemaskingPolicy`, issue #7):** optional
-`remasking_config` keys `commit_confidence_threshold` (float) and `mask_token_id`
-(int); defaults in `vllm_dllm_plugin.config`. See module docstring in
+`remasking_config` keys: `commit_confidence_threshold` (float), `mask_token_id`
+(int), `denoise_steps` (int), `denoise_step_index` (int), `num_transfer` (int
+override). Defaults in `vllm_dllm_plugin.config`. See module docstring in
 `vllm_dllm_plugin.remasking.llada2_default`.
 
 ## See also

@@ -23,11 +23,11 @@ class _StubPolicy:
     def apply(
         self,
         *,
-        input_block: list[int] | tuple[int, ...],
+        input_draft: list[int] | tuple[int, ...],
         logits: Any | None = None,
         remasking_config: Mapping[str, Any] | None = None,
     ) -> RemaskStepResult:
-        del input_block, logits, remasking_config
+        del input_draft, logits, remasking_config
         return RemaskStepResult(
             committed_token_ids=(),
             next_input_block=(0,) * DRAFT_SIZE,
@@ -37,7 +37,7 @@ class _StubPolicy:
 def test_remasking_policy_structural_subtype() -> None:
     stub = _StubPolicy()
     assert isinstance(stub, RemaskingPolicy)
-    out = stub.apply(input_block=tuple(range(DRAFT_SIZE)))
+    out = stub.apply(input_draft=tuple(range(DRAFT_SIZE)))
     validate_remask_step_result(out)
 
 

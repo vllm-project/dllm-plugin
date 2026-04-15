@@ -14,9 +14,9 @@ from typing import Final
 #: LLaDA2.0 MVP uses 32 per ``docs/DESIGN_MVP.md`` (Goals table, section 1).
 DRAFT_SIZE: Final[int] = 32
 
-#: Primary registered architecture key for the real LLaDA2.0 vLLM model module
-#: (HF mapping). Until Phase 7 (#12), registration points at the **mock** class
-#: (see ``docs/MOCK_STACK_MODEL.md``); HF configs using this name get stub logits.
+#: Primary registered architecture key for the real LLaDA2.0 vLLM model module.
+#: Until Phase 7 (#12), registration points at the **mock** class
+#: (see ``docs/MOCK_STACK_MODEL.md``); configs using this name get stub logits.
 #: Prefer ``DLLM_MOCK_STACK_MODEL_ID`` when you want an explicit test-only id.
 #: Exact registry string may be refined when ``register()`` lands (issue #5).
 LLADA2_ARCHITECTURE_NAME: Final[str] = "LLaDA2ForCausalLM"
@@ -36,8 +36,13 @@ DLLM_MOCK_MODEL_CLASS_FQCN: Final[str] = (
 DLLM_STRICT_STACK_VALIDATION_DEFAULT: Final[bool] = True
 
 #: Placeholder **mask** token id for :mod:`~vllm_dllm_plugin.remasking.llada2_default`
-#: ``next_input_block`` remasked positions until real HF config lands (Phase 7 / #12).
+#: remasked positions in drafts until model config wiring lands (Phase 7 / #12).
 LLADA2_DEFAULT_MASK_TOKEN_ID: Final[int] = 1
+
+#: Default number of denoise steps used to build the per-step **transfer count**
+#: schedule (``block_len // steps`` layout). Matches ``DRAFT_SIZE`` for one transfer
+#: per step when the schedule is not overridden.
+LLADA2_DEFAULT_DENOISE_STEPS: Final[int] = DRAFT_SIZE
 
 #: Default minimum softmax probability on the per-position argmax token required to
 #: **commit** that position (issue #7). Tuned so the Phase 2 mock stub logits
