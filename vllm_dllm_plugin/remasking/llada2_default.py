@@ -2,6 +2,9 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """MVP default remasking policy for LLaDA2.0 (milestone issue #7).
 
+**Reference (upstream LLaDA2 model code on Hugging Face):**
+https://huggingface.co/inclusionAI/LLaDA2.0-mini/blob/main/modeling_llada2_moe.py
+
 Per-position **argmax** token and **softmax probability** at that token (stable
 softmax). Only **mask** positions participate in confidence-based transfer; decoded
 positions are preserved. Each step uses a **transfer count** from a schedule over
@@ -184,12 +187,16 @@ class Llada2DefaultRemaskingPolicy:
 
         token_ids: list[int] = []
         probs: list[float] = []
+        # Greedy token + prob at argmax per position from this block's logits; same
+        # spirit as upstream LLaDA2 per-position scores (see module docstring URL).
         for row in rows:
             tid, p = _argmax_and_max_softmax_prob(row)
             token_ids.append(tid)
             probs.append(p)
 
         neg_inf = float("-inf")
+        # Only masked draft positions get a real confidence; decoded slots must not
+        # compete in threshold / top-k selection.
         confidence = [probs[i] if masked[i] else neg_inf for i in range(DRAFT_SIZE)]
         high_conf = [
             masked[i] and (confidence[i] > threshold) for i in range(DRAFT_SIZE)
