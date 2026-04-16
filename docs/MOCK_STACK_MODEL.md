@@ -58,6 +58,10 @@ Sizes are hints for tensor shapes; the mock does not implement a real transforme
   `[num_tokens, vocab_size]` with a **non-normalized** stub (zeros plus `1.0` at
   index `0`). Suitable for shape/device/dtype checks and degenerate argmax bias;
   not a proper probability distribution for logprob or diversity assertions.
+  For the MVP **block** path consumed by
+  `vllm_dllm_plugin.remasking.handoff` ([issue #13](https://github.com/vllm-project/dllm-plugin/issues/13)),
+  `num_tokens` must equal **`DRAFT_SIZE`** so each row aligns with one position
+  in this step's `input_draft`.
 
 **Remasking unit tests:** `Llada2DefaultRemaskingPolicy` expects drafts that use
 the configured **mask token id** (see `LLADA2_DEFAULT_MASK_TOKEN_ID` in
@@ -78,3 +82,8 @@ job syncs with `--extra vllm` on Python 3.12 and runs **pytest** (lint already
 ran in the main matrix) so registration and mock import are exercised on PRs. If
 that job fails (e.g. no wheel for the runner), use the **Optional vLLM smoke**
 workflow or `uv sync --group dev --extra vllm` locally.
+
+**PyTorch-dependent tests:** `tests/test_remask_forward_handoff.py` uses
+`pytest.importorskip("torch")` for tensor-shape cases; they **skip** in the
+default matrix (no PyTorch) and **run** in the `vllm-extra` job, which installs
+Torch transitively via the `vllm` extra.

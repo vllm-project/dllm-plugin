@@ -114,6 +114,15 @@ flowchart LR
 - **Registration** mirrors [bart-plugin](https://github.com/vllm-project/bart-plugin): one entry point that registers architecture names → qualified model class strings.
 - **Runtime** uses the same split of responsibilities: scheduler owns request state for `spec_token_ids`; worker maps `scheduled_spec_decode_tokens` to the forward and fills `sampled_token_ids` + draft return path.
 
+### Forward outputs → remasking (issue #13)
+
+**Handoff module:** `vllm_dllm_plugin.remasking.handoff` — `DllmWorker` (issue #10) should call `remask_after_block_forward(..., policy=...)` after last-rank `compute_logits`, passing the request’s `RemaskingPolicy` (e.g. `Llada2DefaultRemaskingPolicy` for the LLaDA2 MVP), before mapping results into `ModelRunnerOutput.sampled_token_ids` and the draft return path (sections 6–7). The handoff does not choose a default policy.
+
+- **Shape:** 2-D logits `(DRAFT_SIZE, vocab_size)` or an equivalent nested sequence (one row per draft position). Row index `i` aligns with `input_draft[i]` for this block.
+- **Pipeline parallel:** only the **last** rank has non-`None` logits; do not run remasking on other ranks (see `docs/MOCK_STACK_MODEL.md` and `vllm_dllm_plugin.models.mock_llada2`).
+- **Dtype / device:** follow the logits tensor produced on the runner device; the default policy converts per-row values to Python `float` internally.
+- **Batched logits:** a leading batch dimension (e.g. `[batch, DRAFT_SIZE, vocab_size]`) is **out of scope** for the MVP helper; the worker may slice per request or add a batch-aware wrapper later.
+
 ---
 
 ## 6. One decode step (sequence)
