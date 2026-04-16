@@ -57,10 +57,6 @@ Scheduler and worker classes are not implemented yet. **`register_dllm()`** alre
 - [docs/ROADMAP.md](docs/ROADMAP.md) — phased future work.
 - [docs/TOOLING.md](docs/TOOLING.md) — accurate tooling summary (pre-commit uses **`uv run`**, DCO/`sh`, run-from-root note, CI) for contributors and PR descriptions.
 
-**Forward → remasking (issue #13):** after a block forward, map last-rank logits plus `input_draft` through [`vllm_dllm_plugin.remasking.handoff`](vllm_dllm_plugin/remasking/handoff.py) (`remask_after_block_forward`). Defaults match the LLaDA2 MVP default policy unless you pass `policy=`.
-
-**CI and PyTorch:** the default [`.github/workflows/ci.yml`](.github/workflows/ci.yml) job uses `uv sync --group dev` only (no vLLM, no PyTorch). Tests that need `torch` use `pytest.importorskip("torch")` and **skip** there. The **`vllm-extra`** job syncs with `--extra vllm`, which pulls in PyTorch, so those tests **run** in that job—see [`docs/MOCK_STACK_MODEL.md`](docs/MOCK_STACK_MODEL.md) (CI section).
-
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE).
