@@ -9,8 +9,10 @@ from vllm_dllm_plugin.remasking.base import (
     RemaskStepResult,
     validate_remask_step_result,
 )
+from vllm_dllm_plugin.remasking.llada2_default import Llada2DefaultRemaskingPolicy
 
 __all__ = [
+    "Llada2DefaultRemaskingPolicy",
     "RemaskStepResult",
     "RemaskingPolicy",
     "validate_remask_step_result",

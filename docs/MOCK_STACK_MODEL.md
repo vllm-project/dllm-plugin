@@ -58,6 +58,12 @@ Sizes are hints for tensor shapes; the mock does not implement a real transforme
   `[num_tokens, vocab_size]` with a **non-normalized** stub (zeros plus `1.0` at
   index `0`). Suitable for shape/device/dtype checks and degenerate argmax bias;
   not a proper probability distribution for logprob or diversity assertions.
+
+**Remasking unit tests:** `Llada2DefaultRemaskingPolicy` expects drafts that use
+the configured **mask token id** (see `LLADA2_DEFAULT_MASK_TOKEN_ID` in
+`vllm_dllm_plugin.config`) for positions still being refined — not arbitrary
+token sequences. Pair stub logits with an all-mask or mixed-mask draft when
+asserting transfer behavior.
 - **Non-last PP stage:** `compute_logits` returns `None` (vLLM convention).
 - **`forward`:** returns hidden states (or `IntermediateTensors` for PP) with
   hidden width `hidden_size`.

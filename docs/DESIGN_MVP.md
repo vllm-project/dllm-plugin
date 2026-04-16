@@ -11,7 +11,7 @@ This document describes the **MVP architecture** for [`vllm-project/dllm-plugin`
 | Goal | Notes |
 |------|--------|
 | **One diffusion step = one worker schedule = one model forward** | Same abstraction as in that discussion; continuous batching stays aligned across requests. |
-| **Block size `DRAFT_SIZE`** | Fixed per model (e.g. 32 for LLaDA2.0); one input block in, variable **Committed** (0..DRAFT_SIZE) + fixed **next-step input block** out. |
+| **Block size `DRAFT_SIZE`** | Fixed per model (e.g. 32 for LLaDA2.0); one ``input_draft`` in, variable **Committed** (0..DRAFT_SIZE) + fixed **next-step** ``next_input_block`` out. |
 | **Reuse spec-decode fields** | No new core tensor types; overload meaning when plugin scheduler + worker are active. |
 | **Custom scheduler + worker + registered model** | Loaded via `--scheduler-cls` / `--worker-cls` and `vllm.general_plugins` model registration. |
 | **Commit-0** | Plugin scheduler rolls back `num_computed_tokens` when no tokens are committed in a step. |
@@ -129,7 +129,7 @@ sequenceDiagram
   DllmSched->>DllmSched: schedule read spec_token_ids
   DllmSched->>DllmSched: set scheduled_spec_decode_tokens num_scheduled_tokens equals DRAFT_SIZE
   Engine->>DllmWork: SchedulerOutput
-  DllmWork->>DllmWork: build batch from input block
+  DllmWork->>DllmWork: build batch from input_draft
   DllmWork->>Model: forward one block plus KV context
   Model->>Remask: logits or per-position scores
   Remask->>DllmWork: committed_token_ids zero_to_DRAFT_SIZE
@@ -144,17 +144,19 @@ sequenceDiagram
 
 **Commit-0:** In `update_from_output`, if `sampled_token_ids` is empty for a request, the scheduler rolls back `num_computed_tokens` by the number of tokens scheduled that step (typically `DRAFT_SIZE` in this MVP design).
 
+**dLLM inner denoise:** `Llada2DefaultRemaskingPolicy` intentionally returns **empty** `committed_token_ids` on every step while the output draft still contains the mask token; only when the block is fully unmasked does it return the full `DRAFT_SIZE` tuple and an all-mask `next_input_block` for the next block. That means empty commits are **expected** during in-block refinement. `DllmWorker` (issue #10) must either complete the inner denoise loop **before** emitting one engine step, or the stack defines an explicit exception to commit-0 for this mode so the scheduler does not roll back mid-block.
+
 ---
 
 ## 7. Field mapping (MVP contract)
 
 | vLLM field / API | Role when plugin stack is active |
 |------------------|----------------------------------|
-| `Request.spec_token_ids` | **Next-step input block** (length `DRAFT_SIZE`) for the upcoming schedule. |
-| `SchedulerOutput.scheduled_spec_decode_tokens` | **Input block** (length `DRAFT_SIZE`) for this step’s forward. |
+| `Request.spec_token_ids` | Next-step ``input_draft`` (length `DRAFT_SIZE`) for the upcoming schedule. |
+| `SchedulerOutput.scheduled_spec_decode_tokens` | This step’s ``input_draft`` (length `DRAFT_SIZE`) for the forward; aligns with `RemaskingPolicy.apply(..., input_draft=...)`. |
 | `SchedulerOutput.num_scheduled_tokens` (per request) | Set to `DRAFT_SIZE` for decode steps using the block path. |
 | `ModelRunnerOutput.sampled_token_ids` | **Committed** token IDs only, length 0..`DRAFT_SIZE` (may be empty). |
-| Worker `take_draft_token_ids()` | Returns **next-step input block** packaged as `DraftTokenIds` for engine → scheduler. |
+| Worker `take_draft_token_ids()` | Returns the next-step ``input_draft`` packaged as `DraftTokenIds` for engine → scheduler. |
 | Scheduler `update_draft_token_ids` / `update_draft_token_ids_in_output` | Store next block into `spec_token_ids`; **must not** apply AR draft grammar to dLLM blocks (override for structured output / async). |
 
 Mutually exclusive with true speculative decoding on the same requests: operators must not enable spec-decode + dLLM plugin stack together for the same run mode.
@@ -174,14 +176,14 @@ flowchart TB
   Forward --> State
   State --> Policy[RemaskingPolicy.apply]
   Policy --> Committed[Committed subset]
-  Policy --> NextInput[Next input block MASK plus decoded]
+  Policy --> NextInput[next_input_block MASK plus decoded]
   Committed --> OutSched[sampled_token_ids]
   NextInput --> OutDraft[DraftTokenIds]
 ```
 
 **MVP contract (conceptual):**
 
-- **Input:** Current input block, logits (or equivalent), optional request config (e.g. threshold).
+- **Input:** ``input_draft`` (length `DRAFT_SIZE`), logits (or equivalent), optional request config (threshold, mask id, denoise step index, etc.).
 - **Output:** `committed_token_ids: list[int]` (0..N), `next_input_block: list[int]` (length `DRAFT_SIZE`), and internal mask/draft state for logging.
 
 **Shape checks:** `RemaskStepResult` (see `vllm_dllm_plugin.remasking`) does not validate lengths at construction. After `RemaskingPolicy.apply`, the worker or policy boundary should run `validate_remask_step_result()` (same package) or the concrete policy should raise `ValueError` for invalid shapes, consistent with the protocol docstring on `apply`.
@@ -190,7 +192,9 @@ flowchart TB
 
 **Protocol runtime checks:** `RemaskingPolicy` is `@runtime_checkable`; `isinstance(obj, RemaskingPolicy)` only checks for a callable `apply`, not full signature compliance or return types. Use tests and static typing for the real contract.
 
-**LLaDA2.0 default** implements one concrete policy (e.g. confidence-based commit + remask rest); additional policies can plug in as new `RemaskingPolicy` implementations without changing the worker’s engine contract.
+**LLaDA2.0 default** is `vllm_dllm_plugin.remasking.llada2_default.Llada2DefaultRemaskingPolicy` (issue #7): per-position argmax and softmax probability at that token; only **mask** positions join confidence-based transfers; decoded positions are preserved; a **transfer-count schedule** over `denoise_steps` (or a `num_transfer` override) combines **strict** thresholding (`confidence > commit_confidence_threshold`) with a top‑k fallback on masked positions when too few exceed the threshold. While the output draft still contains `mask_token_id`, `committed_token_ids` is **empty** and progress is carried in `next_input_block`; when no mask remains, the policy returns the full decoded block as `committed_token_ids` and sets `next_input_block` to an all-mask draft for the following block. Optional `remasking_config` keys and defaults are summarized in `docs/CONTRACTS.md`. Additional policies can plug in as new `RemaskingPolicy` implementations without changing the worker’s engine contract.
+
+**Reference (transfer mechanics):** Mask-gated confidence, per-step transfer counts from `get_num_transfer_tokens`-style layout, strict `confidence > threshold`, and top‑k fallback follow Hugging Face Diffusers [`BlockRefinementScheduler`](https://github.com/huggingface/diffusers/blob/main/src/diffusers/schedulers/scheduling_block_refinement.py) (`get_num_transfer_tokens`, `step`). [`LLaDA2Pipeline`](https://github.com/huggingface/diffusers/blob/main/src/diffusers/pipelines/llada2/pipeline_llada2.py) composes that scheduler for end-to-end block refinement. vLLM-specific **`input_draft`** / Option A semantics remain plugin-layer (§6–7 above).
 
 ---
 
@@ -265,7 +269,7 @@ vllm serve <model> \
   --worker-cls vllm_dllm_plugin.worker:DllmWorker
 ```
 
-FQCNs are placeholders until the MVP classes land. Before the first decode schedule, `request.spec_token_ids` must hold the first input block (`DRAFT_SIZE` tokens); the plugin scheduler or worker initializes it (prompt suffix + mask padding per this MVP design).
+FQCNs are placeholders until the MVP classes land. Before the first decode schedule, `request.spec_token_ids` must hold the first ``input_draft`` (`DRAFT_SIZE` tokens); the plugin scheduler or worker initializes it (prompt suffix + mask padding per this MVP design).
 
 ---
 

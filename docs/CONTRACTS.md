@@ -33,6 +33,12 @@ If no tokens are committed in a step, the plugin scheduler rolls back
 **`DRAFT_SIZE`**). See `DESIGN_MVP.md` section 6 (sequence diagram) and section 1
 (Commit-0 goal).
 
+**dLLM default remasking:** `Llada2DefaultRemaskingPolicy` may return **empty**
+`committed_token_ids` on inner denoise steps while the draft still contains the
+configured mask token. That is **not** a failed step; the worker must not surface
+those inner steps to commit-0 without an explicit contract exception, or it must
+batch the inner loop into one engine step (see `DESIGN_MVP.md` section 6).
+
 ## Mutual exclusion
 
 True speculative decoding on the same requests must **not** be combined with the
@@ -58,7 +64,7 @@ DllmScheduler -> DllmScheduler: spec_token_ids := next block
 
 ## Remasking handoff (section 8)
 
-`RemaskingPolicy.apply` consumes the current **input block** and model outputs,
+`RemaskingPolicy.apply` consumes the current **input draft** (`input_draft`) and model outputs,
 and returns **committed** ids plus a **fixed-length** next input block
 (`RemaskStepResult` from `vllm_dllm_plugin.remasking`). Length of
 `next_input_block` must equal **`DRAFT_SIZE`**. The dataclass does not enforce
@@ -78,6 +84,16 @@ on tests and type checkers for that.
 against `vllm_dllm_plugin.config.DRAFT_SIZE` only. If the stack ever uses a
 per-request block length, this helper must gain an explicit length parameter (or
 a replacement); otherwise it becomes misleading.
+
+**LLaDA2 default policy (`Llada2DefaultRemaskingPolicy`, issue #7):** optional
+`remasking_config` keys: `commit_confidence_threshold` (float; a masked position
+counts as **high-confidence** only when softmax probability at the argmax token
+is **strictly greater** than this value — the same comparator as Hugging Face
+Diffusers [`BlockRefinementScheduler.step`](https://github.com/huggingface/diffusers/blob/main/src/diffusers/schedulers/scheduling_block_refinement.py)),
+`mask_token_id` (int), `denoise_steps` (int), `denoise_step_index` (int),
+`num_transfer` (int override of the per-step transfer budget; **not** in the
+Diffusers API, for tests and tooling). Defaults in `vllm_dllm_plugin.config`. See
+module docstring in `vllm_dllm_plugin.remasking.llada2_default`.
 
 ## See also
 
