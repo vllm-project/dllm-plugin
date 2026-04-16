@@ -4,10 +4,10 @@ Copy-friendly summary of **`docs/DESIGN_MVP.md` section 7** (field mapping) and
 related invariants. Keep this file ASCII-only for terminals and PR review.
 
 **Keeping docs aligned:** Edits to the field-mapping table or invariants in
-`DESIGN_MVP.md` section 7 (and closely related sections 6 and 8) should be
-mirrored here, and substantive changes here should be reflected back in
-`DESIGN_MVP.md`, so contributor copy and the canonical design doc do not drift
-silently.
+`DESIGN_MVP.md` sections 5–8 (especially 6–8 and the forward→remasking note in
+section 5) should be mirrored here, and substantive changes here should be
+reflected back in `DESIGN_MVP.md`, so contributor copy and the canonical design
+doc do not drift silently.
 
 **Upstream vLLM identifiers:** The table below uses vLLM type and member names as
 they appear for the **bounded** optional `vllm` dependency in `pyproject.toml`.
@@ -19,11 +19,11 @@ pin, re-check upstream APIs and update this file and `DESIGN_MVP.md` together
 
 | vLLM field / API | Role when dLLM plugin scheduler + worker are active |
 |------------------|-----------------------------------------------------|
-| `Request.spec_token_ids` | **Next-step input block** for the upcoming schedule. Length **`DRAFT_SIZE`** (see `vllm_dllm_plugin.config.DRAFT_SIZE`). |
-| `SchedulerOutput.scheduled_spec_decode_tokens` | **Input block** for **this** step's forward. Length **`DRAFT_SIZE`**. |
+| `Request.spec_token_ids` | Next-step **`input_draft`** for the upcoming schedule. Length **`DRAFT_SIZE`** (see `vllm_dllm_plugin.config.DRAFT_SIZE`). |
+| `SchedulerOutput.scheduled_spec_decode_tokens` | This step's **`input_draft`** for the forward. Length **`DRAFT_SIZE`**. |
 | `SchedulerOutput.num_scheduled_tokens` (per request) | Set to **`DRAFT_SIZE`** for decode steps on the block path. |
 | `ModelRunnerOutput.sampled_token_ids` | **Committed** token IDs only; length **0..`DRAFT_SIZE`** (may be empty). |
-| Worker `take_draft_token_ids()` | Returns the **next-step input block** as `DraftTokenIds` for engine -> scheduler. |
+| Worker `take_draft_token_ids()` | Returns the next-step **`input_draft`** as `DraftTokenIds` for engine -> scheduler. |
 | Scheduler `update_draft_token_ids` / `update_draft_token_ids_in_output` | Store the next block into `spec_token_ids`. **Must not** apply AR draft grammar to dLLM blocks (scheduler overrides for structured output / async). |
 
 ## Commit-0 rollback
@@ -43,6 +43,23 @@ batch the inner loop into one engine step (see `DESIGN_MVP.md` section 6).
 
 True speculative decoding on the same requests must **not** be combined with the
 dLLM plugin stack (same run mode). See `DESIGN_MVP.md` section 7 (last paragraph).
+
+## Forward to remasking handoff (issue #13)
+
+After last-rank `compute_logits`, the worker maps block logits plus this step's
+`input_draft` into `RemaskStepResult` via
+`vllm_dllm_plugin.remasking.handoff.remask_after_block_forward` (see
+`DESIGN_MVP.md` section 5, forward outputs subsection).
+
+- **Logits shape:** 2-D ``(DRAFT_SIZE, vocab_size)`` (or equivalent nested
+  sequence). Row ``i`` matches ``input_draft[i]``. Non-last PP ranks return
+  ``logits is None``; do not call the handoff there.
+- **Dtype / device:** follow the runner logits tensor; the default policy reads
+  float-like values per row.
+- **Mock path:** deterministic stub outputs for stack tests are defined in
+  issue #24 / ``docs/MOCK_STACK_MODEL.md`` and ``vllm_dllm_plugin.models.mock_llada2``.
+- **Batched 3-D logits** (leading batch axis) are **out of scope** for the MVP
+  helper; issue #10 may slice or wrap.
 
 ## One decode step (ASCII)
 

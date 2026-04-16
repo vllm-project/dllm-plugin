@@ -58,6 +58,10 @@ Sizes are hints for tensor shapes; the mock does not implement a real transforme
   `[num_tokens, vocab_size]` with a **non-normalized** stub (zeros plus `1.0` at
   index `0`). Suitable for shape/device/dtype checks and degenerate argmax bias;
   not a proper probability distribution for logprob or diversity assertions.
+  For the MVP **block** path consumed by
+  `vllm_dllm_plugin.remasking.handoff` ([issue #13](https://github.com/vllm-project/dllm-plugin/issues/13)),
+  `num_tokens` must equal **`DRAFT_SIZE`** so each row aligns with one position
+  in this step's `input_draft`.
 
 **Remasking unit tests:** `Llada2DefaultRemaskingPolicy` expects drafts that use
 the configured **mask token id** (see `LLADA2_DEFAULT_MASK_TOKEN_ID` in

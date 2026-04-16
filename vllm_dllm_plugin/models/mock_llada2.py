@@ -8,7 +8,10 @@ in issue #12 (Phase 7). Requires a working ``vllm`` + ``torch`` install.
 **Outputs:** ``forward`` returns last-hidden-shaped tensors; ``compute_logits``
 returns a **non-normalized** logit vector (zeros plus a 1.0 at index 0)—fine for
 shape / device / dtype / argmax-bias checks, not for tests that assume a proper
-softmax distribution or diverse sampling.
+softmax distribution or diverse sampling. On the last PP rank the logit matrix
+has shape ``(num_tokens, vocab_size)``; for the MVP block handoff (issue #13,
+``vllm_dllm_plugin.remasking.handoff``), ``num_tokens`` must match ``DRAFT_SIZE``.
+Issue #10 should call ``remask_after_block_forward`` after ``compute_logits``.
 
 There is **no** ``make_empty_intermediate_tensors``; PP-shaped executor paths may
 fail before ``forward`` until DllmWorker / model parity work (milestone issue
