@@ -32,19 +32,30 @@ def _mock_logits(*, vocab_size: int = 256) -> list[list[float]]:
     return [_mock_stub_row(vocab_size=vocab_size) for _ in range(DRAFT_SIZE)]
 
 
-def test_remask_rejects_wrong_input_draft_length() -> None:
+@pytest.fixture
+def llada2_policy() -> Llada2DefaultRemaskingPolicy:
+    return Llada2DefaultRemaskingPolicy()
+
+
+def test_remask_rejects_wrong_input_draft_length(
+    llada2_policy: Llada2DefaultRemaskingPolicy,
+) -> None:
     with pytest.raises(ValueError, match="input_draft length"):
         remask_after_block_forward(
             input_draft=(0,) * (DRAFT_SIZE - 1),
             logits=_mock_logits(),
+            policy=llada2_policy,
         )
 
 
-def test_remask_rejects_logits_none() -> None:
+def test_remask_rejects_logits_none(
+    llada2_policy: Llada2DefaultRemaskingPolicy,
+) -> None:
     with pytest.raises(ValueError, match="logits is None"):
         remask_after_block_forward(
             input_draft=_draft_all_mask(),
             logits=None,
+            policy=llada2_policy,
         )
 
 
@@ -59,40 +70,43 @@ def test_assert_block_logits_shape_rejects_none() -> None:
         assert_block_logits_shape(None)
 
 
-def test_mock_shaped_logits_terminal_matches_direct_policy_apply() -> None:
+def test_mock_shaped_logits_terminal_matches_direct_policy_apply(
+    llada2_policy: Llada2DefaultRemaskingPolicy,
+) -> None:
     draft = _draft_all_mask()
     logits = _mock_logits(vocab_size=256)
-    direct = Llada2DefaultRemaskingPolicy().apply(
+    direct = llada2_policy.apply(
         input_draft=draft,
         logits=logits,
     )
-    via = remask_after_block_forward(input_draft=draft, logits=logits)
+    via = remask_after_block_forward(
+        input_draft=draft,
+        logits=logits,
+        policy=llada2_policy,
+    )
     validate_remask_step_result(via)
     assert via == direct
 
 
-def test_custom_policy_passed_through() -> None:
-    policy = Llada2DefaultRemaskingPolicy()
-    draft = _draft_all_mask()
-    logits = _mock_logits()
-    out = remask_after_block_forward(
-        input_draft=draft,
-        logits=logits,
-        policy=policy,
-    )
-    validate_remask_step_result(out)
-    assert out.committed_token_ids == (0,) * DRAFT_SIZE
-
-
-def test_torch_tensor_logits_matches_list_path() -> None:
+def test_torch_tensor_logits_matches_list_path(
+    llada2_policy: Llada2DefaultRemaskingPolicy,
+) -> None:
     torch = pytest.importorskip("torch")
     draft = _draft_all_mask()
     vocab = 256
     logits_t = torch.zeros(DRAFT_SIZE, vocab, dtype=torch.float32)
     logits_t[:, 0] = 1.0
     logits_list = _mock_logits(vocab_size=vocab)
-    out_t = remask_after_block_forward(input_draft=draft, logits=logits_t)
-    out_list = remask_after_block_forward(input_draft=draft, logits=logits_list)
+    out_t = remask_after_block_forward(
+        input_draft=draft,
+        logits=logits_t,
+        policy=llada2_policy,
+    )
+    out_list = remask_after_block_forward(
+        input_draft=draft,
+        logits=logits_list,
+        policy=llada2_policy,
+    )
     assert out_t == out_list
 
 
@@ -103,8 +117,14 @@ def test_assert_block_logits_shape_rejects_wrong_tensor_rank() -> None:
         assert_block_logits_shape(bad)
 
 
-def test_remask_rejects_wrong_tensor_first_dim() -> None:
+def test_remask_rejects_wrong_tensor_first_dim(
+    llada2_policy: Llada2DefaultRemaskingPolicy,
+) -> None:
     torch = pytest.importorskip("torch")
     bad = torch.zeros(DRAFT_SIZE + 1, 128)
     with pytest.raises(ValueError, match="DRAFT_SIZE"):
-        remask_after_block_forward(input_draft=_draft_all_mask(), logits=bad)
+        remask_after_block_forward(
+            input_draft=_draft_all_mask(),
+            logits=bad,
+            policy=llada2_policy,
+        )

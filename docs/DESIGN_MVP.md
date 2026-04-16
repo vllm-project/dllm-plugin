@@ -116,7 +116,7 @@ flowchart LR
 
 ### Forward outputs → remasking (issue #13)
 
-**Handoff module:** `vllm_dllm_plugin.remasking.handoff` — `DllmWorker` (issue #10) should call `remask_after_block_forward` after last-rank `compute_logits`, before mapping results into `ModelRunnerOutput.sampled_token_ids` and the draft return path (sections 6–7).
+**Handoff module:** `vllm_dllm_plugin.remasking.handoff` — `DllmWorker` (issue #10) should call `remask_after_block_forward(..., policy=...)` after last-rank `compute_logits`, passing the request’s `RemaskingPolicy` (e.g. `Llada2DefaultRemaskingPolicy` for the LLaDA2 MVP), before mapping results into `ModelRunnerOutput.sampled_token_ids` and the draft return path (sections 6–7).
 
 - **Shape:** 2-D logits `(DRAFT_SIZE, vocab_size)` or an equivalent nested sequence (one row per draft position). Row index `i` aligns with `input_draft[i]` for this block.
 - **Pipeline parallel:** only the **last** rank has non-`None` logits; do not run remasking on other ranks (see `docs/MOCK_STACK_MODEL.md` and `vllm_dllm_plugin.models.mock_llada2`).

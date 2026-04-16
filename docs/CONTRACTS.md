@@ -48,8 +48,9 @@ dLLM plugin stack (same run mode). See `DESIGN_MVP.md` section 7 (last paragraph
 
 After last-rank `compute_logits`, the worker maps block logits plus this step's
 `input_draft` into `RemaskStepResult` via
-`vllm_dllm_plugin.remasking.handoff.remask_after_block_forward` (see
-`DESIGN_MVP.md` section 5, forward outputs subsection).
+`vllm_dllm_plugin.remasking.handoff.remask_after_block_forward` (must pass an
+explicit `RemaskingPolicy`, e.g. `Llada2DefaultRemaskingPolicy` for the LLaDA2
+MVP; see `DESIGN_MVP.md` section 5, forward outputs subsection).
 
 - **Logits shape:** 2-D ``(DRAFT_SIZE, vocab_size)`` (or equivalent nested
   sequence). Row ``i`` matches ``input_draft[i]``. Non-last PP ranks return

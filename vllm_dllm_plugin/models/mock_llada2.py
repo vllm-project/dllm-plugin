@@ -11,7 +11,8 @@ shape / device / dtype / argmax-bias checks, not for tests that assume a proper
 softmax distribution or diverse sampling. On the last PP rank the logit matrix
 has shape ``(num_tokens, vocab_size)``; for the MVP block handoff (issue #13,
 ``vllm_dllm_plugin.remasking.handoff``), ``num_tokens`` must match ``DRAFT_SIZE``.
-Issue #10 should call ``remask_after_block_forward`` after ``compute_logits``.
+Issue #10 should call ``remask_after_block_forward(..., policy=...)`` after
+``compute_logits``, passing the stack's ``RemaskingPolicy``.
 
 There is **no** ``make_empty_intermediate_tensors``; PP-shaped executor paths may
 fail before ``forward`` until DllmWorker / model parity work (milestone issue
