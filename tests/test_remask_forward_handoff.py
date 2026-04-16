@@ -87,7 +87,7 @@ def test_omit_policy_matches_explicit_llada2_default() -> None:
     assert explicit == defaulted
 
 
-def test_custom_policy_passed_through() -> None:
+def test_explicit_policy_passed_through() -> None:
     policy = Llada2DefaultRemaskingPolicy()
     draft = _draft_all_mask()
     logits = _mock_logits()
