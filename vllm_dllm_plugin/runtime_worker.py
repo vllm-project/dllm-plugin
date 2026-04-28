@@ -4,8 +4,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
+from vllm_dllm_plugin.config import DRAFT_SIZE, LLADA2_DEFAULT_MASK_TOKEN_ID
+from vllm_dllm_plugin.remasking import Llada2DefaultRemaskingPolicy
 from vllm_dllm_plugin.worker import DllmWorker as DllmWorkerHelper
 from vllm_dllm_plugin.worker import DllmWorkerStep
 
@@ -15,9 +17,61 @@ try:
 
     _VLLM_AVAILABLE = True
 except ImportError:  # pragma: no cover - exercised only in no-vLLM envs.
-    VllmGPUWorker = object  # type: ignore[assignment,misc]
-    DraftTokenIds = Any  # type: ignore[assignment]
+    VllmGPUWorker = object
+    DraftTokenIds = Any
     _VLLM_AVAILABLE = False
+
+
+def build_mock_block_logits(
+    *,
+    input_draft: list[int],
+    sampled_token_ids: list[int],
+    draft_size: int = DRAFT_SIZE,
+) -> list[list[float]]:
+    """Create deterministic block logits for remask handoff in mock mode."""
+
+    if len(input_draft) != draft_size:
+        raise ValueError(
+            "input_draft length must equal draft_size for mock logits: "
+            f"got {len(input_draft)} vs {draft_size}",
+        )
+    max_seen = max(
+        [LLADA2_DEFAULT_MASK_TOKEN_ID, *input_draft, *sampled_token_ids],
+    )
+    vocab_size = max(max_seen + 2, 256)
+    rows: list[list[float]] = []
+    for i in range(draft_size):
+        if i < len(sampled_token_ids):
+            target_id = sampled_token_ids[i]
+        else:
+            draft_tok = input_draft[i]
+            target_id = 0 if draft_tok == LLADA2_DEFAULT_MASK_TOKEN_ID else draft_tok
+        row = [0.0] * vocab_size
+        row[int(target_id)] = 1.0
+        rows.append(row)
+    return rows
+
+
+def run_block_contract_from_model_output(
+    *,
+    helper: DllmWorkerHelper,
+    request_id: str,
+    input_draft: list[int],
+    sampled_token_ids: list[int],
+) -> DllmWorkerStep:
+    """Apply one helper-level remask step using mock logits."""
+
+    logits = build_mock_block_logits(
+        input_draft=input_draft,
+        sampled_token_ids=sampled_token_ids,
+        draft_size=helper.draft_size,
+    )
+    return helper.run_one_block(
+        request_id=request_id,
+        input_draft=input_draft,
+        logits=logits,
+        policy=Llada2DefaultRemaskingPolicy(),
+    )
 
 
 class DllmRuntimeWorker(VllmGPUWorker):
@@ -33,9 +87,50 @@ class DllmRuntimeWorker(VllmGPUWorker):
         # Reuse helper to keep one source of truth for v2 requirement and draft
         # block shape validations.
         self._dllm_helper = DllmWorkerHelper(require_v2_model_runner=True)
+        self._dllm_last_draft_token_ids: DraftTokenIds | None = None
+
+    def execute_model(self, scheduler_output: Any) -> Any:
+        output = super().execute_model(scheduler_output)
+        # Only process concrete model outputs from last PP stage.
+        if output is None or not hasattr(output, "sampled_token_ids"):
+            return output
+
+        next_req_ids: list[str] = []
+        next_blocks: list[list[int]] = []
+        for idx, (req_id, sampled_token_ids) in enumerate(
+            zip(output.req_ids, output.sampled_token_ids, strict=True),
+        ):
+            input_draft = scheduler_output.scheduled_spec_decode_tokens.get(req_id)
+            if not input_draft:
+                continue
+            if len(input_draft) != self._dllm_helper.draft_size:
+                continue
+            step = run_block_contract_from_model_output(
+                helper=self._dllm_helper,
+                request_id=req_id,
+                input_draft=list(input_draft),
+                sampled_token_ids=list(sampled_token_ids),
+            )
+            output.sampled_token_ids[idx] = list(step.sampled_token_ids)
+            next_req_ids.append(req_id)
+            next_blocks.append(list(self._dllm_helper.take_draft_token_ids(step)))
+
+        self._dllm_last_draft_token_ids = (
+            cast(Any, DraftTokenIds)(
+                req_ids=next_req_ids,
+                draft_token_ids=next_blocks,
+            )
+            if next_req_ids
+            else None
+        )
+        return output
 
     def take_draft_token_ids(self) -> DraftTokenIds | None:
-        draft_token_ids = super().take_draft_token_ids()
+        draft_token_ids = self._dllm_last_draft_token_ids
+        if draft_token_ids is not None:
+            self._dllm_last_draft_token_ids = None
+        else:
+            draft_token_ids = super().take_draft_token_ids()
         if draft_token_ids is None:
             return None
         for req_id, next_block in zip(
@@ -53,4 +148,8 @@ class DllmRuntimeWorker(VllmGPUWorker):
         return draft_token_ids
 
 
-__all__ = ["DllmRuntimeWorker"]
+__all__ = [
+    "DllmRuntimeWorker",
+    "build_mock_block_logits",
+    "run_block_contract_from_model_output",
+]

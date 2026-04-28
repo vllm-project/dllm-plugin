@@ -8,6 +8,10 @@ import importlib
 
 import pytest
 
+from vllm_dllm_plugin.config import DRAFT_SIZE, LLADA2_DEFAULT_MASK_TOKEN_ID
+from vllm_dllm_plugin.scheduler import DllmScheduler
+from vllm_dllm_plugin.worker import DllmWorker
+
 
 def test_runtime_adapter_fqcn_targets_resolve() -> None:
     mod_sched = importlib.import_module("vllm_dllm_plugin.runtime_scheduler")
@@ -44,3 +48,49 @@ def test_runtime_worker_behavior_depends_on_vllm_availability() -> None:
         from vllm.v1.worker.gpu_worker import Worker
 
         assert issubclass(DllmRuntimeWorker, Worker)
+
+
+class _FakeModelRunnerOutput:
+    def __init__(self, req_ids: list[str], sampled_token_ids: list[list[int]]) -> None:
+        self.req_ids = req_ids
+        self.sampled_token_ids = sampled_token_ids
+
+
+def test_runtime_contract_progress_with_default_policy() -> None:
+    from vllm_dllm_plugin.runtime_scheduler import validate_scheduler_worker_contract
+    from vllm_dllm_plugin.runtime_worker import run_block_contract_from_model_output
+
+    worker_helper = DllmWorker(require_v2_model_runner=False)
+    scheduler_helper = DllmScheduler()
+    input_draft = [LLADA2_DEFAULT_MASK_TOKEN_ID] * DRAFT_SIZE
+
+    step = run_block_contract_from_model_output(
+        helper=worker_helper,
+        request_id="r1",
+        input_draft=input_draft,
+        sampled_token_ids=[],
+    )
+    assert len(step.sampled_token_ids) > 0
+    assert len(step.next_input_block) == DRAFT_SIZE
+
+    fake_out = _FakeModelRunnerOutput(
+        req_ids=["r1"],
+        sampled_token_ids=[list(step.sampled_token_ids)],
+    )
+    validate_scheduler_worker_contract(
+        helper=scheduler_helper,
+        expected_req_ids=("r1",),
+        model_runner_output=fake_out,
+    )
+
+
+def test_runtime_scheduler_contract_rejects_missing_output_coverage() -> None:
+    from vllm_dllm_plugin.runtime_scheduler import validate_scheduler_worker_contract
+
+    fake_out = _FakeModelRunnerOutput(req_ids=["r1"], sampled_token_ids=[[]])
+    with pytest.raises(ValueError, match="missing worker results"):
+        validate_scheduler_worker_contract(
+            helper=DllmScheduler(),
+            expected_req_ids=("r1", "r2"),
+            model_runner_output=fake_out,
+        )

@@ -25,10 +25,40 @@ try:
 
     _VLLM_AVAILABLE = True
 except ImportError:  # pragma: no cover - exercised only in no-vLLM envs.
-    VllmScheduler = object  # type: ignore[assignment,misc]
-    DraftTokenIds = Any  # type: ignore[assignment]
-    ModelRunnerOutput = Any  # type: ignore[assignment]
+    VllmScheduler = object
+    DraftTokenIds = Any
+    ModelRunnerOutput = Any
     _VLLM_AVAILABLE = False
+
+
+def validate_scheduler_worker_contract(
+    *,
+    helper: DllmSchedulerHelper,
+    expected_req_ids: tuple[str, ...],
+    model_runner_output: Any,
+) -> None:
+    """Apply helper-level scheduler output validation to runtime outputs."""
+
+    helper_states = {
+        req_id: DllmRequestState(
+            request_id=req_id,
+            # Use draft_size so helper accounting checks can run.
+            num_computed_tokens=helper.draft_size,
+        )
+        for req_id in expected_req_ids
+    }
+    helper_results = tuple(
+        DllmWorkerResult(
+            request_id=req_id,
+            sampled_token_ids=tuple(sampled_token_ids),
+        )
+        for req_id, sampled_token_ids in zip(
+            model_runner_output.req_ids,
+            model_runner_output.sampled_token_ids,
+            strict=True,
+        )
+    )
+    helper.update_from_output(states=helper_states, worker_results=helper_results)
 
 
 class DllmRuntimeScheduler(VllmScheduler):
@@ -76,29 +106,10 @@ class DllmRuntimeScheduler(VllmScheduler):
     ) -> dict[int, Any]:
         """Validate dLLM scheduler-worker contract before delegating upstream."""
 
-        expected_req_ids = tuple(scheduler_output.num_scheduled_tokens.keys())
-        helper_states = {
-            req_id: DllmRequestState(
-                request_id=req_id,
-                # Use draft_size so helper accounting checks can run.
-                num_computed_tokens=self._dllm_helper.draft_size,
-            )
-            for req_id in expected_req_ids
-        }
-        helper_results = tuple(
-            DllmWorkerResult(
-                request_id=req_id,
-                sampled_token_ids=tuple(sampled_token_ids),
-            )
-            for req_id, sampled_token_ids in zip(
-                model_runner_output.req_ids,
-                model_runner_output.sampled_token_ids,
-                strict=True,
-            )
-        )
-        self._dllm_helper.update_from_output(
-            states=helper_states,
-            worker_results=helper_results,
+        validate_scheduler_worker_contract(
+            helper=self._dllm_helper,
+            expected_req_ids=tuple(scheduler_output.num_scheduled_tokens.keys()),
+            model_runner_output=model_runner_output,
         )
         return super().update_from_output(scheduler_output, model_runner_output)
 
@@ -127,4 +138,4 @@ class DllmRuntimeScheduler(VllmScheduler):
                 )
 
 
-__all__ = ["DllmRuntimeScheduler"]
+__all__ = ["DllmRuntimeScheduler", "validate_scheduler_worker_contract"]
