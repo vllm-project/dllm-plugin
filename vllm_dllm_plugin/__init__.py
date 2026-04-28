@@ -9,6 +9,8 @@ import logging
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
+from vllm_dllm_plugin.runtime_scheduler import DllmRuntimeScheduler
+from vllm_dllm_plugin.runtime_worker import DllmRuntimeWorker
 from vllm_dllm_plugin.scheduler import DllmScheduler
 from vllm_dllm_plugin.worker import DllmWorker
 
@@ -83,6 +85,8 @@ def register_dllm() -> None:
 
 
 __all__ = [
+    "DllmRuntimeScheduler",
+    "DllmRuntimeWorker",
     "DllmScheduler",
     "DllmWorker",
     "__version__",

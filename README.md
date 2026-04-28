@@ -43,11 +43,11 @@ For MVP stack bring-up, enable the plugin by name and point vLLM at the plugin s
 ```bash
 export VLLM_PLUGINS=dllm
 vllm serve <model> \
-  --scheduler-cls vllm_dllm_plugin.scheduler:DllmScheduler \
-  --worker-cls vllm_dllm_plugin.worker:DllmWorker
+  --scheduler-cls vllm_dllm_plugin.runtime_scheduler:DllmRuntimeScheduler \
+  --worker-cls vllm_dllm_plugin.runtime_worker:DllmRuntimeWorker
 ```
 
-`DllmScheduler` and `DllmWorker` are available in the package and are designed around the field contract documented in [docs/CONTRACTS.md](docs/CONTRACTS.md). MVP expects `VLLM_USE_V2_MODEL_RUNNER=1`; grammar-constrained draft rewriting is intentionally rejected for dLLM block mode to avoid silent block-shape corruption. Block size is configured globally via `vllm_dllm_plugin.config.DRAFT_SIZE` (override with `VLLM_DLLM_DRAFT_SIZE` before importing the plugin) so scheduler/worker/remasking share one value. This remains Phase 4 helper-level runtime contract work, not full end-to-end serving integration. `register_dllm()` continues to register the **mock** model architectures when `vllm` imports successfully.
+`DllmRuntimeScheduler` and `DllmRuntimeWorker` are runtime adapter classes intended for CLI overrides. `DllmScheduler` and `DllmWorker` remain helper/contract implementations used by the adapters. MVP expects `VLLM_USE_V2_MODEL_RUNNER=1`; grammar-constrained draft rewriting is intentionally rejected for dLLM block mode to avoid silent block-shape corruption. Block size is configured globally via `vllm_dllm_plugin.config.DRAFT_SIZE` (override with `VLLM_DLLM_DRAFT_SIZE` before importing the plugin) so scheduler/worker/remasking share one value. This completes Phase 4 runtime wiring for mock bring-up, while Phase 6 integration confidence work remains separate. `register_dllm()` continues to register the **mock** model architectures when `vllm` imports successfully.
 
 ## Docs
 

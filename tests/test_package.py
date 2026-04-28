@@ -33,7 +33,17 @@ def test_register_dllm_does_not_raise() -> None:
     vllm_dllm_plugin.register_dllm()
 
 
-@pytest.mark.parametrize("attr", ("register_dllm", "__version__"))
+@pytest.mark.parametrize(
+    "attr",
+    (
+        "register_dllm",
+        "__version__",
+        "DllmScheduler",
+        "DllmWorker",
+        "DllmRuntimeScheduler",
+        "DllmRuntimeWorker",
+    ),
+)
 def test_public_api(attr: str) -> None:
     assert hasattr(vllm_dllm_plugin, attr)
 
