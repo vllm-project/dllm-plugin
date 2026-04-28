@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/vllm-project/dllm-plugin/actions/workflows/ci.yml/badge.svg)](https://github.com/vllm-project/dllm-plugin/actions/workflows/ci.yml)
 
-**vllm-dllm-plugin** is a [vLLM](https://github.com/vllm-project/vllm) plugin for **block-based diffusion language models (dLLMs)**. The package provides a `vllm.general_plugins` entry point (`dllm`), Phase 1 contracts (`config`, `remasking`), and a **mock registered model** for stack testing (Phases 2–6). Scheduler, worker, and production LLaDA2.0 logic are still in progress (see [docs/ROADMAP.md](docs/ROADMAP.md)).
+**vllm-dllm-plugin** is a [vLLM](https://github.com/vllm-project/vllm) plugin for **block-based diffusion language models (dLLMs)**. The package provides a `vllm.general_plugins` entry point (`dllm`), Phase 1 contracts (`config`, `remasking`), a **mock registered model** for stack testing (Phases 2–6), and Phase 4 scheduler/worker helpers that encode block scheduling, commit-0 rollback, draft handoff, and grammar-safety guardrails. Production LLaDA2.0 model logic remains in progress (see [docs/ROADMAP.md](docs/ROADMAP.md)).
 
 **Important:** `register_dllm()` first checks `importlib.util.find_spec("vllm")`; if `vllm` is not discoverable on `sys.path`, it returns without registering. If the spec exists but `from vllm import ModelRegistry` still fails, registration is skipped and a **DEBUG** traceback is logged. When that import succeeds, **`register_dllm()` registers two architecture names** with vLLM’s `ModelRegistry`, both targeting the **mock** in `vllm_dllm_plugin.models.mock_llada2` (not real inference—see [docs/MOCK_STACK_MODEL.md](docs/MOCK_STACK_MODEL.md)). Schedulers and workers are not registered yet.
 
@@ -38,7 +38,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for pre-commit, CI parity, and contributi
 
 ## Using the plugin (future)
 
-Once the MVP stack exists, you will enable the plugin by name and point vLLM at the plugin scheduler and worker classes (FQCNs will match the implemented modules), for example:
+For MVP stack bring-up, enable the plugin by name and point vLLM at the plugin scheduler and worker classes, for example:
 
 ```bash
 export VLLM_PLUGINS=dllm
@@ -47,7 +47,7 @@ vllm serve <model> \
   --worker-cls vllm_dllm_plugin.worker:DllmWorker
 ```
 
-Scheduler and worker classes are not implemented yet. **`register_dllm()`** already registers the **mock** model architectures when `vllm` imports successfully; end-to-end serving still needs the scheduler/worker stack from later milestones.
+`DllmScheduler` and `DllmWorker` are available in the package and are designed around the field contract documented in [docs/CONTRACTS.md](docs/CONTRACTS.md). MVP expects `VLLM_USE_V2_MODEL_RUNNER=1`; grammar-constrained draft rewriting is intentionally rejected for dLLM block mode to avoid silent block-shape corruption. `register_dllm()` continues to register the **mock** model architectures when `vllm` imports successfully.
 
 ## Docs
 
