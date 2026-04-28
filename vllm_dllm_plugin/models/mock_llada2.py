@@ -35,6 +35,8 @@ from vllm.config import VllmConfig
 from vllm.distributed.parallel_state import get_pp_group
 from vllm.sequence import IntermediateTensors
 
+from vllm_dllm_plugin.validation import assert_compatible_stack
+
 try:
     from vllm.model_executor.layers.attention.layer import Attention
 except ImportError:  # pragma: no cover - depends on vLLM minor layout.
@@ -50,6 +52,9 @@ class DllmMockLlada2ForCausalLM(nn.Module):
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = "") -> None:
         super().__init__()
         del prefix
+        assert_compatible_stack(
+            vllm_config, caller="DllmMockLlada2ForCausalLM.__init__"
+        )
         hf = vllm_config.model_config.hf_config
         self.hidden_size = int(getattr(hf, "hidden_size", 32))
         self.vocab_size = int(getattr(hf, "vocab_size", 256))

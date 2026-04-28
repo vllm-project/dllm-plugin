@@ -16,6 +16,8 @@ from vllm_dllm_plugin.validation import assert_compatible_stack
 from vllm_dllm_plugin.worker import DllmWorker as DllmWorkerHelper
 from vllm_dllm_plugin.worker import DllmWorkerStep
 
+_MISSING = object()
+
 try:
     from vllm.v1.outputs import DraftTokenIds
     from vllm.v1.worker.gpu_worker import Worker as VllmGPUWorker
@@ -79,15 +81,28 @@ def _resolve_output_logits_by_req_id(
     model_output: Any,
     request_id: str,
     request_index: int,
-) -> Any | None:
+) -> tuple[Any | None, bool]:
     """Extract per-request block logits from model output when available."""
 
-    raw = getattr(model_output, "dllm_block_logits", None)
-    if raw is None:
-        return None
+    raw = getattr(model_output, "dllm_block_logits", _MISSING)
+    if raw is _MISSING or raw is None:
+        return None, False
     if isinstance(raw, Mapping):
-        return raw.get(request_id)
-    return raw[request_index]
+        raw_mapping = cast(Mapping[str, Any], raw)
+        if request_id not in raw_mapping:
+            raise ValueError(
+                "runtime remask handoff missing request coverage in "
+                "dllm_block_logits mapping: "
+                f"request_id={request_id!r}",
+            )
+        return raw_mapping[request_id], True
+    try:
+        return cast(Any, raw)[request_index], True
+    except (IndexError, KeyError, TypeError) as exc:
+        raise ValueError(
+            "runtime remask handoff cannot resolve logits row payload for "
+            f"request_id={request_id!r} request_index={request_index}",
+        ) from exc
 
 
 def _is_mock_stack_architecture(vllm_config: Any) -> bool:
@@ -111,13 +126,18 @@ def resolve_runtime_block_logits(
 ) -> list[list[float]]:
     """Resolve block logits/scores for runtime remask handoff."""
 
-    raw_logits = _resolve_output_logits_by_req_id(
+    raw_logits, has_logits_payload = _resolve_output_logits_by_req_id(
         model_output=model_output,
         request_id=request_id,
         request_index=request_index,
     )
     if raw_logits is not None:
         return _normalize_block_logits_rows(logits=raw_logits, draft_size=draft_size)
+    if has_logits_payload:
+        raise ValueError(
+            "runtime remask handoff received unusable logits payload for "
+            f"request_id={request_id!r}",
+        )
 
     if _is_mock_stack_architecture(vllm_config):
         hf_config = getattr(

@@ -209,3 +209,25 @@ def test_runtime_worker_requires_logits_for_llada2_architecture() -> None:
             draft_size=4,
             vllm_config=vllm_config,
         )
+
+
+def test_runtime_worker_rejects_missing_mapping_coverage_for_request() -> None:
+    from vllm_dllm_plugin.runtime_worker import resolve_runtime_block_logits
+
+    output = SimpleNamespace(dllm_block_logits={"r2": [[1.0]] * 4})
+    vllm_config = SimpleNamespace(
+        model_config=SimpleNamespace(
+            hf_config=SimpleNamespace(
+                architectures=("DllmMockLlada2StackTest",),
+                vocab_size=32,
+            ),
+        ),
+    )
+    with pytest.raises(ValueError, match="missing request coverage"):
+        resolve_runtime_block_logits(
+            model_output=output,
+            request_id="r1",
+            request_index=0,
+            draft_size=4,
+            vllm_config=vllm_config,
+        )

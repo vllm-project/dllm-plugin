@@ -59,6 +59,10 @@ Expected behavior:
 - GPU hosts: test executes one end-to-end step through vLLM runtime objects with
   plugin scheduler/worker adapters and mock model config.
 
+For PR/release evidence, include GPU job status plus a persisted log query
+(`gcloud logging read ... labels.\"k8s-pod/job-name\"=\"<job-name>\"`) so the
+integration result remains auditable after pod cleanup.
+
 ## Notes
 
 - This guide covers **mock-stack** MVP only (Phases 2-6), not real LLaDA2 weights.
