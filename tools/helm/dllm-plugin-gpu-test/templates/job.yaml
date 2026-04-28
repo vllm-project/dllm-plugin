@@ -1,0 +1,60 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  ttlSecondsAfterFinished: {{ .Values.job.ttlSecondsAfterFinished }}
+  backoffLimit: {{ .Values.job.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Chart.Name }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        jounce.io/nodetype: {{ .Values.gpu.type | quote }}
+        jounce.io/spot: {{ .Values.gpu.spot | quote }}
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+        - key: jounce.io/nodetype
+          operator: Equal
+          value: {{ .Values.gpu.type | quote }}
+          effect: NoSchedule
+      containers:
+        - name: integration
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          resources:
+            limits:
+              nvidia.com/gpu: {{ .Values.gpu.count }}
+            requests:
+              cpu: {{ .Values.resources.cpu | quote }}
+              memory: {{ .Values.resources.memory | quote }}
+              ephemeral-storage: {{ .Values.resources.ephemeralStorage | quote }}
+              nvidia.com/gpu: {{ .Values.gpu.count }}
+          env:
+            - name: VLLM_PLUGINS
+              value: dllm
+            - name: VLLM_USE_V2_MODEL_RUNNER
+              value: "1"
+            - name: VLLM_ENABLE_V1_MULTIPROCESSING
+              value: "0"
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              apt-get update -qq && apt-get install -qq -y git curl
+              curl -LsSf https://astral.sh/uv/install.sh | sh
+              export PATH="$HOME/.local/bin:$PATH"
+
+              git clone --depth=1 --branch {{ .Values.git.branch | quote }} {{ .Values.git.repoUrl | quote }} /app
+              cd /app
+              uv python pin 3.12
+              uv sync --group dev --extra vllm
+              uv run pytest -q tests/test_vllm_mock_integration.py

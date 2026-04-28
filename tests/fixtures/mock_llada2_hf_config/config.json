@@ -1,0 +1,16 @@
+{
+  "architectures": [
+    "DllmMockLlada2StackTest"
+  ],
+  "model_type": "llama",
+  "hidden_size": 32,
+  "intermediate_size": 64,
+  "num_attention_heads": 4,
+  "num_hidden_layers": 1,
+  "num_key_value_heads": 4,
+  "max_position_embeddings": 128,
+  "vocab_size": 256,
+  "bos_token_id": 1,
+  "eos_token_id": 2,
+  "pad_token_id": 0
+}

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: dllm-plugin-gpu-test
+description: Run vllm-dllm-plugin GPU integration tests on GKE.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

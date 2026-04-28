@@ -1,0 +1,22 @@
+job:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 0
+
+image:
+  repository: pytorch/pytorch
+  tag: 2.6.0-cuda12.4-cudnn9-devel
+  pullPolicy: IfNotPresent
+
+git:
+  repoUrl: https://github.com/vllm-project/dllm-plugin.git
+  branch: feat/phase4-runtime-8-9-10
+
+gpu:
+  count: 1
+  type: L4
+  spot: false
+
+resources:
+  cpu: "6"
+  memory: 24Gi
+  ephemeralStorage: 40Gi

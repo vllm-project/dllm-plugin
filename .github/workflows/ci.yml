@@ -44,6 +44,10 @@ jobs:
   # Exercise plugin code paths that require an installable vLLM (see docs/MOCK_STACK_MODEL.md).
   vllm-extra:
     runs-on: ubuntu-latest
+    env:
+      VLLM_PLUGINS: dllm
+      VLLM_USE_V2_MODEL_RUNNER: "1"
+      VLLM_ENABLE_V1_MULTIPROCESSING: "0"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -54,5 +58,7 @@ jobs:
       - name: Sync environment (locked, dev, vllm extra)
         run: uv sync --locked --group dev --extra vllm
       # Lint/types already run in the ``ci`` job; this job only adds vLLM + pytest signal.
-      - name: Tests
+      - name: Tests (vLLM extra)
         run: uv run pytest -q
+      - name: Mock-stack integration test (GPU-gated)
+        run: uv run pytest -q tests/test_vllm_mock_integration.py

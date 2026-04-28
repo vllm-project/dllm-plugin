@@ -18,6 +18,7 @@ from vllm_dllm_plugin.scheduler import (
 from vllm_dllm_plugin.scheduler import (
     DllmScheduler as DllmSchedulerHelper,
 )
+from vllm_dllm_plugin.validation import assert_compatible_stack
 
 try:
     from vllm.v1.core.sched.scheduler import Scheduler as VllmScheduler
@@ -71,6 +72,10 @@ class DllmRuntimeScheduler(VllmScheduler):
                 "`uv sync --group dev --extra vllm`.",
             )
         super().__init__(*args, **kwargs)
+        assert_compatible_stack(
+            self.vllm_config,
+            caller="DllmRuntimeScheduler.__init__",
+        )
         self._dllm_helper = DllmSchedulerHelper()
 
     def add_request(self, request: Any) -> None:

@@ -12,6 +12,7 @@ from pathlib import Path
 from vllm_dllm_plugin.runtime_scheduler import DllmRuntimeScheduler
 from vllm_dllm_plugin.runtime_worker import DllmRuntimeWorker
 from vllm_dllm_plugin.scheduler import DllmScheduler
+from vllm_dllm_plugin.validation import assert_compatible_stack
 from vllm_dllm_plugin.worker import DllmWorker
 
 try:
@@ -89,6 +90,7 @@ __all__ = [
     "DllmRuntimeWorker",
     "DllmScheduler",
     "DllmWorker",
+    "assert_compatible_stack",
     "__version__",
     "register_dllm",
 ]

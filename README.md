@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/vllm-project/dllm-plugin/actions/workflows/ci.yml/badge.svg)](https://github.com/vllm-project/dllm-plugin/actions/workflows/ci.yml)
 
-**vllm-dllm-plugin** is a [vLLM](https://github.com/vllm-project/vllm) plugin for **block-based diffusion language models (dLLMs)**. The package provides a `vllm.general_plugins` entry point (`dllm`), Phase 1 contracts (`config`, `remasking`), a **mock registered model** for stack testing (Phases 2–6), and Phase 4 scheduler/worker helpers that encode block scheduling, commit-0 rollback, draft handoff, and grammar-safety guardrails. Production LLaDA2.0 model logic remains in progress (see [docs/ROADMAP.md](docs/ROADMAP.md)).
+**vllm-dllm-plugin** is a [vLLM](https://github.com/vllm-project/vllm) plugin for **block-based diffusion language models (dLLMs)**. The package provides a `vllm.general_plugins` entry point (`dllm`), Phase 1 contracts (`config`, `remasking`), a **mock registered model** for stack testing (Phases 2–6), runtime scheduler/worker adapters, strict stack validation, and a GPU-gated end-to-end mock-stack integration test for Phase 6 confidence. Production LLaDA2.0 model logic remains in progress (see [docs/ROADMAP.md](docs/ROADMAP.md)).
 
 **Important:** `register_dllm()` first checks `importlib.util.find_spec("vllm")`; if `vllm` is not discoverable on `sys.path`, it returns without registering. If the spec exists but `from vllm import ModelRegistry` still fails, registration is skipped and a **DEBUG** traceback is logged. When that import succeeds, **`register_dllm()` registers two architecture names** with vLLM’s `ModelRegistry`, both targeting the **mock** in `vllm_dllm_plugin.models.mock_llada2` (not real inference—see [docs/MOCK_STACK_MODEL.md](docs/MOCK_STACK_MODEL.md)). Schedulers and workers are not registered yet.
 
@@ -47,7 +47,7 @@ vllm serve <model> \
   --worker-cls vllm_dllm_plugin.runtime_worker:DllmRuntimeWorker
 ```
 
-`DllmRuntimeScheduler` and `DllmRuntimeWorker` are runtime adapter classes intended for CLI overrides. `DllmScheduler` and `DllmWorker` remain helper/contract implementations used by the adapters. MVP expects `VLLM_USE_V2_MODEL_RUNNER=1`; grammar-constrained draft rewriting is intentionally rejected for dLLM block mode to avoid silent block-shape corruption. Block size is configured globally via `vllm_dllm_plugin.config.DRAFT_SIZE` (override with `VLLM_DLLM_DRAFT_SIZE` before importing the plugin) so scheduler/worker/remasking share one value. This completes Phase 4 runtime wiring for mock bring-up, while Phase 6 integration confidence work remains separate. `register_dllm()` continues to register the **mock** model architectures when `vllm` imports successfully.
+`DllmRuntimeScheduler` and `DllmRuntimeWorker` are runtime adapter classes intended for CLI overrides. `DllmScheduler` and `DllmWorker` remain helper/contract implementations used by the adapters. MVP expects `VLLM_USE_V2_MODEL_RUNNER=1`; grammar-constrained draft rewriting is intentionally rejected for dLLM block mode to avoid silent block-shape corruption. Block size is configured globally via `vllm_dllm_plugin.config.DRAFT_SIZE` (override with `VLLM_DLLM_DRAFT_SIZE` before importing the plugin) so scheduler/worker/remasking share one value. Runtime constructors now call strict stack validation (`assert_compatible_stack`) to reject incompatible scheduler/worker/model combinations early. Runtime remask handoff consumes model score rows when available and, for the mock architecture, uses the mock model's deterministic logits contract (`id=0` highest score) instead of sampled-token synthesis. `register_dllm()` continues to register the **mock** model architectures when `vllm` imports successfully.
 
 ## Docs
 
@@ -55,6 +55,7 @@ vllm serve <model> \
 - [docs/MOCK_STACK_MODEL.md](docs/MOCK_STACK_MODEL.md) — mock registered model ids and HF config surface (Phases 2–6).
 - [docs/CONTRACTS.md](docs/CONTRACTS.md) — copy-friendly field mapping / invariants for contributors (see DESIGN_MVP section 7).
 - [docs/ROADMAP.md](docs/ROADMAP.md) — phased future work.
+- [docs/OPERATOR_LLaDA2.md](docs/OPERATOR_LLaDA2.md) — Phase 6 operator runbook (`VLLM_PLUGINS`, CLI flags, v2 runner, integration test).
 - [docs/TOOLING.md](docs/TOOLING.md) — accurate tooling summary (pre-commit uses **`uv run`**, DCO/`sh`, run-from-root note, CI) for contributors and PR descriptions.
 
 ## License

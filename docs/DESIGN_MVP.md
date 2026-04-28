@@ -11,7 +11,7 @@ This document describes the **MVP architecture** for [`vllm-project/dllm-plugin`
 | Goal | Notes |
 |------|--------|
 | **One diffusion step = one worker schedule = one model forward** | Same abstraction as in that discussion; continuous batching stays aligned across requests. |
-| **Block size `DRAFT_SIZE`** | Fixed per model (e.g. 32 for LLaDA2.0); one ``input_draft`` in, variable **Committed** (0..DRAFT_SIZE) + fixed **next-step** ``next_input_block`` out. |
+| **Block size `DRAFT_SIZE`** | Fixed per model (e.g. 32 for LLaDA2.0); one input block in, variable **Committed** (0..DRAFT_SIZE) + fixed **next-step input block** out. |
 | **Reuse spec-decode fields** | No new core tensor types; overload meaning when plugin scheduler + worker are active. |
 | **Custom scheduler + worker + registered model** | Loaded via `--scheduler-cls` / `--worker-cls` and `vllm.general_plugins` model registration. |
 | **Commit-0** | Plugin scheduler rolls back `num_computed_tokens` when no tokens are committed in a step. |
@@ -114,15 +114,6 @@ flowchart LR
 - **Registration** mirrors [bart-plugin](https://github.com/vllm-project/bart-plugin): one entry point that registers architecture names → qualified model class strings.
 - **Runtime** uses the same split of responsibilities: scheduler owns request state for `spec_token_ids`; worker maps `scheduled_spec_decode_tokens` to the forward and fills `sampled_token_ids` + draft return path.
 
-### Forward outputs → remasking (issue #13)
-
-**Handoff module:** `vllm_dllm_plugin.remasking.handoff` — `DllmWorker` (issue #10) should call `remask_after_block_forward(..., policy=...)` after last-rank `compute_logits`, passing the request’s `RemaskingPolicy` (e.g. `Llada2DefaultRemaskingPolicy` for the LLaDA2 MVP), before mapping results into `ModelRunnerOutput.sampled_token_ids` and the draft return path (sections 6–7). The handoff does not choose a default policy.
-
-- **Shape:** 2-D logits `(DRAFT_SIZE, vocab_size)` or an equivalent nested sequence (one row per draft position). Row index `i` aligns with `input_draft[i]` for this block.
-- **Pipeline parallel:** only the **last** rank has non-`None` logits; do not run remasking on other ranks (see `docs/MOCK_STACK_MODEL.md` and `vllm_dllm_plugin.models.mock_llada2`).
-- **Dtype / device:** follow the logits tensor produced on the runner device; the default policy converts per-row values to Python `float` internally.
-- **Batched logits:** a leading batch dimension (e.g. `[batch, DRAFT_SIZE, vocab_size]`) is **out of scope** for the MVP helper; the worker may slice per request or add a batch-aware wrapper later.
-
 ---
 
 ## 6. One decode step (sequence)
@@ -138,7 +129,7 @@ sequenceDiagram
   DllmSched->>DllmSched: schedule read spec_token_ids
   DllmSched->>DllmSched: set scheduled_spec_decode_tokens num_scheduled_tokens equals DRAFT_SIZE
   Engine->>DllmWork: SchedulerOutput
-  DllmWork->>DllmWork: build batch from input_draft
+  DllmWork->>DllmWork: build batch from input block
   DllmWork->>Model: forward one block plus KV context
   Model->>Remask: logits or per-position scores
   Remask->>DllmWork: committed_token_ids zero_to_DRAFT_SIZE
@@ -153,19 +144,17 @@ sequenceDiagram
 
 **Commit-0:** In `update_from_output`, if `sampled_token_ids` is empty for a request, the scheduler rolls back `num_computed_tokens` by the number of tokens scheduled that step (typically `DRAFT_SIZE` in this MVP design).
 
-**dLLM inner denoise:** `Llada2DefaultRemaskingPolicy` intentionally returns **empty** `committed_token_ids` on every step while the output draft still contains the mask token; only when the block is fully unmasked does it return the full `DRAFT_SIZE` tuple and an all-mask `next_input_block` for the next block. That means empty commits are **expected** during in-block refinement. `DllmWorker` (issue #10) must either complete the inner denoise loop **before** emitting one engine step, or the stack defines an explicit exception to commit-0 for this mode so the scheduler does not roll back mid-block.
-
 ---
 
 ## 7. Field mapping (MVP contract)
 
 | vLLM field / API | Role when plugin stack is active |
 |------------------|----------------------------------|
-| `Request.spec_token_ids` | Next-step ``input_draft`` (length `DRAFT_SIZE`) for the upcoming schedule. |
-| `SchedulerOutput.scheduled_spec_decode_tokens` | This step’s ``input_draft`` (length `DRAFT_SIZE`) for the forward; aligns with `RemaskingPolicy.apply(..., input_draft=...)`. |
+| `Request.spec_token_ids` | **Next-step input block** (length `DRAFT_SIZE`) for the upcoming schedule. |
+| `SchedulerOutput.scheduled_spec_decode_tokens` | **Input block** (length `DRAFT_SIZE`) for this step’s forward. |
 | `SchedulerOutput.num_scheduled_tokens` (per request) | Set to `DRAFT_SIZE` for decode steps using the block path. |
 | `ModelRunnerOutput.sampled_token_ids` | **Committed** token IDs only, length 0..`DRAFT_SIZE` (may be empty). |
-| Worker `take_draft_token_ids()` | Returns the next-step ``input_draft`` packaged as `DraftTokenIds` for engine → scheduler. |
+| Worker `take_draft_token_ids()` | Returns **next-step input block** packaged as `DraftTokenIds` for engine → scheduler. |
 | Scheduler `update_draft_token_ids` / `update_draft_token_ids_in_output` | Store next block into `spec_token_ids`; **must not** apply AR draft grammar to dLLM blocks (override for structured output / async). |
 
 Mutually exclusive with true speculative decoding on the same requests: operators must not enable spec-decode + dLLM plugin stack together for the same run mode.
@@ -185,14 +174,14 @@ flowchart TB
   Forward --> State
   State --> Policy[RemaskingPolicy.apply]
   Policy --> Committed[Committed subset]
-  Policy --> NextInput[next_input_block MASK plus decoded]
+  Policy --> NextInput[Next input block MASK plus decoded]
   Committed --> OutSched[sampled_token_ids]
   NextInput --> OutDraft[DraftTokenIds]
 ```
 
 **MVP contract (conceptual):**
 
-- **Input:** ``input_draft`` (length `DRAFT_SIZE`), logits (or equivalent), optional request config (threshold, mask id, denoise step index, etc.).
+- **Input:** Current input block, logits (or equivalent), optional request config (e.g. threshold).
 - **Output:** `committed_token_ids: list[int]` (0..N), `next_input_block: list[int]` (length `DRAFT_SIZE`), and internal mask/draft state for logging.
 
 **Shape checks:** `RemaskStepResult` (see `vllm_dllm_plugin.remasking`) does not validate lengths at construction. After `RemaskingPolicy.apply`, the worker or policy boundary should run `validate_remask_step_result()` (same package) or the concrete policy should raise `ValueError` for invalid shapes, consistent with the protocol docstring on `apply`.
@@ -201,9 +190,7 @@ flowchart TB
 
 **Protocol runtime checks:** `RemaskingPolicy` is `@runtime_checkable`; `isinstance(obj, RemaskingPolicy)` only checks for a callable `apply`, not full signature compliance or return types. Use tests and static typing for the real contract.
 
-**LLaDA2.0 default** is `vllm_dllm_plugin.remasking.llada2_default.Llada2DefaultRemaskingPolicy` (issue #7): per-position argmax and softmax probability at that token; only **mask** positions join confidence-based transfers; decoded positions are preserved; a **transfer-count schedule** over `denoise_steps` (or a `num_transfer` override) combines **strict** thresholding (`confidence > commit_confidence_threshold`) with a top‑k fallback on masked positions when too few exceed the threshold. While the output draft still contains `mask_token_id`, `committed_token_ids` is **empty** and progress is carried in `next_input_block`; when no mask remains, the policy returns the full decoded block as `committed_token_ids` and sets `next_input_block` to an all-mask draft for the following block. Optional `remasking_config` keys and defaults are summarized in `docs/CONTRACTS.md`. Additional policies can plug in as new `RemaskingPolicy` implementations without changing the worker’s engine contract.
-
-**Reference (transfer mechanics):** Mask-gated confidence, per-step transfer counts from `get_num_transfer_tokens`-style layout, strict `confidence > threshold`, and top‑k fallback follow Hugging Face Diffusers [`BlockRefinementScheduler`](https://github.com/huggingface/diffusers/blob/main/src/diffusers/schedulers/scheduling_block_refinement.py) (`get_num_transfer_tokens`, `step`). [`LLaDA2Pipeline`](https://github.com/huggingface/diffusers/blob/main/src/diffusers/pipelines/llada2/pipeline_llada2.py) composes that scheduler for end-to-end block refinement. vLLM-specific **`input_draft`** / Option A semantics remain plugin-layer (§6–7 above).
+**LLaDA2.0 default** implements one concrete policy (e.g. confidence-based commit + remask rest); additional policies can plug in as new `RemaskingPolicy` implementations without changing the worker’s engine contract.
 
 ---
 
@@ -274,11 +261,13 @@ virtual req 0 (q,k over {0,1}):   virtual req 1 (over {2,3}):   virtual req 2 (o
 ```bash
 export VLLM_PLUGINS=dllm
 vllm serve <model> \
-  --scheduler-cls vllm_dllm_plugin.scheduler:DllmScheduler \
-  --worker-cls vllm_dllm_plugin.worker:DllmWorker
+  --scheduler-cls vllm_dllm_plugin.runtime_scheduler:DllmRuntimeScheduler \
+  --worker-cls vllm_dllm_plugin.runtime_worker:DllmRuntimeWorker
 ```
 
-FQCNs are placeholders until the MVP classes land. Before the first decode schedule, `request.spec_token_ids` must hold the first ``input_draft`` (`DRAFT_SIZE` tokens); the plugin scheduler or worker initializes it (prompt suffix + mask padding per this MVP design).
+Current MVP runtime class targets are `vllm_dllm_plugin.runtime_scheduler:DllmRuntimeScheduler` and `vllm_dllm_plugin.runtime_worker:DllmRuntimeWorker`. Helper classes (`vllm_dllm_plugin.scheduler:DllmScheduler`, `vllm_dllm_plugin.worker:DllmWorker`) remain the contract core used by adapters. Before the first decode schedule, `request.spec_token_ids` must hold the first input block (`DRAFT_SIZE` tokens); the plugin scheduler initializes it (prompt suffix + mask padding per this MVP design). Runtime adapter constructors call `vllm_dllm_plugin.validation.assert_compatible_stack(...)` and fail fast on incompatible scheduler/worker/model combinations.
+
+Phase 6 integration confidence includes a concrete runtime integration test (`tests/test_vllm_mock_integration.py`) that instantiates vLLM runtime objects with the plugin adapters and executes one mock-stack generation step (GPU-gated).
 
 ---
 
@@ -289,4 +278,4 @@ FQCNs are placeholders until the MVP classes land. Before the first decode sched
 | Custom scheduler API not stable | Pin max tested vLLM version; integration tests in CI. |
 | Draft hook not in release | Document minimum vLLM from SHA or nightly until released. |
 | Structured output + async queue | Implement scheduler overrides early; defer full PDA post-MVP where possible. |
-| Wrong worker/scheduler pairing | `validation.py` at model load or worker init. |
+| Wrong worker/scheduler pairing | Implemented strict stack check via `validation.py` in runtime adapter init paths. |

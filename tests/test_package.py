@@ -42,6 +42,7 @@ def test_register_dllm_does_not_raise() -> None:
         "DllmWorker",
         "DllmRuntimeScheduler",
         "DllmRuntimeWorker",
+        "assert_compatible_stack",
     ),
 )
 def test_public_api(attr: str) -> None:
