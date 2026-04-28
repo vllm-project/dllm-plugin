@@ -33,8 +33,12 @@ import torch
 import torch.nn as nn
 from vllm.config import VllmConfig
 from vllm.distributed.parallel_state import get_pp_group
-from vllm.model_executor.layers.attention.attention import Attention
 from vllm.sequence import IntermediateTensors
+
+try:
+    from vllm.model_executor.layers.attention.layer import Attention
+except ImportError:  # pragma: no cover - depends on vLLM minor layout.
+    from vllm.attention.layer import Attention
 
 
 class DllmMockLlada2ForCausalLM(nn.Module):
