@@ -123,6 +123,25 @@ class DllmScheduler:
     ) -> None:
         """Apply commit accounting with rejection rollback."""
 
+        state_request_ids = set(states)
+        worker_request_ids = [result.request_id for result in worker_results]
+        unknown_request_ids = sorted(
+            set(worker_request_ids).difference(state_request_ids),
+        )
+        if unknown_request_ids:
+            raise ValueError(
+                "worker result contains unknown request_id values in "
+                "update_from_output(): "
+                f"{unknown_request_ids}",
+            )
+        missing_request_ids = sorted(state_request_ids.difference(worker_request_ids))
+        if missing_request_ids:
+            raise ValueError(
+                "missing worker results for scheduled request_ids in "
+                "update_from_output(): "
+                f"{missing_request_ids}",
+            )
+
         seen_request_ids: set[str] = set()
         for result in worker_results:
             if result.request_id not in states:

@@ -100,6 +100,19 @@ def test_update_from_output_rejects_unknown_request_id() -> None:
         )
 
 
+def test_update_from_output_rejects_missing_worker_result() -> None:
+    sched = DllmScheduler()
+    state1 = DllmRequestState(request_id="r1")
+    state2 = DllmRequestState(request_id="r2")
+    sched.schedule_decode_step(requests=((state1, ()), (state2, ())))
+
+    with pytest.raises(ValueError, match="missing worker results"):
+        sched.update_from_output(
+            states={"r1": state1, "r2": state2},
+            worker_results=(DllmWorkerResult(request_id="r1", sampled_token_ids=(1,)),),
+        )
+
+
 def test_update_from_output_rejects_duplicate_request_ids() -> None:
     sched = DllmScheduler()
     state = DllmRequestState(request_id="r1")
