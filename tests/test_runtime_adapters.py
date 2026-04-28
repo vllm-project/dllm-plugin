@@ -187,3 +187,25 @@ def test_runtime_worker_requires_logits_for_non_mock_architecture() -> None:
             draft_size=4,
             vllm_config=vllm_config,
         )
+
+
+def test_runtime_worker_requires_logits_for_llada2_architecture() -> None:
+    from vllm_dllm_plugin.runtime_worker import resolve_runtime_block_logits
+
+    output = SimpleNamespace(dllm_block_logits=None)
+    vllm_config = SimpleNamespace(
+        model_config=SimpleNamespace(
+            hf_config=SimpleNamespace(
+                architectures=("LLaDA2ForCausalLM",),
+                vocab_size=32,
+            ),
+        ),
+    )
+    with pytest.raises(ValueError, match="requires model score rows"):
+        resolve_runtime_block_logits(
+            model_output=output,
+            request_id="r1",
+            request_index=0,
+            draft_size=4,
+            vllm_config=vllm_config,
+        )

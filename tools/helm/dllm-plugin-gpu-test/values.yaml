@@ -9,7 +9,7 @@ image:
 
 git:
   repoUrl: https://github.com/vllm-project/dllm-plugin.git
-  branch: feat/phase4-runtime-8-9-10
+  branch: main
 
 gpu:
   count: 1

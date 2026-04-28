@@ -10,7 +10,6 @@ from typing import Any, cast
 from vllm_dllm_plugin.config import (
     DLLM_MOCK_STACK_MODEL_ID,
     DRAFT_SIZE,
-    LLADA2_ARCHITECTURE_NAME,
 )
 from vllm_dllm_plugin.remasking import Llada2DefaultRemaskingPolicy
 from vllm_dllm_plugin.validation import assert_compatible_stack
@@ -99,9 +98,7 @@ def _is_mock_stack_architecture(vllm_config: Any) -> bool:
     if isinstance(archs, str):
         archs = (archs,)
     names = {str(item) for item in archs}
-    return bool(
-        names.intersection({DLLM_MOCK_STACK_MODEL_ID, LLADA2_ARCHITECTURE_NAME}),
-    )
+    return DLLM_MOCK_STACK_MODEL_ID in names
 
 
 def resolve_runtime_block_logits(
