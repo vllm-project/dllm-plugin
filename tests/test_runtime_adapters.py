@@ -94,3 +94,45 @@ def test_runtime_scheduler_contract_rejects_missing_output_coverage() -> None:
             expected_req_ids=("r1", "r2"),
             model_runner_output=fake_out,
         )
+
+
+def test_runtime_worker_contract_rejects_missing_input_draft() -> None:
+    from vllm_dllm_plugin.runtime_worker import validate_runtime_input_draft
+
+    with pytest.raises(ValueError, match="missing scheduled_spec_decode_tokens"):
+        validate_runtime_input_draft(
+            request_id="r1",
+            input_draft=None,
+            draft_size=DRAFT_SIZE,
+        )
+
+
+def test_runtime_worker_contract_rejects_malformed_input_draft_length() -> None:
+    from vllm_dllm_plugin.runtime_worker import validate_runtime_input_draft
+
+    with pytest.raises(ValueError, match="malformed scheduled_spec_decode_tokens"):
+        validate_runtime_input_draft(
+            request_id="r1",
+            input_draft=[1, 2, 3],
+            draft_size=DRAFT_SIZE,
+        )
+
+
+def test_runtime_worker_contract_rejects_missing_draft_handoff_coverage() -> None:
+    from vllm_dllm_plugin.runtime_worker import validate_runtime_draft_handoff_coverage
+
+    with pytest.raises(ValueError, match="missing request_id"):
+        validate_runtime_draft_handoff_coverage(
+            expected_req_ids={"r1", "r2"},
+            produced_req_ids=["r1"],
+        )
+
+
+def test_runtime_worker_contract_rejects_duplicate_draft_handoff_coverage() -> None:
+    from vllm_dllm_plugin.runtime_worker import validate_runtime_draft_handoff_coverage
+
+    with pytest.raises(ValueError, match="duplicate request_id"):
+        validate_runtime_draft_handoff_coverage(
+            expected_req_ids={"r1"},
+            produced_req_ids=["r1", "r1"],
+        )
