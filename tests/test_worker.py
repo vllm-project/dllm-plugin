@@ -4,10 +4,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+from typing import Any
+
 import pytest
 
 from vllm_dllm_plugin.config import DRAFT_SIZE, LLADA2_DEFAULT_MASK_TOKEN_ID
-from vllm_dllm_plugin.remasking import Llada2DefaultRemaskingPolicy
+from vllm_dllm_plugin.remasking import Llada2DefaultRemaskingPolicy, RemaskStepResult
 from vllm_dllm_plugin.worker import (
     DllmWorker,
     is_v2_model_runner_enabled,
@@ -25,6 +28,25 @@ def _mock_logits(*, vocab_size: int = 128) -> list[list[float]]:
         row[0] = 1.0
         rows.append(row)
     return rows
+
+
+class _BadBlockPolicy:
+    """Returns an invalid next block length for contract-boundary testing."""
+
+    __test__ = False
+
+    def apply(
+        self,
+        *,
+        input_draft: Sequence[int],
+        logits: Any | None = None,
+        remasking_config: Mapping[str, Any] | None = None,
+    ) -> RemaskStepResult:
+        del input_draft, logits, remasking_config
+        return RemaskStepResult(
+            committed_token_ids=(),
+            next_input_block=(LLADA2_DEFAULT_MASK_TOKEN_ID,),
+        )
 
 
 def test_v2_model_runner_flag_detection(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -66,3 +88,18 @@ def test_worker_one_block_flow_maps_to_scheduler_contract(
     sched_result = worker.as_scheduler_result(step)
     assert sched_result.request_id == "r1"
     assert sched_result.sampled_token_ids == step.sampled_token_ids
+
+
+def test_worker_rejects_malformed_policy_next_input_block(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", "1")
+    worker = DllmWorker(require_v2_model_runner=True)
+
+    with pytest.raises(ValueError, match="next_input_block"):
+        worker.run_one_block(
+            request_id="r1",
+            input_draft=_draft_all_mask(),
+            logits=_mock_logits(),
+            policy=_BadBlockPolicy(),
+        )

@@ -13,6 +13,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from vllm_dllm_plugin.config import DRAFT_SIZE
 from vllm_dllm_plugin.remasking import RemaskingPolicy, remask_after_block_forward
 from vllm_dllm_plugin.scheduler import DllmWorkerResult
 
@@ -37,6 +38,7 @@ class DllmWorker:
     """Thin worker façade aligned with issue #10's one-block contract."""
 
     def __init__(self, *, require_v2_model_runner: bool = True) -> None:
+        self.draft_size = DRAFT_SIZE
         self.require_v2_model_runner = require_v2_model_runner
         self.v2_model_runner_enabled = is_v2_model_runner_enabled()
         if self.require_v2_model_runner and not self.v2_model_runner_enabled:
@@ -60,6 +62,7 @@ class DllmWorker:
             logits=logits,
             policy=policy,
             remasking_config=remasking_config,
+            draft_size=self.draft_size,
         )
         return DllmWorkerStep(
             request_id=request_id,
@@ -70,6 +73,11 @@ class DllmWorker:
     def take_draft_token_ids(self, step: DllmWorkerStep) -> tuple[int, ...]:
         """Return the next draft block for scheduler ``update_draft_token_ids``."""
 
+        if len(step.next_input_block) != self.draft_size:
+            raise ValueError(
+                "next_input_block length mismatch in take_draft_token_ids: "
+                f"expected {self.draft_size}, got {len(step.next_input_block)}",
+            )
         return step.next_input_block
 
     def as_scheduler_result(self, step: DllmWorkerStep) -> DllmWorkerResult:

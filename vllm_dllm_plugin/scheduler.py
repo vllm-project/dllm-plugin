@@ -57,15 +57,8 @@ class DllmWorkerResult:
 class DllmScheduler:
     """Scheduler helper implementing issue #8 + issue #9 behavior."""
 
-    def __init__(
-        self,
-        *,
-        draft_size: int = DRAFT_SIZE,
-        mask_token_id: int = LLADA2_DEFAULT_MASK_TOKEN_ID,
-    ) -> None:
-        if draft_size <= 0:
-            raise ValueError("draft_size must be positive")
-        self.draft_size = int(draft_size)
+    def __init__(self, *, mask_token_id: int = LLADA2_DEFAULT_MASK_TOKEN_ID) -> None:
+        self.draft_size = DRAFT_SIZE
         self.mask_token_id = int(mask_token_id)
 
     def initialize_first_block(
@@ -130,8 +123,21 @@ class DllmScheduler:
         """Apply commit accounting with commit-0 rollback."""
 
         for result in worker_results:
+            if result.request_id not in states:
+                raise ValueError(
+                    "worker result contains unknown request_id "
+                    f"{result.request_id!r}; ensure scheduler and worker outputs "
+                    "are synchronized before update_from_output()",
+                )
             state = states[result.request_id]
             committed = len(result.sampled_token_ids)
+            if committed > self.draft_size:
+                raise ValueError(
+                    "sampled_token_ids length exceeds draft_size in "
+                    "update_from_output: "
+                    f"request_id={result.request_id!r} committed={committed} "
+                    f"draft_size={self.draft_size}",
+                )
             if committed == 0:
                 # Commit-0 rollback: this step contributed no finalized tokens.
                 state.num_computed_tokens -= self.draft_size

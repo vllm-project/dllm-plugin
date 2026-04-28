@@ -47,7 +47,7 @@ vllm serve <model> \
   --worker-cls vllm_dllm_plugin.worker:DllmWorker
 ```
 
-`DllmScheduler` and `DllmWorker` are available in the package and are designed around the field contract documented in [docs/CONTRACTS.md](docs/CONTRACTS.md). MVP expects `VLLM_USE_V2_MODEL_RUNNER=1`; grammar-constrained draft rewriting is intentionally rejected for dLLM block mode to avoid silent block-shape corruption. `register_dllm()` continues to register the **mock** model architectures when `vllm` imports successfully.
+`DllmScheduler` and `DllmWorker` are available in the package and are designed around the field contract documented in [docs/CONTRACTS.md](docs/CONTRACTS.md). MVP expects `VLLM_USE_V2_MODEL_RUNNER=1`; grammar-constrained draft rewriting is intentionally rejected for dLLM block mode to avoid silent block-shape corruption. Block size is configured globally via `vllm_dllm_plugin.config.DRAFT_SIZE` (override with `VLLM_DLLM_DRAFT_SIZE` before importing the plugin) so scheduler/worker/remasking share one value. This remains Phase 4 helper-level runtime contract work, not full end-to-end serving integration. `register_dllm()` continues to register the **mock** model architectures when `vllm` imports successfully.
 
 ## Docs
 

@@ -8,11 +8,32 @@ remasking, and tests share one source of truth (see ``docs/DESIGN_MVP.md``).
 
 from __future__ import annotations
 
+import os
 from typing import Final
 
+#: Environment variable controlling global dLLM block size for the plugin stack.
+DLLM_DRAFT_SIZE_ENV_VAR: Final[str] = "VLLM_DLLM_DRAFT_SIZE"
+
+
+def _read_draft_size() -> int:
+    raw = os.environ.get(DLLM_DRAFT_SIZE_ENV_VAR)
+    if raw is None:
+        return 32
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(
+            f"{DLLM_DRAFT_SIZE_ENV_VAR} must be an integer, got {raw!r}",
+        ) from exc
+    if value <= 0:
+        raise ValueError(f"{DLLM_DRAFT_SIZE_ENV_VAR} must be positive, got {value}")
+    return value
+
+
 #: Fixed diffusion / spec-decode **block size** for one plugin step (tokens).
-#: LLaDA2.0 MVP uses 32 per ``docs/DESIGN_MVP.md`` (Goals table, section 1).
-DRAFT_SIZE: Final[int] = 32
+#: Defaults to 32 for LLaDA2.0 MVP and can be overridden via
+#: ``VLLM_DLLM_DRAFT_SIZE`` so scheduler/worker/remasking share one value.
+DRAFT_SIZE: Final[int] = _read_draft_size()
 
 #: Primary registered architecture key for the real LLaDA2.0 vLLM model module
 #: (HF mapping). Until Phase 7 (#12), registration points at the **mock** class
@@ -40,8 +61,8 @@ DLLM_STRICT_STACK_VALIDATION_DEFAULT: Final[bool] = True
 LLADA2_DEFAULT_MASK_TOKEN_ID: Final[int] = 1
 
 #: Default number of denoise steps used to build the per-step **transfer count**
-#: schedule (``block_len // steps`` layout). Matches ``DRAFT_SIZE`` for one transfer
-#: per step when the schedule is not overridden.
+#: schedule (``block_len // steps`` layout). Matches configured ``DRAFT_SIZE`` for
+#: one transfer per step when the schedule is not overridden.
 LLADA2_DEFAULT_DENOISE_STEPS: Final[int] = DRAFT_SIZE
 
 #: Default minimum softmax probability on the per-position argmax token required to

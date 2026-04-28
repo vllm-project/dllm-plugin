@@ -30,10 +30,10 @@ from vllm_dllm_plugin.remasking.base import (
 )
 
 
-def assert_block_logits_shape(logits: Any) -> None:
-    """Require 2-D block logits with first dimension ``DRAFT_SIZE``.
+def assert_block_logits_shape(logits: Any, *, draft_size: int = DRAFT_SIZE) -> None:
+    """Require 2-D block logits with first dimension ``draft_size``.
 
-    Accepts ``torch.Tensor`` (via ``shape``) or a length-``DRAFT_SIZE`` sequence
+    Accepts ``torch.Tensor`` (via ``shape``) or a length-``draft_size`` sequence
     of per-position rows without importing ``torch``.
 
     For nested sequences, only the **outer** length is checked here; consistent
@@ -54,13 +54,13 @@ def assert_block_logits_shape(logits: Any) -> None:
             )
             raise ValueError(msg)
         n0 = int(shape[0])
-        if n0 != DRAFT_SIZE:
-            msg = f"logits first dimension must be DRAFT_SIZE={DRAFT_SIZE}, got {n0}"
+        if n0 != draft_size:
+            msg = f"logits first dimension must be draft_size={draft_size}, got {n0}"
             raise ValueError(msg)
         return
     n_pos = len(logits)
-    if n_pos != DRAFT_SIZE:
-        msg = f"logits first dimension must be DRAFT_SIZE={DRAFT_SIZE}, got {n_pos}"
+    if n_pos != draft_size:
+        msg = f"logits first dimension must be draft_size={draft_size}, got {n_pos}"
         raise ValueError(msg)
 
 
@@ -70,6 +70,7 @@ def remask_after_block_forward(
     logits: Any,
     policy: RemaskingPolicy,
     remasking_config: Mapping[str, Any] | None = None,
+    draft_size: int = DRAFT_SIZE,
 ) -> RemaskStepResult:
     """Run one remasking step after a single-block forward (milestone issue #13).
 
@@ -80,9 +81,9 @@ def remask_after_block_forward(
     (``docs/DESIGN_MVP.md`` §6–7).
 
     Args:
-        input_draft: This step's draft, length ``DRAFT_SIZE`` (aligned with
+        input_draft: This step's draft, length ``draft_size`` (aligned with
             ``scheduled_spec_decode_tokens``).
-        logits: Non-``None`` block logits, 2-D ``(DRAFT_SIZE, vocab_size)``.
+        logits: Non-``None`` block logits, 2-D ``(draft_size, vocab_size)``.
         policy: Concrete :class:`~vllm_dllm_plugin.remasking.RemaskingPolicy`
             (e.g. :class:`~vllm_dllm_plugin.remasking.Llada2DefaultRemaskingPolicy`
             for the LLaDA2 MVP). Callers must supply this; there is no default
@@ -96,9 +97,11 @@ def remask_after_block_forward(
         ValueError: If ``input_draft`` length is wrong, ``logits`` is ``None``,
             or logits fail :func:`assert_block_logits_shape`.
     """
-    if len(input_draft) != DRAFT_SIZE:
+    if draft_size <= 0:
+        raise ValueError(f"draft_size must be positive, got {draft_size}")
+    if len(input_draft) != draft_size:
         msg = (
-            f"input_draft length must be DRAFT_SIZE={DRAFT_SIZE}, "
+            f"input_draft length must be draft_size={draft_size}, "
             f"got {len(input_draft)}"
         )
         raise ValueError(msg)
@@ -108,13 +111,13 @@ def remask_after_block_forward(
             "rank where compute_logits returns a tensor (see docs/MOCK_STACK_MODEL.md)."
         )
         raise ValueError(msg)
-    assert_block_logits_shape(logits)
+    assert_block_logits_shape(logits, draft_size=draft_size)
     result = policy.apply(
         input_draft=input_draft,
         logits=logits,
         remasking_config=remasking_config,
     )
-    validate_remask_step_result(result)
+    validate_remask_step_result(result, draft_size=draft_size)
     return result
 
 

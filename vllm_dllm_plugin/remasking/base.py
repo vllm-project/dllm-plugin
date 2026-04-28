@@ -4,7 +4,7 @@
 
 Invariants align with ``docs/DESIGN_MVP.md`` section 8 (remasking composability)
 and use :data:`~vllm_dllm_plugin.config.DRAFT_SIZE` for next-block length.
-Concrete policies live in separate modules (e.g. ``llada2_default`` for LLaDA2.0).
+Concrete policies (e.g. LLaDA2.0 default) live in separate modules (issue #7).
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ class RemaskingPolicy(Protocol):
 
     **MVP contract (conceptual, section 8):**
 
-    - **Input:** current input draft, logits or equivalent scores, optional
+    - **Input:** current input block, logits or equivalent scores, optional
       policy knobs (threshold, top-k, etc.).
     - **Output:** committed ids (subset of positions), next input block of length
       ``DRAFT_SIZE``, and (in concrete implementations) internal mask/draft
@@ -72,7 +72,7 @@ class RemaskingPolicy(Protocol):
         """Run one remasking step for the current block.
 
         Args:
-            input_draft: This step's **input draft** (length typically
+            input_draft: This step's **input block** (length typically
                 ``DRAFT_SIZE`` for decode), aligned with
                 ``SchedulerOutput.scheduled_spec_decode_tokens``
                 (``DESIGN_MVP`` section 7).
@@ -90,8 +90,12 @@ class RemaskingPolicy(Protocol):
         ...
 
 
-def validate_remask_step_result(result: RemaskStepResult) -> None:
-    """Assert MVP shape constraints using module-level ``DRAFT_SIZE``.
+def validate_remask_step_result(
+    result: RemaskStepResult,
+    *,
+    draft_size: int = DRAFT_SIZE,
+) -> None:
+    """Assert MVP shape constraints against ``draft_size``.
 
     Compare :data:`~vllm_dllm_plugin.config.DRAFT_SIZE`. For per-model or
     per-request block sizes, this helper would need an explicit length argument or
@@ -99,15 +103,17 @@ def validate_remask_step_result(result: RemaskStepResult) -> None:
     ``config.DRAFT_SIZE`` would be incorrect (MVP assumes one global draft size).
     """
 
-    if len(result.next_input_block) != DRAFT_SIZE:
+    if draft_size <= 0:
+        raise ValueError(f"draft_size must be positive, got {draft_size}")
+    if len(result.next_input_block) != draft_size:
         msg = (
-            f"next_input_block must have length DRAFT_SIZE={DRAFT_SIZE}, "
+            f"next_input_block must have length draft_size={draft_size}, "
             f"got {len(result.next_input_block)}"
         )
         raise ValueError(msg)
-    if not 0 <= len(result.committed_token_ids) <= DRAFT_SIZE:
+    if not 0 <= len(result.committed_token_ids) <= draft_size:
         msg = (
             "committed_token_ids length must be in "
-            f"0..DRAFT_SIZE (inclusive), got {len(result.committed_token_ids)}"
+            f"0..draft_size (inclusive), got {len(result.committed_token_ids)}"
         )
         raise ValueError(msg)

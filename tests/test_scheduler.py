@@ -63,6 +63,20 @@ def test_update_from_output_keeps_count_when_tokens_committed() -> None:
     assert state.num_computed_tokens == DRAFT_SIZE
 
 
+def test_update_from_output_rejects_unknown_request_id() -> None:
+    sched = DllmScheduler()
+    state = DllmRequestState(request_id="known")
+    sched.schedule_decode_step(requests=((state, ()),))
+
+    with pytest.raises(ValueError, match="unknown request_id"):
+        sched.update_from_output(
+            states={"known": state},
+            worker_results=(
+                DllmWorkerResult(request_id="other", sampled_token_ids=()),
+            ),
+        )
+
+
 def test_update_draft_token_ids_rejects_grammar_constrained_path() -> None:
     sched = DllmScheduler()
     state = DllmRequestState(request_id="r1")

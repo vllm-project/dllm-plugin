@@ -87,7 +87,7 @@ def test_remask_rejects_logits_none(
 
 def test_assert_block_logits_shape_rejects_wrong_len_sequence() -> None:
     short = [_mock_stub_row() for _ in range(DRAFT_SIZE - 1)]
-    with pytest.raises(ValueError, match="DRAFT_SIZE"):
+    with pytest.raises(ValueError, match="draft_size"):
         assert_block_logits_shape(short)
 
 
@@ -179,7 +179,7 @@ def test_remask_rejects_wrong_tensor_first_dim(
 ) -> None:
     torch = pytest.importorskip("torch")
     bad = torch.zeros(DRAFT_SIZE + 1, 128)
-    with pytest.raises(ValueError, match="DRAFT_SIZE"):
+    with pytest.raises(ValueError, match="draft_size"):
         remask_after_block_forward(
             input_draft=_draft_all_mask(),
             logits=bad,
