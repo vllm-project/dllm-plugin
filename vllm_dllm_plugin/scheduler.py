@@ -8,7 +8,8 @@ This module models the scheduler-side contract in ``docs/DESIGN_MVP.md`` and
 Key invariants:
 - ``spec_token_ids`` holds the next-step input block (length ``DRAFT_SIZE``).
 - One decode schedule emits exactly ``DRAFT_SIZE`` draft tokens per request.
-- Commit-0 rollback subtracts scheduled tokens when a step commits no tokens.
+- Post-step accounting subtracts rejected positions so ``num_computed_tokens``
+  tracks committed progress (including full commit-0 rollback).
 - Grammar-constrained draft rewriting is explicitly unsupported for dLLM blocks
   in this MVP path; callers get a hard error instead of silent corruption.
 """
@@ -120,8 +121,9 @@ class DllmScheduler:
         states: dict[str, DllmRequestState],
         worker_results: Sequence[DllmWorkerResult],
     ) -> None:
-        """Apply commit accounting with commit-0 rollback."""
+        """Apply commit accounting with rejection rollback."""
 
+        seen_request_ids: set[str] = set()
         for result in worker_results:
             if result.request_id not in states:
                 raise ValueError(
@@ -129,6 +131,12 @@ class DllmScheduler:
                     f"{result.request_id!r}; ensure scheduler and worker outputs "
                     "are synchronized before update_from_output()",
                 )
+            if result.request_id in seen_request_ids:
+                raise ValueError(
+                    "duplicate request_id in worker results for one scheduler step: "
+                    f"{result.request_id!r}",
+                )
+            seen_request_ids.add(result.request_id)
             state = states[result.request_id]
             committed = len(result.sampled_token_ids)
             if committed > self.draft_size:
@@ -138,9 +146,10 @@ class DllmScheduler:
                     f"request_id={result.request_id!r} committed={committed} "
                     f"draft_size={self.draft_size}",
                 )
-            if committed == 0:
-                # Commit-0 rollback: this step contributed no finalized tokens.
-                state.num_computed_tokens -= self.draft_size
+            # Roll back rejected positions; when committed == 0 this is a full
+            # commit-0 rollback, and when committed > 0 this keeps accounting
+            # aligned with effective committed progress.
+            state.num_computed_tokens -= self.draft_size - committed
             if state.num_computed_tokens < 0:
                 state.num_computed_tokens = 0
 

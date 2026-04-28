@@ -50,7 +50,7 @@ def test_update_from_output_rolls_back_on_empty_commit() -> None:
     assert state.num_computed_tokens == 0
 
 
-def test_update_from_output_keeps_count_when_tokens_committed() -> None:
+def test_update_from_output_counts_only_committed_tokens() -> None:
     sched = DllmScheduler()
     state = DllmRequestState(request_id="r1")
     sched.schedule_decode_step(requests=((state, ()),))
@@ -60,7 +60,30 @@ def test_update_from_output_keeps_count_when_tokens_committed() -> None:
         states={"r1": state},
         worker_results=(DllmWorkerResult(request_id="r1", sampled_token_ids=(1,)),),
     )
-    assert state.num_computed_tokens == DRAFT_SIZE
+    assert state.num_computed_tokens == 1
+
+
+def test_update_from_output_multi_step_partial_commits_accumulate_correctly() -> None:
+    sched = DllmScheduler()
+    state = DllmRequestState(request_id="r1")
+
+    sched.schedule_decode_step(requests=((state, ()),))
+    sched.update_from_output(
+        states={"r1": state},
+        worker_results=(
+            DllmWorkerResult(request_id="r1", sampled_token_ids=(1, 2, 3, 4, 5)),
+        ),
+    )
+    assert state.num_computed_tokens == 5
+
+    sched.schedule_decode_step(requests=((state, ()),))
+    sched.update_from_output(
+        states={"r1": state},
+        worker_results=(
+            DllmWorkerResult(request_id="r1", sampled_token_ids=(9, 10, 11)),
+        ),
+    )
+    assert state.num_computed_tokens == 8
 
 
 def test_update_from_output_rejects_unknown_request_id() -> None:
@@ -73,6 +96,21 @@ def test_update_from_output_rejects_unknown_request_id() -> None:
             states={"known": state},
             worker_results=(
                 DllmWorkerResult(request_id="other", sampled_token_ids=()),
+            ),
+        )
+
+
+def test_update_from_output_rejects_duplicate_request_ids() -> None:
+    sched = DllmScheduler()
+    state = DllmRequestState(request_id="r1")
+    sched.schedule_decode_step(requests=((state, ()),))
+
+    with pytest.raises(ValueError, match="duplicate request_id"):
+        sched.update_from_output(
+            states={"r1": state},
+            worker_results=(
+                DllmWorkerResult(request_id="r1", sampled_token_ids=(1,)),
+                DllmWorkerResult(request_id="r1", sampled_token_ids=(2,)),
             ),
         )
 
