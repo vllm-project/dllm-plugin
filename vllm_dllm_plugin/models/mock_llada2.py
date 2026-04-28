@@ -60,7 +60,7 @@ class DllmMockLlada2ForCausalLM(nn.Module):
             head_size=self.hidden_size,
             scale=1.0,
             num_kv_heads=1,
-            prefix="mock_attention",
+            prefix="layers.0.attn",
         )
 
     def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
