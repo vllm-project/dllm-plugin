@@ -27,8 +27,8 @@ pin, re-check upstream APIs and update this file and `DESIGN_MVP.md` together
 | Scheduler `update_draft_token_ids` / `update_draft_token_ids_in_output` | Store the next block into `spec_token_ids`. **Must not** apply AR draft grammar to dLLM blocks (scheduler overrides for structured output / async). |
 
 **Runtime wiring note:** CLI overrides use runtime adapters
-`vllm_dllm_plugin.runtime_scheduler:DllmRuntimeScheduler` and
-`vllm_dllm_plugin.runtime_worker:DllmRuntimeWorker`. The helper classes in
+`vllm_dllm_plugin.runtime_scheduler.DllmRuntimeScheduler` and
+`vllm_dllm_plugin.runtime_worker.DllmRuntimeWorker`. The helper classes in
 `vllm_dllm_plugin.scheduler` / `vllm_dllm_plugin.worker` are contract-core
 implementations used internally by those adapters. Runtime adapter constructors
 call `vllm_dllm_plugin.validation.assert_compatible_stack(...)` and fail fast

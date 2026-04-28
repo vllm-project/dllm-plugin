@@ -43,11 +43,11 @@ For MVP stack bring-up, enable the plugin by name and point vLLM at the plugin s
 ```bash
 export VLLM_PLUGINS=dllm
 vllm serve <model> \
-  --scheduler-cls vllm_dllm_plugin.runtime_scheduler:DllmRuntimeScheduler \
-  --worker-cls vllm_dllm_plugin.runtime_worker:DllmRuntimeWorker
+  --scheduler-cls vllm_dllm_plugin.runtime_scheduler.DllmRuntimeScheduler \
+  --worker-cls vllm_dllm_plugin.runtime_worker.DllmRuntimeWorker
 ```
 
-`DllmRuntimeScheduler` and `DllmRuntimeWorker` are runtime adapter classes intended for CLI overrides. `DllmScheduler` and `DllmWorker` remain helper/contract implementations used by the adapters. MVP expects `VLLM_USE_V2_MODEL_RUNNER=1`; grammar-constrained draft rewriting is intentionally rejected for dLLM block mode to avoid silent block-shape corruption. Block size is configured globally via `vllm_dllm_plugin.config.DRAFT_SIZE` (override with `VLLM_DLLM_DRAFT_SIZE` before importing the plugin) so scheduler/worker/remasking share one value. Runtime constructors now call strict stack validation (`assert_compatible_stack`) to reject incompatible scheduler/worker/model combinations early. Runtime remask handoff consumes model score rows when available and, for the mock architecture, uses the mock model's deterministic logits contract (`id=0` highest score) instead of sampled-token synthesis. `register_dllm()` continues to register the **mock** model architectures when `vllm` imports successfully.
+`DllmRuntimeScheduler` and `DllmRuntimeWorker` are runtime adapter classes intended for CLI overrides. Use dotted qualnames (`module.Class`) with vLLM args (`--scheduler-cls` / `--worker-cls`). `DllmScheduler` and `DllmWorker` remain helper/contract implementations used by the adapters. MVP expects `VLLM_USE_V2_MODEL_RUNNER=1`; grammar-constrained draft rewriting is intentionally rejected for dLLM block mode to avoid silent block-shape corruption. Block size is configured globally via `vllm_dllm_plugin.config.DRAFT_SIZE` (override with `VLLM_DLLM_DRAFT_SIZE` before importing the plugin) so scheduler/worker/remasking share one value. Runtime constructors now call strict stack validation (`assert_compatible_stack`) to reject incompatible scheduler/worker/model combinations early. Runtime remask handoff consumes model score rows when available and, for the mock architecture, uses the mock model's deterministic logits contract (`id=0` highest score) instead of sampled-token synthesis. `register_dllm()` continues to register the **mock** model architectures when `vllm` imports successfully.
 
 ## Docs
 

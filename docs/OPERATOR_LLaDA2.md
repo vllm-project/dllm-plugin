@@ -25,8 +25,8 @@ Use runtime adapters via CLI overrides:
 
 ```bash
 vllm serve <model> \
-  --scheduler-cls vllm_dllm_plugin.runtime_scheduler:DllmRuntimeScheduler \
-  --worker-cls vllm_dllm_plugin.runtime_worker:DllmRuntimeWorker
+  --scheduler-cls vllm_dllm_plugin.runtime_scheduler.DllmRuntimeScheduler \
+  --worker-cls vllm_dllm_plugin.runtime_worker.DllmRuntimeWorker
 ```
 
 Strict stack validation (`vllm_dllm_plugin.validation.assert_compatible_stack`)

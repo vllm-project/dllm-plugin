@@ -68,7 +68,15 @@ def assert_compatible_stack(
         raise ValueError(
             "missing scheduler_config in vLLM config for dLLM runtime stack",
         )
-    scheduler_cls = scheduler_config.get_scheduler_cls()
+    try:
+        scheduler_cls = scheduler_config.get_scheduler_cls()
+    except Exception as exc:
+        raise ValueError(
+            "failed to resolve scheduler class for dLLM runtime stack; use "
+            "--scheduler-cls "
+            "vllm_dllm_plugin.runtime_scheduler.DllmRuntimeScheduler "
+            "(dotted qualname expected by vLLM)",
+        ) from exc
     scheduler_fqcn = _normalize_fqcn(
         f"{scheduler_cls.__module__}.{scheduler_cls.__name__}",
     )
@@ -78,7 +86,7 @@ def assert_compatible_stack(
             f"got={scheduler_fqcn!r} expected one of "
             f"{(_SCHEDULER_FQCN_DOT, _SCHEDULER_FQCN_COLON)!r}; "
             "pass --scheduler-cls "
-            "vllm_dllm_plugin.runtime_scheduler:DllmRuntimeScheduler",
+            "vllm_dllm_plugin.runtime_scheduler.DllmRuntimeScheduler",
         )
 
     parallel_config = getattr(vllm_config, "parallel_config", None)
@@ -92,7 +100,8 @@ def assert_compatible_stack(
             "invalid worker class for dLLM runtime stack: "
             f"got={worker_cls!r} expected one of "
             f"{(_WORKER_FQCN_DOT, _WORKER_FQCN_COLON)!r}; "
-            "pass --worker-cls vllm_dllm_plugin.runtime_worker:DllmRuntimeWorker",
+            "pass --worker-cls "
+            "vllm_dllm_plugin.runtime_worker.DllmRuntimeWorker",
         )
 
     del caller
