@@ -61,4 +61,5 @@ spec:
               cd /app
               uv python pin 3.12
               uv sync --group dev --extra vllm
-              uv run pytest -q{{- range .Values.tests.pytestPaths }} {{ . }}{{- end }}
+              {{/* One pytest process per file avoids stale CUDA state across GPU tests. */}}
+              {{- range $i, $p := .Values.tests.pytestPaths }}{{ if $i }} && {{ end }}uv run pytest -q {{ $p }}{{ end }}
