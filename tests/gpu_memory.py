@@ -16,3 +16,23 @@ def gpu_memory_utilization() -> float:
     """
 
     return float(os.environ.get("DLLM_TEST_GPU_MEMORY_UTILIZATION", "0.9"))
+
+
+def kv_cache_memory_bytes() -> int | None:
+    """Fixed KV budget for integration tests using ``load_format='dummy'``.
+
+    vLLM 0.14.x profiles GPU memory with a forward pass; dummy/mock weights may
+    allocate no extra VRAM, tripping an internal ``free_memory`` assertion.
+    Passing ``kv_cache_memory_bytes`` skips that path (upstream
+    ``determine_available_memory``).
+
+    Set ``DLLM_TEST_KV_CACHE_MEMORY_BYTES`` to an integer (bytes), or ``none`` to
+    omit and use full profiling (needs a real-sized model forward).
+    """
+
+    raw = os.environ.get("DLLM_TEST_KV_CACHE_MEMORY_BYTES")
+    if raw is None or raw == "":
+        return 256 * 1024 * 1024
+    if raw.strip().lower() in {"none", "null"}:
+        return None
+    return int(raw)
