@@ -103,9 +103,7 @@ def test_gpu_dllm_stack_structured_output_regex_grammar(
         load_format="dummy",
         scheduler_cls="dllm_plugin.Scheduler",
         worker_cls="dllm_plugin.Worker",
-        # Regex-only SO: ``outlines`` avoids xgrammar CPU bitmask sizing edge cases
-        # with the minimal mock tokenizer fixture under vLLM 0.14.x GPU CI.
-        structured_outputs_config=StructuredOutputsConfig(backend="outlines"),
+        structured_outputs_config=StructuredOutputsConfig(backend="auto"),
         async_scheduling=False,
     )
 
