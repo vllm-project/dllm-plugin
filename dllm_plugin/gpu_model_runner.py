@@ -163,6 +163,10 @@ class DllmGPUModelRunner(GPUModelRunner):
         if not _VLLM:
             raise RuntimeError("DllmGPUModelRunner requires vLLM.")
         super().__init__(vllm_config, device)
+        # v0.14.x ``GPUModelRunner`` never assigns this until ``execute_model`` runs;
+        # mainline initializes ``execute_model_state = None`` in ``__init__``. Align.
+        if not hasattr(self, "execute_model_state"):
+            self.execute_model_state = None
         #: Width for sampled-token tensor rows (rejection / post_update layout).
         self._dllm_slot_width = max(self.num_speculative_steps + 1, DRAFT_SIZE)
         self._dllm_helper = DllmWorker(require_v2_model_runner=True)
