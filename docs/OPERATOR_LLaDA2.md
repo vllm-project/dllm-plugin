@@ -49,11 +49,11 @@ Use runtime adapters via CLI overrides:
 
 ```bash
 vllm serve <model> \
-  --scheduler-cls dllm_plugin:Scheduler \
-  --worker-cls dllm_plugin:Worker
+  --scheduler-cls dllm_plugin.Scheduler \
+  --worker-cls dllm_plugin.Worker
 ```
 
-Short aliases (`dllm_plugin:Scheduler` / `dllm_plugin:Worker`) match `DllmRuntimeScheduler` / `DllmRuntimeWorker`. Full dotted paths are also accepted.
+Short aliases (`dllm_plugin.Scheduler` / `dllm_plugin.Worker`) match `DllmRuntimeScheduler` / `DllmRuntimeWorker`. vLLM class resolution expects **dotted** names (`module.Class`), not `module:Class`.
 
 Strict stack validation (`dllm_plugin.validation.assert_compatible_stack`)
 fails fast when scheduler/worker/model architecture combinations are incompatible.

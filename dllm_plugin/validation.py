@@ -23,7 +23,7 @@ def _normalize_fqcn(value: str) -> str:
     return value.replace(":", ".")
 
 
-# Package-root aliases (``dllm_plugin:Worker`` normalizes to ``dllm_plugin.Worker``).
+# Package-root alias ``dllm_plugin.Worker`` (vLLM resolves dotted qualnames only).
 _WORKER_ACCEPT_NORMALIZED: frozenset[str] = frozenset(
     {
         _normalize_fqcn(_WORKER_FQCN_DOT),
@@ -95,7 +95,7 @@ def assert_compatible_stack(
     except Exception as exc:
         raise ValueError(
             "failed to resolve scheduler class for dLLM runtime stack; use "
-            "--scheduler-cls dllm_plugin:Scheduler "
+            "--scheduler-cls dllm_plugin.Scheduler "
             "(or dllm_plugin.runtime_scheduler.DllmRuntimeScheduler)"
             f"{_ctx()}",
         ) from exc
@@ -107,7 +107,7 @@ def assert_compatible_stack(
             "invalid scheduler class for dLLM runtime stack: "
             f"got={scheduler_fqcn!r} expected one of "
             f"{(_SCHEDULER_FQCN_DOT, _SCHEDULER_FQCN_COLON)!r}; "
-            "pass --scheduler-cls dllm_plugin:Scheduler "
+            "pass --scheduler-cls dllm_plugin.Scheduler "
             "(or dllm_plugin.runtime_scheduler.DllmRuntimeScheduler)"
             f"{_ctx()}",
         )
@@ -121,7 +121,7 @@ def assert_compatible_stack(
     if worker_cls not in _WORKER_ACCEPT_NORMALIZED:
         raise ValueError(
             "invalid worker class for dLLM runtime stack: "
-            f"got={worker_cls!r}; pass --worker-cls dllm_plugin:Worker "
+            f"got={worker_cls!r}; pass --worker-cls dllm_plugin.Worker "
             f"(or {_WORKER_FQCN_DOT!r})"
             f"{_ctx()}",
         )

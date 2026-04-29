@@ -43,8 +43,8 @@ def test_mock_stack_engine_args_resolve_paths_and_strict_validation_cpu(
         max_model_len=128,
         max_num_seqs=1,
         load_format="dummy",
-        scheduler_cls="dllm_plugin:Scheduler",
-        worker_cls="dllm_plugin:Worker",
+        scheduler_cls="dllm_plugin.Scheduler",
+        worker_cls="dllm_plugin.Worker",
     )
     vllm_config = engine_args.create_engine_config(
         usage_context=UsageContext.LLM_CLASS,

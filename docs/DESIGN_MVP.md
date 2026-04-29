@@ -269,11 +269,11 @@ virtual req 0 (q,k over {0,1}):   virtual req 1 (over {2,3}):   virtual req 2 (o
 ```bash
 export VLLM_PLUGINS=dllm
 vllm serve <model> \
-  --scheduler-cls dllm_plugin:Scheduler \
-  --worker-cls dllm_plugin:Worker
+  --scheduler-cls dllm_plugin.Scheduler \
+  --worker-cls dllm_plugin.Worker
 ```
 
-Current MVP runtime adapters are `DllmRuntimeScheduler` / `DllmRuntimeWorker`, exposed for CLI as **`dllm_plugin:Scheduler`** / **`dllm_plugin:Worker`** or full dotted paths under `dllm_plugin.runtime_*`. Helper classes (`dllm_plugin.scheduler:DllmScheduler`, `dllm_plugin.worker:DllmWorker`) remain the contract core used by adapters. Before the first decode schedule, `request.spec_token_ids` must hold the first input block (`DRAFT_SIZE` tokens); the plugin scheduler initializes it (prompt suffix + mask padding per this MVP design). Strict stack validation (`dllm_plugin.validation.assert_compatible_stack(...)`) runs in runtime adapter constructors and at mock-model runtime initialization, so dLLM architecture + incompatible scheduler/worker fails fast.
+Current MVP runtime adapters are `DllmRuntimeScheduler` / `DllmRuntimeWorker`, exposed for CLI as **`dllm_plugin.Scheduler`** / **`dllm_plugin.Worker`** or full dotted paths under `dllm_plugin.runtime_*` (vLLM resolves dotted qualnames). Helper classes (`dllm_plugin.scheduler:DllmScheduler`, `dllm_plugin.worker:DllmWorker`) remain the contract core used by adapters. Before the first decode schedule, `request.spec_token_ids` must hold the first input block (`DRAFT_SIZE` tokens); the plugin scheduler initializes it (prompt suffix + mask padding per this MVP design). Strict stack validation (`dllm_plugin.validation.assert_compatible_stack(...)`) runs in runtime adapter constructors and at mock-model runtime initialization, so dLLM architecture + incompatible scheduler/worker fails fast.
 
 Phase 6 integration confidence includes a concrete runtime integration test (`tests/test_vllm_mock_integration.py`) that instantiates vLLM runtime objects with the plugin adapters and executes one mock-stack generation step (GPU-gated).
 

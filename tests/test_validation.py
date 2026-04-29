@@ -60,7 +60,7 @@ def test_assert_compatible_stack_accepts_dllm_plugin_worker_alias() -> None:
 
     cfg = _build_vllm_config(
         scheduler_cls=DllmRuntimeScheduler,
-        worker_cls="dllm_plugin:Worker",
+        worker_cls="dllm_plugin.Worker",
     )
     assert_compatible_stack(cfg, caller="test")
 

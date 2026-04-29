@@ -45,11 +45,11 @@ For MVP stack bring-up, enable the plugin by name and point vLLM at the runtime 
 ```bash
 export VLLM_PLUGINS=dllm
 vllm serve <model> \
-  --scheduler-cls dllm_plugin:Scheduler \
-  --worker-cls dllm_plugin:Worker
+  --scheduler-cls dllm_plugin.Scheduler \
+  --worker-cls dllm_plugin.Worker
 ```
 
-`Scheduler` / `Worker` are aliases on `dllm_plugin` for `DllmRuntimeScheduler` / `DllmRuntimeWorker`. You can also pass dotted paths such as `dllm_plugin.runtime_scheduler.DllmRuntimeScheduler`. `DllmScheduler` and `DllmWorker` remain helper contracts used by the adapters. MVP expects `VLLM_USE_V2_MODEL_RUNNER=1`; grammar-constrained draft rewriting is intentionally rejected for dLLM block mode to avoid silent block-shape corruption. Block size is configured globally via `dllm_plugin.config.DRAFT_SIZE` (override with `VLLM_DLLM_DRAFT_SIZE` before importing the plugin) so scheduler/worker/remasking share one value. Strict stack validation (`assert_compatible_stack`) runs in runtime adapter constructors and mock-model runtime init to reject incompatible scheduler/worker/model combinations early. Runtime remask handoff consumes model score rows when available and mock fallback is restricted to the explicit mock architecture path. `register_dllm()` continues to register the **mock** model architectures when `vllm` imports successfully.
+`Scheduler` / `Worker` are aliases on `dllm_plugin` for `DllmRuntimeScheduler` / `DllmRuntimeWorker`. vLLM resolves **dotted** qualnames (`module.sub.Class`); use `dllm_plugin.Scheduler` / `dllm_plugin.Worker` or full paths such as `dllm_plugin.runtime_scheduler.DllmRuntimeScheduler`. `DllmScheduler` and `DllmWorker` remain helper contracts used by the adapters. MVP expects `VLLM_USE_V2_MODEL_RUNNER=1`; grammar-constrained draft rewriting is intentionally rejected for dLLM block mode to avoid silent block-shape corruption. Block size is configured globally via `dllm_plugin.config.DRAFT_SIZE` (override with `VLLM_DLLM_DRAFT_SIZE` before importing the plugin) so scheduler/worker/remasking share one value. Strict stack validation (`assert_compatible_stack`) runs in runtime adapter constructors and mock-model runtime init to reject incompatible scheduler/worker/model combinations early. Runtime remask handoff consumes model score rows when available and mock fallback is restricted to the explicit mock architecture path. `register_dllm()` continues to register the **mock** model architectures when `vllm` imports successfully.
 
 ## Docs
 

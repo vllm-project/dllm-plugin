@@ -15,7 +15,7 @@ from dllm_plugin.scheduler import DllmScheduler
 from dllm_plugin.validation import assert_compatible_stack
 from dllm_plugin.worker import DllmWorker
 
-# Short names for CLI (``dllm_plugin:Scheduler``, ``dllm_plugin:Worker``).
+# Short names for CLI (``dllm_plugin.Scheduler``, ``dllm_plugin.Worker``; dotted).
 Scheduler = DllmRuntimeScheduler
 Worker = DllmRuntimeWorker
 
