@@ -103,9 +103,9 @@ def test_gpu_dllm_stack_structured_output_regex_grammar(
         load_format="dummy",
         scheduler_cls="dllm_plugin.Scheduler",
         worker_cls="dllm_plugin.Worker",
-        structured_outputs_config=StructuredOutputsConfig(backend="auto"),
-        # v0.14+ enables async scheduling when compatible; xgrammar bitmask + our
-        # two-phase runner path needs the sync scheduling logits layout in CI.
+        # Regex-only SO: ``outlines`` avoids xgrammar CPU bitmask sizing edge cases
+        # with the minimal mock tokenizer fixture under vLLM 0.14.x GPU CI.
+        structured_outputs_config=StructuredOutputsConfig(backend="outlines"),
         async_scheduling=False,
     )
 
