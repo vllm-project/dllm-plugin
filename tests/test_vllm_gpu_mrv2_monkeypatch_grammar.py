@@ -104,6 +104,9 @@ def test_gpu_dllm_stack_structured_output_regex_grammar(
         scheduler_cls="dllm_plugin.Scheduler",
         worker_cls="dllm_plugin.Worker",
         structured_outputs_config=StructuredOutputsConfig(backend="auto"),
+        # v0.14+ enables async scheduling when compatible; xgrammar bitmask + our
+        # two-phase runner path needs the sync scheduling logits layout in CI.
+        async_scheduling=False,
     )
 
     sp = SamplingParams(
