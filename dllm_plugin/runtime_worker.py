@@ -16,18 +16,31 @@ _MISSING = object()
 
 try:
     from vllm.tracing import instrument
+except ImportError:  # pragma: no cover
+    # vLLM 0.14.x ships ``vllm/tracing.py`` only; there is no ``instrument``
+    # decorator (that API lives under ``vllm/tracing/`` in newer releases).
+    def instrument(  # type: ignore[misc]
+        obj: Any | None = None,
+        *,
+        span_name: str = "",
+        attributes: dict[str, str] | None = None,
+        record_exception: bool = True,
+    ) -> Any:
+        if obj is None:
+
+            def _partial(fn: Any) -> Any:
+                return fn
+
+            return _partial
+        return obj
+
+
+try:
     from vllm.v1.outputs import DraftTokenIds
     from vllm.v1.worker.gpu_worker import Worker as VllmGPUWorker
 
     _VLLM_AVAILABLE = True
 except ImportError:  # pragma: no cover - exercised only in no-vLLM envs.
-
-    def instrument(*_args: Any, **_kwargs: Any) -> Any:
-        def _decorator(fn: Any) -> Any:
-            return fn
-
-        return _decorator
-
     VllmGPUWorker = object
     DraftTokenIds = Any
     _VLLM_AVAILABLE = False

@@ -12,6 +12,7 @@ See ``docs/DESIGN_MVP.md`` for the two-phase contract.
 
 from __future__ import annotations
 
+import inspect
 from typing import Any
 
 import numpy as np
@@ -29,12 +30,35 @@ from dllm_plugin.grammar_utils import (
 from dllm_plugin.worker import DllmWorker
 
 try:
+    from vllm.v1.worker.gpu.buffer_utils import async_copy_to_gpu
+except ImportError:  # pragma: no cover - vLLM 0.14.x had no standalone helper
+
+    def async_copy_to_gpu(
+        x: torch.Tensor | np.ndarray,
+        out: torch.Tensor | None = None,
+        device: torch.device | None = None,
+    ) -> torch.Tensor:
+        """Match newer ``vllm.v1.worker.gpu.buffer_utils.async_copy_to_gpu``."""
+
+        if isinstance(x, np.ndarray):
+            x = torch.from_numpy(x)
+        assert x.is_cpu
+
+        if out is None:
+            assert device is not None
+            out = torch.empty_like(x, device=device)
+
+        tmp = x.pin_memory()
+        assert tmp is not x
+        return out.copy_(tmp, non_blocking=True)
+
+
+try:
     from vllm.sequence import IntermediateTensors as IntermediateTensorsType
     from vllm.v1.core.sched.output import GrammarOutput as GrammarOutputType
     from vllm.v1.core.sched.output import SchedulerOutput as SchedulerOutputType
     from vllm.v1.outputs import ModelRunnerOutput
     from vllm.v1.worker.gpu.async_utils import AsyncOutput
-    from vllm.v1.worker.gpu.buffer_utils import async_copy_to_gpu
     from vllm.v1.worker.gpu.input_batch import (
         InputBatch,
         combine_sampled_and_draft_tokens,
@@ -430,14 +454,17 @@ class DllmGPUModelRunner(GPUModelRunner):
             prompt_logprobs_dict=prompt_logprobs_dict,
             kv_connector_output=kv_connector_output,
         )
-        async_output = AsyncOutput(
-            model_runner_output=model_runner_output,
-            sampler_output=sampler_output,
-            num_sampled_tokens=num_sampled,
-            main_stream=self.main_stream,
-            copy_stream=self.output_copy_stream,
-            copy_event=self.output_copy_event,
-        )
+        _ao_params = inspect.signature(AsyncOutput.__init__).parameters
+        _ao_kw: dict[str, Any] = {
+            "model_runner_output": model_runner_output,
+            "sampler_output": sampler_output,
+            "num_sampled_tokens": num_sampled,
+            "copy_stream": self.output_copy_stream,
+            "copy_event": self.output_copy_event,
+        }
+        if "main_stream" in _ao_params:
+            _ao_kw["main_stream"] = self.main_stream
+        async_output = AsyncOutput(**_ao_kw)
 
         self.postprocess(
             input_batch, sampler_output.sampled_token_ids, num_sampled, num_rejected
