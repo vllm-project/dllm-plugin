@@ -18,21 +18,21 @@ import pytest
 pytest.importorskip("vllm")
 
 
-def _ensure_resolvable_device_platform() -> None:
-    """Force ``CpuPlatform`` when vLLM would leave ``UnspecifiedPlatform`` active.
+def _ensure_cpu_platform_for_engine_arg_utils(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patch ``vllm.engine.arg_utils.current_platform`` when device inference fails.
 
-    Stock Linux CI images often use a non-``cpu`` vLLM wheel with no GPU: no CUDA
-    plugin wins, ``cpu_platform_plugin`` does not activate, so
-    ``current_platform.device_type`` is empty and ``create_engine_config`` fails.
-    ``CpuPlatform`` matches typical CPU-only hosts.
+    ``arg_utils`` does ``from vllm.platforms import current_platform`` — that name
+    binds once at import time. Assigning ``vllm.platforms.current_platform`` later
+    does **not** update ``arg_utils.current_platform``, so ``create_engine_config``
+    still sees ``UnspecifiedPlatform`` with an empty ``device_type`` on stock
+    GPU-less Linux CI wheels.
     """
 
-    import vllm.platforms
+    import vllm.engine.arg_utils as engine_arg_utils
     from vllm.platforms.cpu import CpuPlatform
 
-    plat = vllm.platforms.current_platform
-    if not getattr(plat, "device_type", None):
-        vllm.platforms.current_platform = CpuPlatform()
+    if not getattr(engine_arg_utils.current_platform, "device_type", None):
+        monkeypatch.setattr(engine_arg_utils, "current_platform", CpuPlatform())
 
 
 def test_mock_stack_engine_args_resolve_paths_and_strict_validation_cpu(
@@ -44,7 +44,7 @@ def test_mock_stack_engine_args_resolve_paths_and_strict_validation_cpu(
 
     from dllm_plugin.validation import assert_compatible_stack
 
-    _ensure_resolvable_device_platform()
+    _ensure_cpu_platform_for_engine_arg_utils(monkeypatch)
 
     model_dir = Path(__file__).parent / "fixtures" / "mock_llada2_hf_config"
 
