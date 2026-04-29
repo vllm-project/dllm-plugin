@@ -11,6 +11,10 @@ from dllm_plugin.config import (
     DLLM_MOCK_STACK_MODEL_ID,
     DRAFT_SIZE,
 )
+from dllm_plugin.grammar_utils import (
+    apply_packed_bitmask_inplace_logits_row,
+    grammar_extra_transfer_slots,
+)
 from dllm_plugin.remasking import Llada2DefaultRemaskingPolicy
 from dllm_plugin.validation import assert_compatible_stack
 from dllm_plugin.worker import DllmWorker as DllmWorkerHelper
@@ -167,6 +171,7 @@ def run_block_contract_from_model_output(
     request_id: str,
     input_draft: list[int],
     logits: Any,
+    remasking_config: Mapping[str, Any] | None = None,
 ) -> DllmWorkerStep:
     """Apply one helper-level remask step using model-provided logits."""
 
@@ -175,6 +180,7 @@ def run_block_contract_from_model_output(
         input_draft=input_draft,
         logits=logits,
         policy=Llada2DefaultRemaskingPolicy(),
+        remasking_config=remasking_config,
     )
 
 
@@ -270,11 +276,51 @@ class DllmRuntimeWorker(VllmGPUWorker):
                 draft_size=self._dllm_helper.draft_size,
                 vllm_config=self.vllm_config,
             )
+            go = getattr(scheduler_output, "dllm_grammar_output", None)
+            flat_indices = getattr(
+                scheduler_output,
+                "dllm_so_frontier_flat_indices",
+                None,
+            )
+            block_rows = getattr(
+                scheduler_output,
+                "dllm_so_frontier_block_rows",
+                None,
+            )
+            prefix_lens = getattr(
+                scheduler_output,
+                "dllm_so_valid_prefix_lens",
+                None,
+            )
+            so_reqs = getattr(go, "structured_output_request_ids", None) if go else None
+            if (
+                go is not None
+                and flat_indices is not None
+                and block_rows is not None
+                and so_reqs is not None
+                and req_id in so_reqs
+            ):
+                br = block_rows.get(req_id)
+                fi = flat_indices.get(req_id)
+                if br is not None and fi is not None:
+                    row_bm = go.grammar_bitmask[int(fi)]
+                    apply_packed_bitmask_inplace_logits_row(block_logits[br], row_bm)
+
+            extra_transfer = 0
+            if prefix_lens is not None and req_id in prefix_lens:
+                extra_transfer = grammar_extra_transfer_slots(
+                    draft_tokens=input_draft,
+                    valid_prefix_len=prefix_lens[req_id],
+                )
+            remasking_cfg = (
+                {"grammar_extra_transfer": extra_transfer} if extra_transfer else None
+            )
             step = run_block_contract_from_model_output(
                 helper=self._dllm_helper,
                 request_id=req_id,
                 input_draft=list(input_draft),
                 logits=block_logits,
+                remasking_config=remasking_cfg,
             )
             output.sampled_token_ids[idx] = list(step.sampled_token_ids)
             next_req_ids.append(req_id)

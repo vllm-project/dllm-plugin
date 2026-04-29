@@ -111,5 +111,26 @@ keys from another fleet apply to yours.
 ## Notes
 
 - This guide covers **mock-stack** MVP only (Phases 2-6), not real LLaDA2 weights.
-- Structured-output grammar rewriting remains explicitly rejected for dLLM block
-  mode in this MVP path.
+
+### Structured outputs (Phase 4 / issues [#9](https://github.com/vllm-project/dllm-plugin/issues/9), [#10](https://github.com/vllm-project/dllm-plugin/issues/10))
+
+- **Mutually exclusive:** Do **not** enable vanilla **speculative decoding** alongside the
+  dLLM draft-block path; reuse of spec-decode-shaped fields is for dLLM blocks only (see
+  ``docs/DESIGN_MVP.md`` §7).
+- **Frontier bitmask:** For structured-output requests, grammar masks apply at the
+  **frontier** token (first invalid grammar position in the draft block). Valid-prefix
+  bookkeeping follows vLLM’s ``StructuredOutputManager.grammar_bitmask`` semantics;
+  fixed ``DRAFT_SIZE`` blocks are preserved — drafts are not grammar-truncated in
+  ``update_draft_token_ids``.
+- **Repair budget:** ``grammar_extra_transfer`` may increase per-step transfer counts when
+  a grammar-invalid tail exists (see ``Llada2DefaultRemaskingPolicy``).
+- **Strict frontier-only vs multi-frontier:** Default MVP path masks **one** frontier row
+  per step; remasking earlier positions without re-evaluating grammar is out of scope
+  unless documented otherwise.
+- **vLLM pin:** Precomputed grammar metadata on ``SchedulerOutput`` and relaxed draft-token
+  hooks in ``EngineCore`` require the matching **vLLM** revision that includes those
+  ``dllm_*`` fields and ``post_step`` / batch-queue updates—coordinate upgrades with
+  ``pyproject.toml`` bounds (issue [#2](https://github.com/vllm-project/dllm-plugin/issues/2)).
+- **Bitmask buffer sizing:** If ``speculative_config.num_speculative_tokens`` is unset,
+  raise it to at least ``DRAFT_SIZE - 1`` when using structured outputs at scale, or rely on
+  a vLLM build that extends grammar-bitmask allocation for large dLLM blocks.

@@ -32,6 +32,8 @@ step returns the full decoded block as ``committed_token_ids`` and sets
 - ``denoise_step_index`` (``int``): zero-based index into the schedule; default ``0``.
   Production callers should pass the real step.
 - ``num_transfer`` (``int``): if set, use this count instead of the schedule entry.
+- ``grammar_extra_transfer`` (``int``): added to the scheduled transfer budget when
+  structured-output repair hints reserve extra decode slots (Phase 4 / issue #9).
 
 **Logits:** 2-D, shape ``(DRAFT_SIZE, vocab_size)``. Accepts nested sequences or
 indexable row-major objects (e.g. ``torch.Tensor``) without importing ``torch``
@@ -169,6 +171,7 @@ class Llada2DefaultRemaskingPolicy:
                 LLADA2_DEFAULT_COMMIT_CONFIDENCE_THRESHOLD,
             ),
         )
+        grammar_extra_transfer = max(0, int(cfg.get("grammar_extra_transfer", 0)))
         mask_token_id = int(cfg.get("mask_token_id", LLADA2_DEFAULT_MASK_TOKEN_ID))
         denoise_steps = int(cfg.get("denoise_steps", LLADA2_DEFAULT_DENOISE_STEPS))
         denoise_step_index = int(cfg.get("denoise_step_index", 0))
@@ -204,14 +207,14 @@ class Llada2DefaultRemaskingPolicy:
         h = sum(high_conf)
 
         if "num_transfer" in cfg:
-            num_to_transfer = int(cfg["num_transfer"])
+            num_to_transfer = int(cfg["num_transfer"]) + grammar_extra_transfer
             if num_to_transfer < 0:
                 msg = "num_transfer must be non-negative"
                 raise ValueError(msg)
         else:
             schedule = _num_transfer_schedule(DRAFT_SIZE, denoise_steps)
             step = max(0, min(denoise_step_index, len(schedule) - 1))
-            num_to_transfer = schedule[step]
+            num_to_transfer = schedule[step] + grammar_extra_transfer
 
         num_masked = sum(masked)
         transfer_idx: list[int]
