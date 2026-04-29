@@ -60,8 +60,6 @@ jobs:
       # Lint/types already run in the ``ci`` job; this job only adds vLLM + pytest signal.
       # Includes CPU mock-stack smoke (``test_vllm_mock_integration_cpu_smoke``) for drift
       # coverage without CUDA.
+      # ``-rs``: show skip reasons for GPU-only tests on CPU runners.
       - name: Tests (vLLM extra)
-        run: uv run pytest -q
-      # GitHub-hosted ubuntu-latest has no CUDA; only the LLM.generate step is skipped.
-      - name: Mock-stack LLM.generate integration (GPU-gated, expected skip here)
-        run: uv run pytest -q -rs tests/test_vllm_mock_integration.py
+        run: uv run pytest -q -rs

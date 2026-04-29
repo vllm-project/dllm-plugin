@@ -18,6 +18,23 @@ import pytest
 pytest.importorskip("vllm")
 
 
+def _ensure_resolvable_device_platform() -> None:
+    """Force ``CpuPlatform`` when vLLM would leave ``UnspecifiedPlatform`` active.
+
+    Stock Linux CI images often use a non-``cpu`` vLLM wheel with no GPU: no CUDA
+    plugin wins, ``cpu_platform_plugin`` does not activate, so
+    ``current_platform.device_type`` is empty and ``create_engine_config`` fails.
+    ``CpuPlatform`` matches typical CPU-only hosts.
+    """
+
+    import vllm.platforms
+    from vllm.platforms.cpu import CpuPlatform
+
+    plat = vllm.platforms.current_platform
+    if not getattr(plat, "device_type", None):
+        vllm.platforms.current_platform = CpuPlatform()
+
+
 def test_mock_stack_engine_args_resolve_paths_and_strict_validation_cpu(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -26,6 +43,8 @@ def test_mock_stack_engine_args_resolve_paths_and_strict_validation_cpu(
     from vllm.utils.import_utils import resolve_obj_by_qualname
 
     from dllm_plugin.validation import assert_compatible_stack
+
+    _ensure_resolvable_device_platform()
 
     model_dir = Path(__file__).parent / "fixtures" / "mock_llada2_hf_config"
 
