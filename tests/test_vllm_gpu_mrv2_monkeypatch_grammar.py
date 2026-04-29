@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.gpu_memory import gpu_memory_utilization
+
 pytest.importorskip("vllm")
 torch = pytest.importorskip("torch")
 
@@ -55,6 +57,7 @@ def test_gpu_injects_dllm_mrv2_via_monkeypatch_stock_worker(
         pipeline_parallel_size=1,
         max_model_len=128,
         max_num_seqs=1,
+        gpu_memory_utilization=gpu_memory_utilization(),
         load_format="dummy",
         scheduler_cls="dllm_plugin.Scheduler",
         worker_cls="vllm.v1.worker.gpu_worker.Worker",
@@ -94,6 +97,7 @@ def test_gpu_dllm_stack_structured_output_regex_grammar(
         pipeline_parallel_size=1,
         max_model_len=128,
         max_num_seqs=1,
+        gpu_memory_utilization=gpu_memory_utilization(),
         load_format="dummy",
         scheduler_cls="dllm_plugin.Scheduler",
         worker_cls="dllm_plugin.Worker",

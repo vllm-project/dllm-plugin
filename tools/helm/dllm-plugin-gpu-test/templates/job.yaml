@@ -45,6 +45,10 @@ spec:
               value: "1"
             - name: VLLM_ENABLE_V1_MULTIPROCESSING
               value: "0"
+{{- range $k, $v := (.Values.testEnv | default dict) }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+{{- end }}
           command: ["/bin/bash", "-c"]
           args:
             - |

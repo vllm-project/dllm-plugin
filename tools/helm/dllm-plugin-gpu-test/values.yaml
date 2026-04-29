@@ -37,3 +37,8 @@ resources:
   cpu: "6"
   memory: 24Gi
   ephemeralStorage: 40Gi
+
+# Extra env for pytest (see ``tests/gpu_memory.py``).
+# Shared CI GPUs often have little free VRAM; keep KV reservation small.
+testEnv:
+  DLLM_TEST_GPU_MEMORY_UTILIZATION: "0.08"
