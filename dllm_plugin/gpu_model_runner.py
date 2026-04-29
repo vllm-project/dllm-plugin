@@ -105,6 +105,7 @@ try:
     from vllm.v1.core.sched.output import SchedulerOutput as SchedulerOutputType
     from vllm.v1.outputs import ModelRunnerOutput
     from vllm.v1.worker.gpu.async_utils import AsyncOutput
+    from vllm.v1.worker.gpu.attn_utils import build_attn_metadata
     from vllm.v1.worker.gpu.input_batch import (
         InputBatch,
         combine_sampled_and_draft_tokens,
@@ -139,9 +140,17 @@ if _VLLM:
     _VLLM_LEGACY_SAMPLE_5ARG = (
         len(inspect.signature(_gpu_mr_cls.sample).parameters) >= 5
     )
+    # Mainline ``InputBatch`` adds ``expanded_local_pos``, DCP fields, etc.; v0.14.x
+    # matches the older dataclass (``mrope_positions``, ``attn_metadata``, …).
+    _VLLM_INPUT_BATCH_LEGACY = "expanded_local_pos" not in getattr(
+        InputBatch,
+        "__dataclass_fields__",
+        {},
+    )
 else:  # pragma: no cover
     _VLLM_EXECUTE_HAS_SKIP_ATTN = False
     _VLLM_LEGACY_SAMPLE_5ARG = False
+    _VLLM_INPUT_BATCH_LEGACY = False
 
 
 def _dllm_architecture_match(vllm_config: Any) -> bool:
@@ -213,6 +222,163 @@ class DllmGPUModelRunner(GPUModelRunner):
             kw["skip_attn_for_dummy_run"] = skip_attn_for_dummy_run
         return super().execute_model(**kw)
 
+    def _prepare_inputs_v014(
+        self, scheduler_output: SchedulerOutputType, num_tokens_after_padding: int
+    ) -> InputBatch:
+        """v0.14.x ``InputBatch`` / ``prepare_inputs`` (incl. ``attn_metadata``)."""
+
+        num_tokens = scheduler_output.total_num_scheduled_tokens
+        assert num_tokens > 0
+        num_reqs = len(scheduler_output.num_scheduled_tokens)
+
+        req_ids = sorted(
+            scheduler_output.num_scheduled_tokens.keys(),
+            key=lambda k: scheduler_output.num_scheduled_tokens[k],
+        )
+        num_scheduled_tokens = np.array(
+            [scheduler_output.num_scheduled_tokens[i] for i in req_ids],
+            dtype=np.int32,
+        )
+
+        idx_mapping_list = [
+            self.req_states.req_id_to_index[req_id] for req_id in req_ids
+        ]
+        idx_mapping_np = np.array(idx_mapping_list, dtype=np.int32)
+        idx_mapping = self.tmp_idx_mapping.copy_to_gpu(idx_mapping_np)
+
+        if not scheduler_output.scheduled_spec_decode_tokens:
+            total_num_draft_tokens = 0
+            total_num_logits = num_reqs
+            cu_num_logits_np = np.arange(num_reqs + 1, dtype=np.int32)
+            cu_num_logits = torch.arange(
+                num_reqs + 1, device=self.device, dtype=torch.int32
+            )
+            expanded_idx_mapping = idx_mapping
+        else:
+            draft_tokens = scheduler_output.scheduled_spec_decode_tokens
+            num_draft_tokens = np.array(
+                [
+                    len(draft_tokens[req_id]) if req_id in draft_tokens else 0
+                    for req_id in req_ids
+                ],
+                dtype=np.int32,
+            )
+            total_num_draft_tokens = int(num_draft_tokens.sum())
+            total_num_logits = num_reqs + total_num_draft_tokens
+
+            num_logits = num_draft_tokens + 1
+            cu_num_logits_np = np.empty(num_reqs + 1, dtype=np.int32)
+            cu_num_logits_np[0] = 0
+            np.cumsum(num_logits, out=cu_num_logits_np[1:])
+            cu_num_logits = self.tmp_cu_num_logits.copy_to_gpu(cu_num_logits_np)
+
+            max_logits_per_req = int(np.max(num_logits))
+            max_expand_len = max(self.num_speculative_steps + 1, max_logits_per_req)
+            expanded_idx_mapping = expand_idx_mapping(
+                idx_mapping,
+                total_num_logits,
+                cu_num_logits,
+                max_expand_len,
+            )
+
+        block_tables = self.block_tables.gather_block_tables(idx_mapping)
+
+        query_start_loc_np = np.empty(self.max_num_reqs + 1, dtype=np.int32)
+        query_start_loc_np[0] = 0
+        np.cumsum(num_scheduled_tokens, out=query_start_loc_np[1 : num_reqs + 1])
+        query_start_loc_np[num_reqs + 1 :] = num_tokens
+        self.tmp_query_start_loc.copy_to_gpu(
+            query_start_loc_np,
+            out=self.input_buffers.query_start_loc,
+        )
+        query_start_loc_np = query_start_loc_np[: num_reqs + 1]
+        query_start_loc_cpu = torch.from_numpy(query_start_loc_np)
+        query_start_loc = self.input_buffers.query_start_loc[: num_reqs + 1]
+
+        prepare_prefill_inputs(
+            self.input_buffers.input_ids,
+            self.req_states.next_prefill_tokens,
+            idx_mapping,
+            query_start_loc,
+            self.req_states.prefill_token_ids.gpu,
+            self.req_states.prefill_len.gpu,
+            self.req_states.num_computed_tokens.gpu,
+        )
+
+        prepare_pos_seq_lens(
+            idx_mapping,
+            query_start_loc,
+            self.req_states.num_computed_tokens.gpu,
+            self.input_buffers.positions,
+            self.input_buffers.seq_lens,
+        )
+        seq_lens = self.input_buffers.seq_lens[:num_reqs]
+
+        if self.uses_mrope:
+            self.mrope_states.prepare_mrope_positions(
+                idx_mapping,
+                query_start_loc,
+                self.req_states.prefill_len.gpu,
+                self.req_states.num_computed_tokens.gpu,
+                self.input_buffers.mrope_positions,
+            )
+
+        logits_indices = combine_sampled_and_draft_tokens(
+            self.input_buffers.input_ids,
+            idx_mapping,
+            self.req_states.last_sampled_tokens,
+            query_start_loc,
+            seq_lens,
+            self.req_states.prefill_len.gpu,
+            self.req_states.draft_tokens,
+            cu_num_logits,
+            total_num_logits,
+        )
+
+        slot_mappings = self.block_tables.compute_slot_mappings(
+            query_start_loc, self.input_buffers.positions[:num_tokens]
+        )
+
+        attn_metadata = build_attn_metadata(
+            attn_metadata_builders=self.attn_metadata_builders,
+            num_reqs=num_reqs,
+            num_tokens=num_tokens,
+            query_start_loc_gpu=query_start_loc,
+            query_start_loc_cpu=query_start_loc_cpu,
+            seq_lens=self.input_buffers.seq_lens,
+            max_seq_len=self.max_model_len,
+            block_tables=block_tables,
+            slot_mappings=slot_mappings,
+            kv_cache_config=self.kv_cache_config,
+        )
+
+        input_ids = self.input_buffers.input_ids[:num_tokens_after_padding]
+        positions = self.input_buffers.positions[:num_tokens_after_padding]
+        mrope_positions = self.input_buffers.mrope_positions[
+            :, :num_tokens_after_padding
+        ]
+        return InputBatch(
+            req_ids=req_ids,
+            num_reqs=num_reqs,
+            idx_mapping=idx_mapping,
+            idx_mapping_np=idx_mapping_np,
+            expanded_idx_mapping=expanded_idx_mapping,
+            num_scheduled_tokens=num_scheduled_tokens,
+            num_tokens=num_tokens,
+            num_tokens_after_padding=num_tokens_after_padding,
+            num_draft_tokens=total_num_draft_tokens,
+            query_start_loc=query_start_loc,
+            query_start_loc_np=query_start_loc_np,
+            seq_lens=seq_lens,
+            input_ids=input_ids,
+            positions=positions,
+            mrope_positions=mrope_positions,
+            attn_metadata=attn_metadata,
+            logits_indices=logits_indices,
+            cu_num_logits=cu_num_logits,
+            cu_num_logits_np=cu_num_logits_np,
+        )
+
     def prepare_inputs(
         self, scheduler_output: SchedulerOutputType, num_tokens_after_padding: int
     ) -> InputBatch:
@@ -222,6 +388,9 @@ class DllmGPUModelRunner(GPUModelRunner):
         schedules ``DRAFT_SIZE`` logits rows per request without Eagle, so we take
         ``max(num_speculative_steps + 1, max_logits_per_request)``.
         """
+        if _VLLM_INPUT_BATCH_LEGACY:
+            return self._prepare_inputs_v014(scheduler_output, num_tokens_after_padding)
+
         num_tokens = scheduler_output.total_num_scheduled_tokens
         assert num_tokens > 0
         num_tokens_per_req = scheduler_output.num_scheduled_tokens
