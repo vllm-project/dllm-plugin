@@ -30,7 +30,7 @@ dependencies = []
 [project.optional-dependencies]
 # Bounded like bart-plugin: vLLM API churn is real. Widen intentionally when tested
 # (optional smoke workflow + lock refresh). Track draft-token hook: vllm#36155, DESIGN_MVP §4.
-vllm = ["vllm>=0.14.0,<0.15"]
+vllm = ["vllm>=0.20.0,<0.21"]
 
 [project.urls]
 Homepage = "https://github.com/vllm-project/dllm-plugin"

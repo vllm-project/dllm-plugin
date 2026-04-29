@@ -13,7 +13,7 @@ uv sync --group dev --extra vllm
 ```
 
 - vLLM compatibility/minimum tested range follows `pyproject.toml`
-  (`vllm>=0.14.0,<0.15`); track pin and hook confidence updates via issue `#2`.
+  (`vllm>=0.20.0,<0.21`); track pin and hook confidence updates via issue `#2`.
 
 - vLLM plugin loading enabled:
 
