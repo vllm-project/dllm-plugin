@@ -9,15 +9,28 @@ import logging
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-from dllm_plugin.runtime_scheduler import DllmRuntimeScheduler
-from dllm_plugin.runtime_worker import DllmRuntimeWorker
 from dllm_plugin.scheduler import DllmScheduler
 from dllm_plugin.validation import assert_compatible_stack
 from dllm_plugin.worker import DllmWorker
 
-# Short names for CLI (``dllm_plugin.Scheduler``, ``dllm_plugin.Worker``; dotted).
-Scheduler = DllmRuntimeScheduler
-Worker = DllmRuntimeWorker
+# Do **not** import ``runtime_scheduler`` / ``runtime_worker`` at package import time.
+# Their top-level ``vllm`` imports must run only after submodules such as
+# ``dllm_plugin.gpu_model_runner`` have finished loading; eager imports here
+# caused a circular import that cleared ``_VLLM`` / ``_VLLM_AVAILABLE`` and broke
+# GPU integration tests (Worker / DllmGPUModelRunner saw vLLM as unavailable).
+
+
+def __getattr__(name: str):
+    if name in ("DllmRuntimeScheduler", "Scheduler"):
+        from dllm_plugin.runtime_scheduler import DllmRuntimeScheduler
+
+        return DllmRuntimeScheduler
+    if name in ("DllmRuntimeWorker", "Worker"):
+        from dllm_plugin.runtime_worker import DllmRuntimeWorker
+
+        return DllmRuntimeWorker
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 try:
     __version__ = version("vllm-dllm-plugin")
