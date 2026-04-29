@@ -81,7 +81,7 @@ def test_gpu_dllm_stack_structured_output_regex_grammar(
 ) -> None:
     """Production worker, tokenizer fixture, regex SO (bitmask path)."""
     from vllm import LLM, SamplingParams
-    from vllm.config import SpeculativeConfig, StructuredOutputsConfig
+    from vllm.config import StructuredOutputsConfig
     from vllm.inputs import TokensPrompt
     from vllm.sampling_params import StructuredOutputsParams
 
@@ -109,10 +109,11 @@ def test_gpu_dllm_stack_structured_output_regex_grammar(
         # vLLM's SO bitmask buffer is sized from ``speculative_config`` (see
         # ``StructuredOutputManager.grammar_bitmask``). Ngram spec is a no-op for
         # this mock but sizes the buffer like vLLM's spec+SO tests.
-        speculative_config=SpeculativeConfig(
-            model="[ngram]",
-            num_speculative_tokens=DRAFT_SIZE,
-        ),
+        speculative_config={
+            "method": "ngram",
+            "model": "[ngram]",
+            "num_speculative_tokens": DRAFT_SIZE,
+        },
         structured_outputs_config=StructuredOutputsConfig(backend="auto"),
         async_scheduling=False,
     )
