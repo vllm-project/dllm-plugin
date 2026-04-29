@@ -19,7 +19,7 @@ try:
 except ImportError:  # pragma: no cover
     # vLLM 0.14.x ships ``vllm/tracing.py`` only; there is no ``instrument``
     # decorator (that API lives under ``vllm/tracing/`` in newer releases).
-    def instrument(  # type: ignore[misc]
+    def instrument(
         obj: Any | None = None,
         *,
         span_name: str = "",

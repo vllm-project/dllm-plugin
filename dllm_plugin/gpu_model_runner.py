@@ -13,7 +13,7 @@ See ``docs/DESIGN_MVP.md`` for the two-phase contract.
 from __future__ import annotations
 
 import inspect
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -124,6 +124,25 @@ except ImportError:  # pragma: no cover
     GrammarOutputType = Any
     SchedulerOutputType = Any
 
+if _VLLM:
+    _gpu_mr_cls = cast(Any, GPUModelRunner)
+    # Mainline vLLM adds kwargs (``skip_attn_for_dummy_run``); v0.14.x ``execute_model``
+    # only accepts ``(scheduler_output, intermediate_tensors, dummy_run)``.
+    _VLLM_EXECUTE_HAS_SKIP_ATTN = (
+        "skip_attn_for_dummy_run"
+        in inspect.signature(
+            _gpu_mr_cls.execute_model,
+        ).parameters
+    )
+    # v0.14.x: ``sample(..., sampling_metadata, grammar_output)`` — five parameters
+    # including ``self``; newer releases drop ``sampling_metadata``.
+    _VLLM_LEGACY_SAMPLE_5ARG = (
+        len(inspect.signature(_gpu_mr_cls.sample).parameters) >= 5
+    )
+else:  # pragma: no cover
+    _VLLM_EXECUTE_HAS_SKIP_ATTN = False
+    _VLLM_LEGACY_SAMPLE_5ARG = False
+
 
 def _dllm_architecture_match(vllm_config: Any) -> bool:
     hf = getattr(getattr(vllm_config, "model_config", None), "hf_config", None)
@@ -181,12 +200,14 @@ class DllmGPUModelRunner(GPUModelRunner):
         self._dllm_pending_draft_ids = None
         if not dummy_run:
             self._dllm_capture_scheduler_extras(scheduler_output)
-        return super().execute_model(
-            scheduler_output,
-            intermediate_tensors,
-            dummy_run=dummy_run,
-            skip_attn_for_dummy_run=skip_attn_for_dummy_run,
-        )
+        kw: dict[str, Any] = {
+            "scheduler_output": scheduler_output,
+            "intermediate_tensors": intermediate_tensors,
+            "dummy_run": dummy_run,
+        }
+        if _VLLM_EXECUTE_HAS_SKIP_ATTN:
+            kw["skip_attn_for_dummy_run"] = skip_attn_for_dummy_run
+        return super().execute_model(**kw)
 
     def prepare_inputs(
         self, scheduler_output: SchedulerOutputType, num_tokens_after_padding: int
@@ -323,13 +344,29 @@ class DllmGPUModelRunner(GPUModelRunner):
         self,
         hidden_states: torch.Tensor,
         input_batch: InputBatch,
-        grammar_output: GrammarOutputType | None,
+        third: Any,
+        fourth: GrammarOutputType | None = None,
     ) -> tuple[SamplerOutput, torch.Tensor, torch.Tensor]:
+        if _VLLM_LEGACY_SAMPLE_5ARG:
+            sampling_metadata, grammar_output = third, fourth
+        else:
+            grammar_output = third
+
         if not (
             _dllm_architecture_match(self.vllm_config)
             and input_batch.num_draft_tokens > 0
         ):
+            if _VLLM_LEGACY_SAMPLE_5ARG:
+                return super().sample(
+                    hidden_states,
+                    input_batch,
+                    sampling_metadata,
+                    grammar_output,
+                )
             return super().sample(hidden_states, input_batch, grammar_output)
+
+        if _VLLM_LEGACY_SAMPLE_5ARG:
+            del sampling_metadata
 
         # Late import avoids circular import with runtime_worker.
         from dllm_plugin.runtime_worker import (
@@ -455,6 +492,12 @@ class DllmGPUModelRunner(GPUModelRunner):
         # upstream execute_model → None, sample_tokens applies grammar + sampling).
         if self.execute_model_state is None:
             return None
+        # vLLM 0.14.x: ``execute_model_state`` is ``(hidden_states, input_batch,
+        # sampling_metadata)``. Newer releases stash a larger tuple (KV connector,
+        # aux hidden states, …). Delegate to stock ``GPUModelRunner.sample_tokens``.
+        if len(self.execute_model_state) == 3:
+            return cast(Any, GPUModelRunner).sample_tokens(self, grammar_output)
+
         (
             input_batch,
             model_inputs,
