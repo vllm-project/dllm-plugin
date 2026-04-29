@@ -26,8 +26,8 @@ export VLLM_USE_V2_MODEL_RUNNER=1
 
 | Runner | Mock-stack support | Notes |
 |--------|-------------------|--------|
-| **v2** (`VLLM_USE_V2_MODEL_RUNNER=1`) | **Supported** | Required for the Phase 6 integration test, CI (`vllm-extra`), and operator docs. Matches vLLM v1 engine / worker paths used by `DllmRuntimeWorker`. |
-| **v1** (`VLLM_USE_V2_MODEL_RUNNER=0` or unset) | **Unsupported** | Runtime adapters target the v2 worker stack. Expect incorrect scheduler/worker pairing or runtime failures rather than silent corruption; do not use for mock-stack validation. |
+| **v2** (`VLLM_USE_V2_MODEL_RUNNER=1`) | **Supported** | Required for the Phase 6 integration test, CI (`vllm-extra`), and operator docs. Adapters are written against vLLM's **v2 model-runner** hooks (`DllmRuntimeWorker` subclasses vLLM's worker on that stack). |
+| **v1** (`VLLM_USE_V2_MODEL_RUNNER=0` or unset) | **Unsupported** | Runtime adapters target the **v2 model-runner** stack only. Expect incorrect scheduler/worker pairing or runtime failures rather than silent corruption; do not use for mock-stack validation. |
 
 There is **no supported fallback** from v2 to v1 for the mock-stack path: if your environment cannot enable the v2 model runner, treat the mock-stack integration test and operator workflow as **not applicable** until v2 is available—do not expect partial correctness on v1.
 
@@ -58,6 +58,12 @@ Short aliases (`dllm_plugin.Scheduler` / `dllm_plugin.Worker`) match `DllmRuntim
 Strict stack validation (`dllm_plugin.validation.assert_compatible_stack`)
 fails fast when scheduler/worker/model architecture combinations are incompatible.
 
+Checks resolve scheduler and worker types and compare them to the **concrete**
+adapter classes (`DllmRuntimeScheduler`, `DllmRuntimeWorker`) by fully-qualified
+name. **Subclasses** of those adapters are rejected until validation is relaxed
+or extended—by design for MVP mock-stack gatekeeping; forks should adjust
+validation if they introduce subclassed workers/schedulers.
+
 ## First block initialization
 
 - The scheduler initializes `Request.spec_token_ids` for new requests when empty.
@@ -86,6 +92,9 @@ Expected behavior:
   skipped (`requires CUDA GPU`).
 - **GPU hosts:** that test executes one end-to-end step through vLLM runtime objects with
   plugin scheduler/worker adapters and mock model config.
+- **Depth:** the GPU test asserts `LLM.generate` returns token ids; it does **not**
+  check remasking block shape, `dllm_block_logits` consumption, or other remask
+  invariants—tighter assertions are optional follow-ups beyond this Phase 6 smoke.
 
 For PR/release evidence, include GPU job status plus a persisted log query
 (`gcloud logging read ... labels.\"k8s-pod/job-name\"=\"<job-name>\"`) so the

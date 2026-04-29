@@ -82,6 +82,10 @@ def assert_compatible_stack(
     When ``strict`` is ``None``, effective strictness comes from
     :func:`~dllm_plugin.config.resolve_strict_stack_validation` (see
     :data:`~dllm_plugin.config.DLLM_STRICT_STACK_VALIDATION_ENV_VAR`).
+
+    Scheduler and worker must resolve to the concrete adapter classes
+    (``DllmRuntimeScheduler``, ``DllmRuntimeWorker``); subclasses are not
+    accepted unless this check is extended.
     """
 
     def _ctx() -> str:
