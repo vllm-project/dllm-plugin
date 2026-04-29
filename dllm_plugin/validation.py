@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import importlib
 from collections.abc import Iterable
 from typing import Any
 
@@ -16,20 +17,33 @@ from dllm_plugin.config import (
 _SCHEDULER_FQCN_DOT = "dllm_plugin.runtime_scheduler.DllmRuntimeScheduler"
 _SCHEDULER_FQCN_COLON = "dllm_plugin.runtime_scheduler:DllmRuntimeScheduler"
 _WORKER_FQCN_DOT = "dllm_plugin.runtime_worker.DllmRuntimeWorker"
-_WORKER_FQCN_COLON = "dllm_plugin.runtime_worker:DllmRuntimeWorker"
 
 
 def _normalize_fqcn(value: str) -> str:
     return value.replace(":", ".")
 
 
-# Package-root alias ``dllm_plugin.Worker`` (vLLM resolves dotted qualnames only).
-_WORKER_ACCEPT_NORMALIZED: frozenset[str] = frozenset(
-    {
-        _normalize_fqcn(_WORKER_FQCN_DOT),
-        "dllm_plugin.Worker",
-    },
-)
+def _resolve_class_from_qualname(qualname: str, *, role: str) -> type[Any]:
+    """Resolve a dotted (or colon-separated) qualname to a class object.
+
+    Mirrors :func:`vllm.utils.import_utils.resolve_obj_by_qualname` so worker
+    validation inspects the same object vLLM instantiates.
+    """
+
+    normalized = _normalize_fqcn(qualname.strip())
+    if not normalized or "." not in normalized:
+        raise ValueError(
+            f"{role} must be a dotted qualname (e.g. dllm_plugin.Worker); "
+            f"got={qualname!r}",
+        )
+    module_name, obj_name = normalized.rsplit(".", 1)
+    module = importlib.import_module(module_name)
+    obj = getattr(module, obj_name)
+    if not isinstance(obj, type):
+        raise TypeError(
+            f"{role} resolved to {type(obj).__name__}, expected a class",
+        )
+    return obj
 
 
 def _get_model_architectures(vllm_config: Any) -> tuple[str, ...]:
@@ -117,11 +131,37 @@ def assert_compatible_stack(
         raise ValueError(
             f"missing parallel_config in vLLM config for dLLM runtime stack{_ctx()}",
         )
-    worker_cls = _normalize_fqcn(str(getattr(parallel_config, "worker_cls", "")))
-    if worker_cls not in _WORKER_ACCEPT_NORMALIZED:
+    worker_cls_raw = getattr(parallel_config, "worker_cls", "")
+    if not isinstance(worker_cls_raw, str):
+        raise ValueError(
+            "parallel_config.worker_cls must be a qualname string "
+            f"(got type {type(worker_cls_raw).__name__}){_ctx()}",
+        )
+    if worker_cls_raw.strip() == "auto":
+        raise ValueError(
+            "parallel_config.worker_cls is still 'auto'; "
+            "platform check_and_update_config should set a concrete worker "
+            "before dLLM stack validation"
+            f"{_ctx()}",
+        )
+    try:
+        worker_cls = _resolve_class_from_qualname(
+            worker_cls_raw,
+            role="parallel_config.worker_cls",
+        )
+    except Exception as exc:
+        raise ValueError(
+            "failed to resolve worker class for dLLM runtime stack; use "
+            "--worker-cls dllm_plugin.Worker "
+            f"(or {_WORKER_FQCN_DOT!r})"
+            f"{_ctx()}",
+        ) from exc
+    worker_fqcn = _normalize_fqcn(f"{worker_cls.__module__}.{worker_cls.__name__}")
+    if worker_fqcn != _normalize_fqcn(_WORKER_FQCN_DOT):
         raise ValueError(
             "invalid worker class for dLLM runtime stack: "
-            f"got={worker_cls!r}; pass --worker-cls dllm_plugin.Worker "
+            f"got={worker_fqcn!r} expected {_WORKER_FQCN_DOT!r}; "
+            "pass --worker-cls dllm_plugin.Worker "
             f"(or {_WORKER_FQCN_DOT!r})"
             f"{_ctx()}",
         )

@@ -89,13 +89,26 @@ def test_assert_compatible_stack_rejects_wrong_scheduler() -> None:
         assert_compatible_stack(cfg, caller="test")
 
 
-def test_assert_compatible_stack_rejects_wrong_worker() -> None:
+def test_assert_compatible_stack_rejects_worker_cls_auto() -> None:
     class DllmRuntimeScheduler:
         __module__ = "dllm_plugin.runtime_scheduler"
 
     cfg = _build_vllm_config(
         scheduler_cls=DllmRuntimeScheduler,
-        worker_cls="vllm.v1.worker.gpu_worker.Worker",
+        worker_cls="auto",
+    )
+    with pytest.raises(ValueError, match="still 'auto'"):
+        assert_compatible_stack(cfg, caller="test")
+
+
+def test_assert_compatible_stack_rejects_wrong_worker() -> None:
+    class DllmRuntimeScheduler:
+        __module__ = "dllm_plugin.runtime_scheduler"
+
+    # Wrong worker type resolvable without vLLM (minimal test envs omit vllm).
+    cfg = _build_vllm_config(
+        scheduler_cls=DllmRuntimeScheduler,
+        worker_cls="dllm_plugin.scheduler.DllmScheduler",
     )
     with pytest.raises(ValueError, match="invalid worker class"):
         assert_compatible_stack(cfg, caller="test")
