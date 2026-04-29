@@ -9,6 +9,7 @@ class is usable as ``--scheduler-cls`` when ``vllm`` is installed.
 
 from __future__ import annotations
 
+import os
 from dataclasses import replace
 from typing import Any
 
@@ -140,6 +141,8 @@ class DllmRuntimeScheduler(VllmScheduler):
         """Ensure first-step dLLM draft block is initialized for new requests."""
 
         super().add_request(request)
+        if os.environ.get("VLLM_DLLM_SKIP_FIRST_BLOCK_SEED") == "1":
+            return
         live_req = self.requests.get(request.request_id)
         if live_req is None or live_req.spec_token_ids:
             return

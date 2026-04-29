@@ -85,11 +85,15 @@ def test_gpu_dllm_stack_structured_output_regex_grammar(
     from vllm.inputs import TokensPrompt
     from vllm.sampling_params import StructuredOutputsParams
 
-    from dllm_plugin.config import DRAFT_SIZE
-
     monkeypatch.setenv("VLLM_PLUGINS", "dllm")
     monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", "1")
     monkeypatch.setenv("VLLM_ENABLE_V1_MULTIPROCESSING", "0")
+    # Avoid seeding ``spec_token_ids`` (length ``DRAFT_SIZE``): without a matching
+    # ``speculative_config``, vLLM's structured-output bitmask buffer is sized for
+    # AR-only (``max_num_seqs`` rows), but grammar fill walks one row per scheduled
+    # spec token and overflows. Skipping the seed keeps this test focused on regex
+    # SO + plugin wiring; full block+draft + SO remains covered elsewhere.
+    monkeypatch.setenv("VLLM_DLLM_SKIP_FIRST_BLOCK_SEED", "1")
 
     llm = LLM(
         model=str(mock_llada2_model_dir),
@@ -105,15 +109,6 @@ def test_gpu_dllm_stack_structured_output_regex_grammar(
         load_format="dummy",
         scheduler_cls="dllm_plugin.Scheduler",
         worker_cls="dllm_plugin.Worker",
-        # ``DllmRuntimeScheduler`` seeds ``spec_token_ids`` (length ``DRAFT_SIZE``);
-        # vLLM's SO bitmask buffer is sized from ``speculative_config`` (see
-        # ``StructuredOutputManager.grammar_bitmask``). Ngram spec is a no-op for
-        # this mock but sizes the buffer like vLLM's spec+SO tests.
-        speculative_config={
-            "method": "ngram",
-            "model": "[ngram]",
-            "num_speculative_tokens": DRAFT_SIZE,
-        },
         structured_outputs_config=StructuredOutputsConfig(backend="auto"),
         async_scheduling=False,
     )
