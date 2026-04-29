@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""Tests for ``vllm_dllm_plugin.remasking.handoff`` (issue #13).
+"""Tests for ``dllm_plugin.remasking.handoff`` (issue #13).
 
 Broader field-mapping / worker-runner contract coverage lives in issue #16.
 Tensor-shape tests use ``pytest.importorskip("torch")``; they skip in the default
@@ -15,8 +15,8 @@ from typing import Any
 
 import pytest
 
-from vllm_dllm_plugin.config import DRAFT_SIZE, LLADA2_DEFAULT_MASK_TOKEN_ID
-from vllm_dllm_plugin.remasking import (
+from dllm_plugin.config import DRAFT_SIZE, LLADA2_DEFAULT_MASK_TOKEN_ID
+from dllm_plugin.remasking import (
     Llada2DefaultRemaskingPolicy,
     RemaskStepResult,
     assert_block_logits_shape,

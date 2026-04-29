@@ -10,7 +10,7 @@ ENV/
 
 # Packaging
 *.egg-info/
-vllm_dllm_plugin.egg-info/
+dllm_plugin.egg-info/
 *.egg
 dist/
 build/

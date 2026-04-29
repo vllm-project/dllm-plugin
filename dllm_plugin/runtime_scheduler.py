@@ -11,14 +11,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from vllm_dllm_plugin.scheduler import (
+from dllm_plugin.scheduler import (
     DllmRequestState,
     DllmWorkerResult,
 )
-from vllm_dllm_plugin.scheduler import (
+from dllm_plugin.scheduler import (
     DllmScheduler as DllmSchedulerHelper,
 )
-from vllm_dllm_plugin.validation import assert_compatible_stack
+from dllm_plugin.validation import assert_compatible_stack
 
 try:
     from vllm.v1.core.sched.scheduler import Scheduler as VllmScheduler

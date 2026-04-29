@@ -1,17 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""Tests for :class:`~vllm_dllm_plugin.remasking.Llada2DefaultRemaskingPolicy`."""
+"""Tests for :class:`~dllm_plugin.remasking.Llada2DefaultRemaskingPolicy`."""
 
 from __future__ import annotations
 
 import pytest
 
-from vllm_dllm_plugin.config import (
+from dllm_plugin.config import (
     DRAFT_SIZE,
     LLADA2_DEFAULT_COMMIT_CONFIDENCE_THRESHOLD,
     LLADA2_DEFAULT_MASK_TOKEN_ID,
 )
-from vllm_dllm_plugin.remasking import (
+from dllm_plugin.remasking import (
     Llada2DefaultRemaskingPolicy,
     RemaskingPolicy,
     validate_remask_step_result,

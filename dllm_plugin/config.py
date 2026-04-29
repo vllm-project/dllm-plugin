@@ -48,15 +48,44 @@ DLLM_MOCK_STACK_MODEL_ID: Final[str] = "DllmMockLlada2StackTest"
 
 #: Lazy import target for :func:`register_dllm` (``<module>:<Class>``).
 DLLM_MOCK_MODEL_CLASS_FQCN: Final[str] = (
-    "vllm_dllm_plugin.models.mock_llada2:DllmMockLlada2ForCausalLM"
+    "dllm_plugin.models.mock_llada2:DllmMockLlada2ForCausalLM"
 )
 
-#: When ``True``, ``validation.py`` (issue #4) should treat incompatible
-#: scheduler / worker / model combinations as errors once that module exists.
-#: Operators or tests may override via future config wiring; this is the default.
-DLLM_STRICT_STACK_VALIDATION_DEFAULT: Final[bool] = True
+#: When set, overrides default strictness for :func:`resolve_strict_stack_validation`
+#: when ``explicit`` is ``None``. Values: ``1``/``true``/``yes``/``on`` (strict),
+#: ``0``/``false``/``no``/``off`` (skip validation). Unset means strict.
+DLLM_STRICT_STACK_VALIDATION_ENV_VAR: Final[str] = "VLLM_DLLM_STRICT_STACK_VALIDATION"
 
-#: Placeholder **mask** token id for :mod:`~vllm_dllm_plugin.remasking.llada2_default`
+
+def _read_strict_stack_validation_from_env() -> bool:
+    raw = os.environ.get(DLLM_STRICT_STACK_VALIDATION_ENV_VAR)
+    if raw is None or raw.strip() == "":
+        return True
+    lowered = raw.strip().lower()
+    if lowered in {"0", "false", "no", "off"}:
+        return False
+    if lowered in {"1", "true", "yes", "on"}:
+        return True
+    raise ValueError(
+        f"{DLLM_STRICT_STACK_VALIDATION_ENV_VAR} must be one of "
+        f"0/false/no/off or 1/true/yes/on; got {raw!r}",
+    )
+
+
+def resolve_strict_stack_validation(explicit: bool | None) -> bool:
+    """Return whether strict stack validation should run.
+
+    Callers pass ``explicit`` when they need a definite on/off regardless of
+    environment (tests, imperative overrides). When ``explicit`` is ``None``,
+    read :data:`DLLM_STRICT_STACK_VALIDATION_ENV_VAR` (default: strict on).
+    """
+
+    if explicit is not None:
+        return explicit
+    return _read_strict_stack_validation_from_env()
+
+
+#: Placeholder **mask** token id for :mod:`~dllm_plugin.remasking.llada2_default`
 #: ``next_input_block`` remasked positions until real HF config lands (Phase 7 / #12).
 LLADA2_DEFAULT_MASK_TOKEN_ID: Final[int] = 1
 

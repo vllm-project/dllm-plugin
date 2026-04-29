@@ -13,8 +13,12 @@ git:
 
 gpu:
   count: 1
-  type: L4
-  spot: false
+
+# Optional cluster-specific scheduling (defaults are empty = portable).
+# Set nodeSelector / extraTolerations for your GPU nodes (see README.md).
+scheduling:
+  nodeSelector: {}
+  extraTolerations: []
 
 resources:
   cpu: "6"

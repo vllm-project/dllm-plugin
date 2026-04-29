@@ -7,20 +7,29 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from vllm_dllm_plugin.config import (
+from dllm_plugin.config import (
     DLLM_MOCK_STACK_MODEL_ID,
-    DLLM_STRICT_STACK_VALIDATION_DEFAULT,
     LLADA2_ARCHITECTURE_NAME,
+    resolve_strict_stack_validation,
 )
 
-_SCHEDULER_FQCN_DOT = "vllm_dllm_plugin.runtime_scheduler.DllmRuntimeScheduler"
-_SCHEDULER_FQCN_COLON = "vllm_dllm_plugin.runtime_scheduler:DllmRuntimeScheduler"
-_WORKER_FQCN_DOT = "vllm_dllm_plugin.runtime_worker.DllmRuntimeWorker"
-_WORKER_FQCN_COLON = "vllm_dllm_plugin.runtime_worker:DllmRuntimeWorker"
+_SCHEDULER_FQCN_DOT = "dllm_plugin.runtime_scheduler.DllmRuntimeScheduler"
+_SCHEDULER_FQCN_COLON = "dllm_plugin.runtime_scheduler:DllmRuntimeScheduler"
+_WORKER_FQCN_DOT = "dllm_plugin.runtime_worker.DllmRuntimeWorker"
+_WORKER_FQCN_COLON = "dllm_plugin.runtime_worker:DllmRuntimeWorker"
 
 
 def _normalize_fqcn(value: str) -> str:
     return value.replace(":", ".")
+
+
+# Package-root aliases (``dllm_plugin:Worker`` normalizes to ``dllm_plugin.Worker``).
+_WORKER_ACCEPT_NORMALIZED: frozenset[str] = frozenset(
+    {
+        _normalize_fqcn(_WORKER_FQCN_DOT),
+        "dllm_plugin.Worker",
+    },
+)
 
 
 def _get_model_architectures(vllm_config: Any) -> tuple[str, ...]:
@@ -48,11 +57,23 @@ def assert_compatible_stack(
     vllm_config: Any,
     *,
     caller: str,
-    strict: bool = DLLM_STRICT_STACK_VALIDATION_DEFAULT,
+    strict: bool | None = None,
 ) -> None:
-    """Fail fast when scheduler/worker/model stack is incompatible for dLLM."""
+    """Fail fast when scheduler/worker/model stack is incompatible for dLLM.
 
-    if not strict:
+    ``caller`` is appended to raised :exc:`ValueError` messages as
+    ``(context: '<caller>')`` so logs distinguish scheduler vs worker vs model
+    bootstrap paths.
+
+    When ``strict`` is ``None``, effective strictness comes from
+    :func:`~dllm_plugin.config.resolve_strict_stack_validation` (see
+    :data:`~dllm_plugin.config.DLLM_STRICT_STACK_VALIDATION_ENV_VAR`).
+    """
+
+    def _ctx() -> str:
+        return f" (context: {caller!r})"
+
+    if not resolve_strict_stack_validation(strict):
         return
 
     archs = _get_model_architectures(vllm_config)
@@ -60,22 +81,23 @@ def assert_compatible_stack(
         raise ValueError(
             "dLLM runtime adapters require a dLLM-compatible model architecture "
             f"(got architectures={archs!r}); expected one of "
-            f"{(LLADA2_ARCHITECTURE_NAME, DLLM_MOCK_STACK_MODEL_ID)!r}",
+            f"{(LLADA2_ARCHITECTURE_NAME, DLLM_MOCK_STACK_MODEL_ID)!r}"
+            f"{_ctx()}",
         )
 
     scheduler_config = getattr(vllm_config, "scheduler_config", None)
     if scheduler_config is None:
         raise ValueError(
-            "missing scheduler_config in vLLM config for dLLM runtime stack",
+            f"missing scheduler_config in vLLM config for dLLM runtime stack{_ctx()}",
         )
     try:
         scheduler_cls = scheduler_config.get_scheduler_cls()
     except Exception as exc:
         raise ValueError(
             "failed to resolve scheduler class for dLLM runtime stack; use "
-            "--scheduler-cls "
-            "vllm_dllm_plugin.runtime_scheduler.DllmRuntimeScheduler "
-            "(dotted qualname expected by vLLM)",
+            "--scheduler-cls dllm_plugin:Scheduler "
+            "(or dllm_plugin.runtime_scheduler.DllmRuntimeScheduler)"
+            f"{_ctx()}",
         ) from exc
     scheduler_fqcn = _normalize_fqcn(
         f"{scheduler_cls.__module__}.{scheduler_cls.__name__}",
@@ -85,26 +107,24 @@ def assert_compatible_stack(
             "invalid scheduler class for dLLM runtime stack: "
             f"got={scheduler_fqcn!r} expected one of "
             f"{(_SCHEDULER_FQCN_DOT, _SCHEDULER_FQCN_COLON)!r}; "
-            "pass --scheduler-cls "
-            "vllm_dllm_plugin.runtime_scheduler.DllmRuntimeScheduler",
+            "pass --scheduler-cls dllm_plugin:Scheduler "
+            "(or dllm_plugin.runtime_scheduler.DllmRuntimeScheduler)"
+            f"{_ctx()}",
         )
 
     parallel_config = getattr(vllm_config, "parallel_config", None)
     if parallel_config is None:
         raise ValueError(
-            "missing parallel_config in vLLM config for dLLM runtime stack",
+            f"missing parallel_config in vLLM config for dLLM runtime stack{_ctx()}",
         )
     worker_cls = _normalize_fqcn(str(getattr(parallel_config, "worker_cls", "")))
-    if worker_cls != _normalize_fqcn(_WORKER_FQCN_DOT):
+    if worker_cls not in _WORKER_ACCEPT_NORMALIZED:
         raise ValueError(
             "invalid worker class for dLLM runtime stack: "
-            f"got={worker_cls!r} expected one of "
-            f"{(_WORKER_FQCN_DOT, _WORKER_FQCN_COLON)!r}; "
-            "pass --worker-cls "
-            "vllm_dllm_plugin.runtime_worker.DllmRuntimeWorker",
+            f"got={worker_cls!r}; pass --worker-cls dllm_plugin:Worker "
+            f"(or {_WORKER_FQCN_DOT!r})"
+            f"{_ctx()}",
         )
-
-    del caller
 
 
 __all__ = ["assert_compatible_stack"]

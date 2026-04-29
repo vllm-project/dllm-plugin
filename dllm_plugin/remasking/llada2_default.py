@@ -24,11 +24,11 @@ step returns the full decoded block as ``committed_token_ids`` and sets
 - ``commit_confidence_threshold`` (``float``): masked positions count as
   high-confidence when softmax probability at the argmax token is **strictly**
   greater than this value (default
-  :data:`~vllm_dllm_plugin.config.LLADA2_DEFAULT_COMMIT_CONFIDENCE_THRESHOLD`).
+  :data:`~dllm_plugin.config.LLADA2_DEFAULT_COMMIT_CONFIDENCE_THRESHOLD`).
 - ``mask_token_id`` (``int``): mask placeholder in drafts (default
-  :data:`~vllm_dllm_plugin.config.LLADA2_DEFAULT_MASK_TOKEN_ID`).
+  :data:`~dllm_plugin.config.LLADA2_DEFAULT_MASK_TOKEN_ID`).
 - ``denoise_steps`` (``int``): schedule length; default
-  :data:`~vllm_dllm_plugin.config.LLADA2_DEFAULT_DENOISE_STEPS`.
+  :data:`~dllm_plugin.config.LLADA2_DEFAULT_DENOISE_STEPS`.
 - ``denoise_step_index`` (``int``): zero-based index into the schedule; default ``0``.
   Production callers should pass the real step.
 - ``num_transfer`` (``int``): if set, use this count instead of the schedule entry.
@@ -44,13 +44,13 @@ import math
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from vllm_dllm_plugin.config import (
+from dllm_plugin.config import (
     DRAFT_SIZE,
     LLADA2_DEFAULT_COMMIT_CONFIDENCE_THRESHOLD,
     LLADA2_DEFAULT_DENOISE_STEPS,
     LLADA2_DEFAULT_MASK_TOKEN_ID,
 )
-from vllm_dllm_plugin.remasking.base import (
+from dllm_plugin.remasking.base import (
     RemaskStepResult,
     validate_remask_step_result,
 )
@@ -142,7 +142,7 @@ def _topk_masked_indices(
 
 
 class Llada2DefaultRemaskingPolicy:
-    """LLaDA2.0 MVP default :class:`~vllm_dllm_plugin.remasking.RemaskingPolicy`."""
+    """LLaDA2.0 MVP default :class:`~dllm_plugin.remasking.RemaskingPolicy`."""
 
     def apply(
         self,

@@ -6,8 +6,8 @@ from __future__ import annotations
 
 import pytest
 
-from vllm_dllm_plugin.config import DRAFT_SIZE, LLADA2_DEFAULT_MASK_TOKEN_ID
-from vllm_dllm_plugin.scheduler import (
+from dllm_plugin.config import DRAFT_SIZE, LLADA2_DEFAULT_MASK_TOKEN_ID
+from dllm_plugin.scheduler import (
     DllmRequestState,
     DllmScheduler,
     DllmWorkerResult,

@@ -39,7 +39,7 @@ Documentation = "https://github.com/vllm-project/dllm-plugin#readme"
 "Bug Tracker" = "https://github.com/vllm-project/dllm-plugin/issues"
 
 [project.entry-points."vllm.general_plugins"]
-dllm = "vllm_dllm_plugin:register_dllm"
+dllm = "dllm_plugin:register_dllm"
 
 [dependency-groups]
 dev = [
@@ -54,10 +54,10 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["vllm_dllm_plugin*"]
+include = ["dllm_plugin*"]
 
 [tool.setuptools.package-data]
-vllm_dllm_plugin = ["py.typed"]
+dllm_plugin = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -89,7 +89,7 @@ docstring-code-format = true
 
 [tool.ty]
 # Rely on defaults; vLLM is an optional runtime dependency (see ``[project.optional-dependencies]``).
-# ``vllm_dllm_plugin/models/mock_llada2.py`` is checked with allowed-unresolved-imports below.
+# ``dllm_plugin/models/mock_llada2.py`` is checked with allowed-unresolved-imports below.
 
 [tool.ty.analysis]
 # Dev/CI default sync omits ``torch``/``vllm``; imports are runtime-gated or skipped in tests.

@@ -9,11 +9,15 @@ import logging
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-from vllm_dllm_plugin.runtime_scheduler import DllmRuntimeScheduler
-from vllm_dllm_plugin.runtime_worker import DllmRuntimeWorker
-from vllm_dllm_plugin.scheduler import DllmScheduler
-from vllm_dllm_plugin.validation import assert_compatible_stack
-from vllm_dllm_plugin.worker import DllmWorker
+from dllm_plugin.runtime_scheduler import DllmRuntimeScheduler
+from dllm_plugin.runtime_worker import DllmRuntimeWorker
+from dllm_plugin.scheduler import DllmScheduler
+from dllm_plugin.validation import assert_compatible_stack
+from dllm_plugin.worker import DllmWorker
+
+# Short names for CLI (``dllm_plugin:Scheduler``, ``dllm_plugin:Worker``).
+Scheduler = DllmRuntimeScheduler
+Worker = DllmRuntimeWorker
 
 try:
     __version__ = version("vllm-dllm-plugin")
@@ -38,9 +42,9 @@ def register_dllm() -> None:
     ``ModelRegistry``, both pointing at the same **mock** implementation for
     Phases 2–6 stack testing (issues #5 and #24):
 
-    * :data:`~vllm_dllm_plugin.config.LLADA2_ARCHITECTURE_NAME` — placeholder
+    * :data:`~dllm_plugin.config.LLADA2_ARCHITECTURE_NAME` — placeholder
       until the real HF-mapped module ships (issue #12 / Phase 7).
-    * :data:`~vllm_dllm_plugin.config.DLLM_MOCK_STACK_MODEL_ID` — explicit test id.
+    * :data:`~dllm_plugin.config.DLLM_MOCK_STACK_MODEL_ID` — explicit test id.
 
     Uses lazy ``"<module>:<Class>"`` registration so importing this package does
     not pull ``torch``/CUDA until the model class is needed.
@@ -63,7 +67,7 @@ def register_dllm() -> None:
         )
         return
 
-    from vllm_dllm_plugin.config import (
+    from dllm_plugin.config import (
         DLLM_MOCK_MODEL_CLASS_FQCN,
         DLLM_MOCK_STACK_MODEL_ID,
         LLADA2_ARCHITECTURE_NAME,
@@ -90,6 +94,8 @@ __all__ = [
     "DllmRuntimeWorker",
     "DllmScheduler",
     "DllmWorker",
+    "Scheduler",
+    "Worker",
     "assert_compatible_stack",
     "__version__",
     "register_dllm",

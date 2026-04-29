@@ -15,17 +15,17 @@ spec:
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
       restartPolicy: Never
+{{- if .Values.scheduling.nodeSelector }}
       nodeSelector:
-        jounce.io/nodetype: {{ .Values.gpu.type | quote }}
-        jounce.io/spot: {{ .Values.gpu.spot | quote }}
+{{ toYaml .Values.scheduling.nodeSelector | nindent 8 }}
+{{- end }}
       tolerations:
         - key: nvidia.com/gpu
           operator: Exists
           effect: NoSchedule
-        - key: jounce.io/nodetype
-          operator: Equal
-          value: {{ .Values.gpu.type | quote }}
-          effect: NoSchedule
+{{- if .Values.scheduling.extraTolerations }}
+{{ toYaml .Values.scheduling.extraTolerations | nindent 8 }}
+{{- end }}
       containers:
         - name: integration
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"

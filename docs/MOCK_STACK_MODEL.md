@@ -13,8 +13,8 @@ and validation can integrate **before** real LLaDA2 weights and attention land
 | `LLADA2_ARCHITECTURE_NAME` | `LLaDA2ForCausalLM` | Placeholder prod-style name until HF mapping (#12). |
 | `DLLM_MOCK_STACK_MODEL_ID` | `DllmMockLlada2StackTest` | Explicit stack-test id. |
 
-Lazy FQCN: `vllm_dllm_plugin.config.DLLM_MOCK_MODEL_CLASS_FQCN` →
-`vllm_dllm_plugin.models.mock_llada2:DllmMockLlada2ForCausalLM`.
+Lazy FQCN: `dllm_plugin.config.DLLM_MOCK_MODEL_CLASS_FQCN` →
+`dllm_plugin.models.mock_llada2:DllmMockLlada2ForCausalLM`.
 
 ### Placeholder architecture risk (`LLaDA2ForCausalLM`)
 
@@ -59,13 +59,13 @@ Sizes are hints for tensor shapes; the mock does not implement a real transforme
   index `0`). Suitable for shape/device/dtype checks and degenerate argmax bias;
   not a proper probability distribution for logprob or diversity assertions.
   For the MVP **block** path consumed by
-  `vllm_dllm_plugin.remasking.handoff` ([issue #13](https://github.com/vllm-project/dllm-plugin/issues/13)),
+  `dllm_plugin.remasking.handoff` ([issue #13](https://github.com/vllm-project/dllm-plugin/issues/13)),
   `num_tokens` must equal **`DRAFT_SIZE`** so each row aligns with one position
   in this step's `input_draft`.
 
 **Remasking unit tests:** `Llada2DefaultRemaskingPolicy` expects drafts that use
 the configured **mask token id** (see `LLADA2_DEFAULT_MASK_TOKEN_ID` in
-`vllm_dllm_plugin.config`) for positions still being refined — not arbitrary
+`dllm_plugin.config`) for positions still being refined — not arbitrary
 token sequences. Pair stub logits with an all-mask or mixed-mask draft when
 asserting transfer behavior.
 - **Non-last PP stage:** `compute_logits` returns `None` (vLLM convention).

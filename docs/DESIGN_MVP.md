@@ -35,7 +35,7 @@ This document describes the **MVP architecture** for [`vllm-project/dllm-plugin`
 ## 3. Suggested package layout (MVP)
 
 ```text
-vllm_dllm_plugin/
+dllm_plugin/
   __init__.py              # register_dllm() entry for vllm.general_plugins
   config.py                # DRAFT_SIZE, model id constants, feature flags
   validation.py            # assert_compatible_stack(vllm_config)
@@ -52,7 +52,7 @@ vllm_dllm_plugin/
 ```
 
 **Implemented defaults:** `DRAFT_SIZE` (32 for LLaDA2.0 MVP), model identifier
-constants, and feature flags live in `vllm_dllm_plugin.config` with docstrings as
+constants, and feature flags live in `dllm_plugin.config` with docstrings as
 the implementer-facing source of truth (milestone issue #3).
 
 Naming is illustrative; the PyPI distribution is **`vllm-dllm-plugin`**.
@@ -184,13 +184,21 @@ flowchart TB
 - **Input:** Current input block, logits (or equivalent), optional request config (e.g. threshold).
 - **Output:** `committed_token_ids: list[int]` (0..N), `next_input_block: list[int]` (length `DRAFT_SIZE`), and internal mask/draft state for logging.
 
-**Shape checks:** `RemaskStepResult` (see `vllm_dllm_plugin.remasking`) does not validate lengths at construction. After `RemaskingPolicy.apply`, the worker or policy boundary should run `validate_remask_step_result()` (same package) or the concrete policy should raise `ValueError` for invalid shapes, consistent with the protocol docstring on `apply`.
+**Shape checks:** `RemaskStepResult` (see `dllm_plugin.remasking`) does not validate lengths at construction. After `RemaskingPolicy.apply`, the worker or policy boundary should run `validate_remask_step_result()` (same package) or the concrete policy should raise `ValueError` for invalid shapes, consistent with the protocol docstring on `apply`.
 
 **Lists vs tuples:** Conceptual output above uses `list[int]`; the implemented `RemaskStepResult` uses immutable `tuple[int, ...]`. Worker code should convert where vLLM/engine APIs require lists.
 
 **Protocol runtime checks:** `RemaskingPolicy` is `@runtime_checkable`; `isinstance(obj, RemaskingPolicy)` only checks for a callable `apply`, not full signature compliance or return types. Use tests and static typing for the real contract.
 
 **LLaDA2.0 default** implements one concrete policy (e.g. confidence-based commit + remask rest); additional policies can plug in as new `RemaskingPolicy` implementations without changing the worker’s engine contract.
+
+### 8.1 Phase 3–4 bridge (#13 / #10)
+
+Phase 6 documentation **does not** replace Phase 3–4 obligations; it layers validation and runtime adapters on top:
+
+- **Issue #13 (`remasking/handoff.py`):** After the last pipeline-parallel forward, `remask_after_block_forward` consumes **2-D** block logits `(DRAFT_SIZE, vocab_size)` and a concrete `RemaskingPolicy`. Non-last PP ranks do not run remasking (`logits is None`).
+- **Issue #10 (`worker.py`):** `DllmWorker.run_one_block` wires forward outputs through that helper and maps `RemaskStepResult` into scheduler-visible fields (`DllmWorkerStep` / `take_draft_token_ids`).
+- **Commit-0 vs policy stepping:** Scheduler **commit-0** rollback when `sampled_token_ids` is empty is independent of **`Llada2DefaultRemaskingPolicy`** inner transfer scheduling (`denoise_steps`, `denoise_step_index`, …). Copy-friendly tables live in `docs/CONTRACTS.md` (forward → remasking + `remasking_config` keys).
 
 ---
 
@@ -261,11 +269,11 @@ virtual req 0 (q,k over {0,1}):   virtual req 1 (over {2,3}):   virtual req 2 (o
 ```bash
 export VLLM_PLUGINS=dllm
 vllm serve <model> \
-  --scheduler-cls vllm_dllm_plugin.runtime_scheduler.DllmRuntimeScheduler \
-  --worker-cls vllm_dllm_plugin.runtime_worker.DllmRuntimeWorker
+  --scheduler-cls dllm_plugin:Scheduler \
+  --worker-cls dllm_plugin:Worker
 ```
 
-Current MVP runtime class targets are `vllm_dllm_plugin.runtime_scheduler.DllmRuntimeScheduler` and `vllm_dllm_plugin.runtime_worker.DllmRuntimeWorker`. Helper classes (`vllm_dllm_plugin.scheduler:DllmScheduler`, `vllm_dllm_plugin.worker:DllmWorker`) remain the contract core used by adapters. Before the first decode schedule, `request.spec_token_ids` must hold the first input block (`DRAFT_SIZE` tokens); the plugin scheduler initializes it (prompt suffix + mask padding per this MVP design). Strict stack validation (`vllm_dllm_plugin.validation.assert_compatible_stack(...)`) runs in runtime adapter constructors and at mock-model runtime initialization, so dLLM architecture + incompatible scheduler/worker fails fast.
+Current MVP runtime adapters are `DllmRuntimeScheduler` / `DllmRuntimeWorker`, exposed for CLI as **`dllm_plugin:Scheduler`** / **`dllm_plugin:Worker`** or full dotted paths under `dllm_plugin.runtime_*`. Helper classes (`dllm_plugin.scheduler:DllmScheduler`, `dllm_plugin.worker:DllmWorker`) remain the contract core used by adapters. Before the first decode schedule, `request.spec_token_ids` must hold the first input block (`DRAFT_SIZE` tokens); the plugin scheduler initializes it (prompt suffix + mask padding per this MVP design). Strict stack validation (`dllm_plugin.validation.assert_compatible_stack(...)`) runs in runtime adapter constructors and at mock-model runtime initialization, so dLLM architecture + incompatible scheduler/worker fails fast.
 
 Phase 6 integration confidence includes a concrete runtime integration test (`tests/test_vllm_mock_integration.py`) that instantiates vLLM runtime objects with the plugin adapters and executes one mock-stack generation step (GPU-gated).
 

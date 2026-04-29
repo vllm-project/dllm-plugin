@@ -48,8 +48,8 @@ That is **intentional** for reproducible **`uv sync --extra vllm`** installs. Ex
 Hooks use **`uv`** on your `PATH`:
 
 1. **`uv sync --locked --group dev`** when `pyproject.toml` or `uv.lock` changes — fails if the lockfile is out of date. After dependency edits, run **`uv lock`** and commit **`uv.lock`**.
-2. **`uv run ruff check`** and **`uv run ruff format --check`** on `vllm_dllm_plugin/` and `tests/` when those paths or **`pyproject.toml`** change (same versions as **`uv.lock`**; avoids running on doc-only commits).
-3. **`uv run ty check`** when **`vllm_dllm_plugin/**/*.py`** or **`pyproject.toml`** changes.
+2. **`uv run ruff check`** and **`uv run ruff format --check`** on `dllm_plugin/` and `tests/` when those paths or **`pyproject.toml`** change (same versions as **`uv.lock`**; avoids running on doc-only commits).
+3. **`uv run ty check`** when **`dllm_plugin/**/*.py`** or **`pyproject.toml`** changes.
 
 Run **`uv sync --group dev`** once locally so **`uv run`** can resolve tools without extra network work during commits.
 
@@ -62,6 +62,10 @@ Run all hooks on every file (matches CI):
 ```bash
 uv run pre-commit run --all-files
 ```
+
+## Milestone PR descriptions
+
+Orchestration issue **[#19](https://github.com/vllm-project/dllm-plugin/issues/19)** suggests structured PR descriptions (phase label, HARD/SOFT dependencies, checklist). Optional copy-paste starter: **`docs/MILESTONE_PR_CHECKLIST.md`**.
 
 ## CI parity
 
@@ -97,8 +101,8 @@ For milestone work, use the repository PR template at **`.github/PULL_REQUEST_TE
 From the synced environment (lockfile-pinned tool versions):
 
 ```bash
-uv run ruff check vllm_dllm_plugin tests
-uv run ruff format --check vllm_dllm_plugin tests
+uv run ruff check dllm_plugin tests
+uv run ruff format --check dllm_plugin tests
 uv run ty check
 uv run pytest
 ```
@@ -134,7 +138,7 @@ The distribution version is **derived from git** via **[setuptools-scm](https://
 
 ## SPDX headers (Python)
 
-New **`.py`** files under **`vllm_dllm_plugin/`** and **`tests/`** should start with the same SPDX lines as vLLM core:
+New **`.py`** files under **`dllm_plugin/`** and **`tests/`** should start with the same SPDX lines as vLLM core:
 
 ```text
 # SPDX-License-Identifier: Apache-2.0

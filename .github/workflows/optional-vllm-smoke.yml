@@ -41,6 +41,6 @@ jobs:
         run: uv sync --locked --group dev --extra vllm
       - name: Tests (vLLM extra)
         run: uv run pytest -q
-      # GitHub-hosted ubuntu-latest has no CUDA; this test is expected to skip here.
-      - name: Mock-stack integration test (GPU-gated, expected skip on non-GPU runner)
+      # GitHub-hosted ubuntu-latest has no CUDA; only the LLM.generate step is skipped.
+      - name: Mock-stack LLM.generate integration (GPU-gated, expected skip here)
         run: uv run pytest -q -rs tests/test_vllm_mock_integration.py

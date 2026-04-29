@@ -15,22 +15,22 @@ repos:
         files: ^(pyproject\.toml|uv\.lock)$
       - id: ruff-check
         name: ruff check
-        entry: uv run ruff check vllm_dllm_plugin tests
+        entry: uv run ruff check dllm_plugin tests
         language: system
         pass_filenames: false
-        files: ^(vllm_dllm_plugin|tests)/.*\.py$|^pyproject\.toml$
+        files: ^(dllm_plugin|tests)/.*\.py$|^pyproject\.toml$
       - id: ruff-format
         name: ruff format --check
-        entry: uv run ruff format --check vllm_dllm_plugin tests
+        entry: uv run ruff format --check dllm_plugin tests
         language: system
         pass_filenames: false
-        files: ^(vllm_dllm_plugin|tests)/.*\.py$|^pyproject\.toml$
+        files: ^(dllm_plugin|tests)/.*\.py$|^pyproject\.toml$
       - id: ty-check
         name: ty check
         entry: uv run ty check
         language: system
         pass_filenames: false
-        files: ^vllm_dllm_plugin/.*\.py$|^pyproject\.toml$
+        files: ^dllm_plugin/.*\.py$|^pyproject\.toml$
       - id: git-signoff
         name: git-signoff (commit message)
         description: Adds a 'Signed-off-by:' trailer to the commit message (DCO).

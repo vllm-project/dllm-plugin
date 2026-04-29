@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""Forward output to :class:`~vllm_dllm_plugin.remasking.RemaskingPolicy` (issue #13).
+"""Forward output to :class:`~dllm_plugin.remasking.RemaskingPolicy` (issue #13).
 
 After one block forward on the **last** pipeline-parallel rank, ``compute_logits``
-(see :mod:`vllm_dllm_plugin.models.mock_llada2` and ``docs/MOCK_STACK_MODEL.md``)
+(see :mod:`dllm_plugin.models.mock_llada2` and ``docs/MOCK_STACK_MODEL.md``)
 must yield a **2-D** tensor of shape ``(DRAFT_SIZE, vocab_size)`` (or an
 equivalent nested sequence). Row ``i`` aligns with ``input_draft[i]``.
 
@@ -22,8 +22,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from vllm_dllm_plugin.config import DRAFT_SIZE
-from vllm_dllm_plugin.remasking.base import (
+from dllm_plugin.config import DRAFT_SIZE
+from dllm_plugin.remasking.base import (
     RemaskingPolicy,
     RemaskStepResult,
     validate_remask_step_result,
@@ -38,7 +38,7 @@ def assert_block_logits_shape(logits: Any, *, draft_size: int = DRAFT_SIZE) -> N
 
     For nested sequences, only the **outer** length is checked here; consistent
     per-row vocabulary width is enforced by the concrete policy (e.g.
-    :class:`~vllm_dllm_plugin.remasking.Llada2DefaultRemaskingPolicy` via
+    :class:`~dllm_plugin.remasking.Llada2DefaultRemaskingPolicy` via
     ``_logits_to_rows``), not by this helper.
     """
     if logits is None:
@@ -76,7 +76,7 @@ def remask_after_block_forward(
 
     Intended call site: ``DllmWorker`` (issue #10) after last-rank
     ``compute_logits``, before mapping
-    :class:`~vllm_dllm_plugin.remasking.RemaskStepResult` into
+    :class:`~dllm_plugin.remasking.RemaskStepResult` into
     ``ModelRunnerOutput.sampled_token_ids`` and the draft return path
     (``docs/DESIGN_MVP.md`` §6–7).
 
@@ -84,14 +84,14 @@ def remask_after_block_forward(
         input_draft: This step's draft, length ``draft_size`` (aligned with
             ``scheduled_spec_decode_tokens``).
         logits: Non-``None`` block logits, 2-D ``(draft_size, vocab_size)``.
-        policy: Concrete :class:`~vllm_dllm_plugin.remasking.RemaskingPolicy`
-            (e.g. :class:`~vllm_dllm_plugin.remasking.Llada2DefaultRemaskingPolicy`
+        policy: Concrete :class:`~dllm_plugin.remasking.RemaskingPolicy`
+            (e.g. :class:`~dllm_plugin.remasking.Llada2DefaultRemaskingPolicy`
             for the LLaDA2 MVP). Callers must supply this; there is no default
             implementation in this helper.
         remasking_config: Optional knobs forwarded to ``policy.apply``.
 
     Returns:
-        Validated :class:`~vllm_dllm_plugin.remasking.RemaskStepResult`.
+        Validated :class:`~dllm_plugin.remasking.RemaskStepResult`.
 
     Raises:
         ValueError: If ``input_draft`` length is wrong, ``logits`` is ``None``,

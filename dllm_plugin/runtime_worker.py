@@ -7,14 +7,14 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, cast
 
-from vllm_dllm_plugin.config import (
+from dllm_plugin.config import (
     DLLM_MOCK_STACK_MODEL_ID,
     DRAFT_SIZE,
 )
-from vllm_dllm_plugin.remasking import Llada2DefaultRemaskingPolicy
-from vllm_dllm_plugin.validation import assert_compatible_stack
-from vllm_dllm_plugin.worker import DllmWorker as DllmWorkerHelper
-from vllm_dllm_plugin.worker import DllmWorkerStep
+from dllm_plugin.remasking import Llada2DefaultRemaskingPolicy
+from dllm_plugin.validation import assert_compatible_stack
+from dllm_plugin.worker import DllmWorker as DllmWorkerHelper
+from dllm_plugin.worker import DllmWorkerStep
 
 _MISSING = object()
 
@@ -49,7 +49,11 @@ def build_mock_model_block_logits(
 
 
 def _normalize_block_logits_rows(*, logits: Any, draft_size: int) -> list[list[float]]:
-    """Normalize and validate score rows for one remask block."""
+    """Normalize and validate score rows for one remask block.
+
+    Phase 6 mock-stack: Python ``float`` rows are fine for small vocabs. Phase 7
+    (real-model logits, large vocabs) should avoid eager full-row materialization here.
+    """
 
     if len(logits) != draft_size:
         raise ValueError(

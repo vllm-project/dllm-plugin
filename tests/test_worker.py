@@ -9,9 +9,9 @@ from typing import Any
 
 import pytest
 
-from vllm_dllm_plugin.config import DRAFT_SIZE, LLADA2_DEFAULT_MASK_TOKEN_ID
-from vllm_dllm_plugin.remasking import Llada2DefaultRemaskingPolicy, RemaskStepResult
-from vllm_dllm_plugin.worker import (
+from dllm_plugin.config import DRAFT_SIZE, LLADA2_DEFAULT_MASK_TOKEN_ID
+from dllm_plugin.remasking import Llada2DefaultRemaskingPolicy, RemaskStepResult
+from dllm_plugin.worker import (
     DllmWorker,
     is_v2_model_runner_enabled,
 )

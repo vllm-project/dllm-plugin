@@ -3,7 +3,7 @@
 """``RemaskingPolicy`` contract (protocol) for MVP dLLM decode steps.
 
 Invariants align with ``docs/DESIGN_MVP.md`` section 8 (remasking composability)
-and use :data:`~vllm_dllm_plugin.config.DRAFT_SIZE` for next-block length.
+and use :data:`~dllm_plugin.config.DRAFT_SIZE` for next-block length.
 Concrete policies (e.g. LLaDA2.0 default) live in separate modules (issue #7).
 """
 
@@ -13,7 +13,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
-from vllm_dllm_plugin.config import DRAFT_SIZE
+from dllm_plugin.config import DRAFT_SIZE
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,7 +35,7 @@ class RemaskStepResult:
     next_input_block: tuple[int, ...]
     """Next-step **input block** for the scheduler / draft path.
 
-    Must have length exactly :data:`~vllm_dllm_plugin.config.DRAFT_SIZE`
+    Must have length exactly :data:`~dllm_plugin.config.DRAFT_SIZE`
     (section 8: ``next_input_block`` / MASK + decoded positions).
     """
 
@@ -97,7 +97,7 @@ def validate_remask_step_result(
 ) -> None:
     """Assert MVP shape constraints against ``draft_size``.
 
-    Compare :data:`~vllm_dllm_plugin.config.DRAFT_SIZE`. For per-model or
+    Compare :data:`~dllm_plugin.config.DRAFT_SIZE`. For per-model or
     per-request block sizes, this helper would need an explicit length argument or
     a different entry point; calling it when the live block size differs from
     ``config.DRAFT_SIZE`` would be incorrect (MVP assumes one global draft size).

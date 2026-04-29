@@ -15,7 +15,7 @@ fail before ``forward`` until DllmWorker / model parity work (milestone issue
 #10) adds factory hooks or an early error when PP > 1.
 
 **HF config:** ``architectures`` must include a name registered in
-``register_dllm()`` (see ``vllm_dllm_plugin.config`` and ``docs/MOCK_STACK_MODEL.md``).
+``register_dllm()`` (see ``dllm_plugin.config`` and ``docs/MOCK_STACK_MODEL.md``).
 ``hidden_size`` and ``vocab_size`` should be set; defaults below apply if absent.
 
 Pipeline-parallel staging is only **partially** mimicked: non-last ranks return
@@ -35,7 +35,7 @@ from vllm.config import VllmConfig
 from vllm.distributed.parallel_state import get_pp_group
 from vllm.sequence import IntermediateTensors
 
-from vllm_dllm_plugin.validation import assert_compatible_stack
+from dllm_plugin.validation import assert_compatible_stack
 
 try:
     from vllm.model_executor.layers.attention.layer import Attention

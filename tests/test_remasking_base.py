@@ -9,8 +9,8 @@ from typing import Any
 
 import pytest
 
-from vllm_dllm_plugin.config import DRAFT_SIZE
-from vllm_dllm_plugin.remasking import (
+from dllm_plugin.config import DRAFT_SIZE
+from dllm_plugin.remasking import (
     RemaskingPolicy,
     RemaskStepResult,
     validate_remask_step_result,

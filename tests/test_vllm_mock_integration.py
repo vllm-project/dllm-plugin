@@ -33,8 +33,8 @@ def test_vllm_mock_stack_end_to_end_gpu(monkeypatch: pytest.MonkeyPatch) -> None
         max_model_len=128,
         max_num_seqs=1,
         load_format="dummy",
-        scheduler_cls="vllm_dllm_plugin.runtime_scheduler.DllmRuntimeScheduler",
-        worker_cls="vllm_dllm_plugin.runtime_worker.DllmRuntimeWorker",
+        scheduler_cls="dllm_plugin:Scheduler",
+        worker_cls="dllm_plugin:Worker",
     )
     outputs = llm.generate(
         [TokensPrompt(prompt_token_ids=[1, 2, 3, 4])],

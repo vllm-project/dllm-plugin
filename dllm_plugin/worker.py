@@ -13,9 +13,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from vllm_dllm_plugin.config import DRAFT_SIZE
-from vllm_dllm_plugin.remasking import RemaskingPolicy, remask_after_block_forward
-from vllm_dllm_plugin.scheduler import DllmWorkerResult
+from dllm_plugin.config import DRAFT_SIZE
+from dllm_plugin.remasking import RemaskingPolicy, remask_after_block_forward
+from dllm_plugin.scheduler import DllmWorkerResult
 
 
 def is_v2_model_runner_enabled() -> bool:
