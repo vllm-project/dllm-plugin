@@ -14,11 +14,24 @@ git:
 gpu:
   count: 1
 
-# Optional cluster-specific scheduling (defaults are empty = portable).
-# Set nodeSelector / extraTolerations for your GPU nodes (see README.md).
+# Pytest targets (GPU job): mock-stack smoke, MRV2 subclass + structured-output regex,
+# and two-phase contract imports (needs ``--extra vllm``).
+tests:
+  pytestPaths:
+    - tests/test_vllm_mock_integration.py
+    - tests/test_vllm_gpu_mrv2_monkeypatch_grammar.py
+    - tests/test_two_phase_dllm.py
+
+# Cluster GPU pool: match dedicated GPU node taints (see README).
+# The jounce.io L4 pool uses this alongside the standard nvidia.com/gpu taint
+# (the Job template always includes the nvidia.com/gpu toleration).
 scheduling:
   nodeSelector: {}
-  extraTolerations: []
+  extraTolerations:
+    - key: jounce.io/nodetype
+      operator: Equal
+      value: L4
+      effect: NoSchedule
 
 resources:
   cpu: "6"

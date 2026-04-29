@@ -88,6 +88,10 @@ class DllmRuntimeScheduler(VllmScheduler):
         """Attach precomputed grammar bitmask metadata for dLLM workers."""
 
         out = super().schedule()
+        # Frontier repair metadata for dLLM structured outputs. Consumed in phase two
+        # by :class:`~dllm_plugin.gpu_model_runner.DllmGPUModelRunner` (stashed from
+        # ``SchedulerOutput`` in ``execute_model``). ``GrammarOutput`` still arrives via
+        # ``sample_tokens`` from the engine; these fields are not a second grammar path.
         out.dllm_grammar_output = None
         out.dllm_so_frontier_flat_indices = None
         out.dllm_so_frontier_block_rows = None

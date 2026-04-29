@@ -93,4 +93,4 @@ docstring-code-format = true
 
 [tool.ty.analysis]
 # Dev/CI default sync omits ``torch``/``vllm``; imports are runtime-gated or skipped in tests.
-allowed-unresolved-imports = ["torch.**", "vllm.**"]
+allowed-unresolved-imports = ["numpy.**", "torch.**", "vllm.**"]

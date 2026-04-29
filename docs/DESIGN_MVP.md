@@ -142,6 +142,16 @@ sequenceDiagram
   DllmSched->>DllmSched: spec_token_ids equals next block
 ```
 
+On the **v2 GPU model runner** stack, the engine actually performs **two phases** per step: `GPUModelRunner.execute_model` runs the forward and returns `None` on the last pipeline rank while stashing hidden states in `execute_model_state`; the driver then calls `sample_tokens(grammar_output)`, which applies structured-output bitmasks (when present), runs sampling/remasking, and builds `ModelRunnerOutput`. The diagram above is logically accurate for data flow; timing-wise, remap “forward” to phase one and “set sampled_token_ids / drafts” to phase two (`sample` / `sample_tokens`).
+
+### 6.1 Two-phase API alignment (v2)
+
+The plugin installs `DllmGPUModelRunner`, which subclasses vLLM’s `GPUModelRunner` and moves **dLLM block remasking** into `sample` / `sample_tokens`, alongside stock `apply_grammar_bitmask` behavior when `GrammarOutput` is provided. Scheduler extras for frontier structured-output repair (`dllm_so_*` on `SchedulerOutput`) are copied in `execute_model` and consumed next to `grammar_output` in phase two—there is no separate grammar application on `execute_model` outputs.
+
+**Mutual exclusion:** do not combine Eagle (or other target+draft-model) speculative decoding with the dLLM block path on the same run; the runner skips `speculator.propose` when servicing a dLLM block batch and emits drafts via the same `take_draft_token_ids` hook spec decode uses.
+
+**CUDA graphs:** prefer `enforce_eager` or non-`FULL` cudagraph modes for dLLM until any capture/replay path is validated against the custom `sample` branch; treating this like other non-standard sampling paths is the supported MVP stance.
+
 **Commit-0:** In `update_from_output`, if `sampled_token_ids` is empty for a request, the scheduler rolls back `num_computed_tokens` by the number of tokens scheduled that step (typically `DRAFT_SIZE` in this MVP design).
 
 ---

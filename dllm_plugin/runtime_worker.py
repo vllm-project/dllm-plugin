@@ -7,27 +7,27 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, cast
 
-from dllm_plugin.config import (
-    DLLM_MOCK_STACK_MODEL_ID,
-    DRAFT_SIZE,
-)
-from dllm_plugin.grammar_utils import (
-    apply_packed_bitmask_inplace_logits_row,
-    grammar_extra_transfer_slots,
-)
+from dllm_plugin.config import DLLM_MOCK_STACK_MODEL_ID, DRAFT_SIZE
 from dllm_plugin.remasking import Llada2DefaultRemaskingPolicy
 from dllm_plugin.validation import assert_compatible_stack
-from dllm_plugin.worker import DllmWorker as DllmWorkerHelper
-from dllm_plugin.worker import DllmWorkerStep
+from dllm_plugin.worker import DllmWorker, DllmWorkerStep
 
 _MISSING = object()
 
 try:
+    from vllm.tracing import instrument
     from vllm.v1.outputs import DraftTokenIds
     from vllm.v1.worker.gpu_worker import Worker as VllmGPUWorker
 
     _VLLM_AVAILABLE = True
 except ImportError:  # pragma: no cover - exercised only in no-vLLM envs.
+
+    def instrument(*_args: Any, **_kwargs: Any) -> Any:
+        def _decorator(fn: Any) -> Any:
+            return fn
+
+        return _decorator
+
     VllmGPUWorker = object
     DraftTokenIds = Any
     _VLLM_AVAILABLE = False
@@ -167,7 +167,7 @@ def resolve_runtime_block_logits(
 
 def run_block_contract_from_model_output(
     *,
-    helper: DllmWorkerHelper,
+    helper: DllmWorker,
     request_id: str,
     input_draft: list[int],
     logits: Any,
@@ -246,128 +246,42 @@ class DllmRuntimeWorker(VllmGPUWorker):
             )
         super().__init__(*args, **kwargs)
         assert_compatible_stack(self.vllm_config, caller="DllmRuntimeWorker.__init__")
-        # Reuse helper to keep one source of truth for v2 requirement and draft
-        # block shape validations.
-        self._dllm_helper = DllmWorkerHelper(require_v2_model_runner=True)
-        self._dllm_last_draft_token_ids: DraftTokenIds | None = None
-        self._dllm_expected_draft_req_ids: set[str] | None = None
+        self._dllm_helper = DllmWorker(require_v2_model_runner=True)
+
+    @instrument(span_name="Init device")
+    def init_device(self) -> None:
+        """Install :class:`~dllm_plugin.gpu_model_runner.DllmGPUModelRunner` for v2."""
+        super().init_device()
+        if getattr(self, "use_v2_model_runner", False):
+            from dllm_plugin.gpu_model_runner import DllmGPUModelRunner
+
+            self.model_runner = DllmGPUModelRunner(self.vllm_config, self.device)
 
     def execute_model(self, scheduler_output: Any) -> Any:
-        output = super().execute_model(scheduler_output)
-        # Only process concrete model outputs from last PP stage.
-        if output is None or not hasattr(output, "sampled_token_ids"):
-            return output
+        """Phase one only: forward + stash state; sampling runs in ``sample_tokens``."""
 
-        expected_req_ids = set(output.req_ids)
-        next_req_ids: list[str] = []
-        next_blocks: list[list[int]] = []
-        for idx, (req_id, _sampled_token_ids) in enumerate(
-            zip(output.req_ids, output.sampled_token_ids, strict=True),
-        ):
-            input_draft = validate_runtime_input_draft(
-                request_id=req_id,
-                input_draft=scheduler_output.scheduled_spec_decode_tokens.get(req_id),
-                draft_size=self._dllm_helper.draft_size,
-            )
-            block_logits = resolve_runtime_block_logits(
-                model_output=output,
-                request_id=req_id,
-                request_index=idx,
-                draft_size=self._dllm_helper.draft_size,
-                vllm_config=self.vllm_config,
-            )
-            go = getattr(scheduler_output, "dllm_grammar_output", None)
-            flat_indices = getattr(
-                scheduler_output,
-                "dllm_so_frontier_flat_indices",
-                None,
-            )
-            block_rows = getattr(
-                scheduler_output,
-                "dllm_so_frontier_block_rows",
-                None,
-            )
-            prefix_lens = getattr(
-                scheduler_output,
-                "dllm_so_valid_prefix_lens",
-                None,
-            )
-            so_reqs = getattr(go, "structured_output_request_ids", None) if go else None
-            if (
-                go is not None
-                and flat_indices is not None
-                and block_rows is not None
-                and so_reqs is not None
-                and req_id in so_reqs
-            ):
-                br = block_rows.get(req_id)
-                fi = flat_indices.get(req_id)
-                if br is not None and fi is not None:
-                    row_bm = go.grammar_bitmask[int(fi)]
-                    apply_packed_bitmask_inplace_logits_row(block_logits[br], row_bm)
-
-            extra_transfer = 0
-            if prefix_lens is not None and req_id in prefix_lens:
-                extra_transfer = grammar_extra_transfer_slots(
-                    draft_tokens=input_draft,
-                    valid_prefix_len=prefix_lens[req_id],
-                )
-            remasking_cfg = (
-                {"grammar_extra_transfer": extra_transfer} if extra_transfer else None
-            )
-            step = run_block_contract_from_model_output(
-                helper=self._dllm_helper,
-                request_id=req_id,
-                input_draft=list(input_draft),
-                logits=block_logits,
-                remasking_config=remasking_cfg,
-            )
-            output.sampled_token_ids[idx] = list(step.sampled_token_ids)
-            next_req_ids.append(req_id)
-            next_blocks.append(list(self._dllm_helper.take_draft_token_ids(step)))
-
-        validate_runtime_draft_handoff_coverage(
-            expected_req_ids=expected_req_ids,
-            produced_req_ids=next_req_ids,
-        )
-        self._dllm_expected_draft_req_ids = expected_req_ids
-        self._dllm_last_draft_token_ids = (
-            cast(Any, DraftTokenIds)(
-                req_ids=next_req_ids,
-                draft_token_ids=next_blocks,
-            )
-            if next_req_ids
-            else None
-        )
-        return output
+        return super().execute_model(scheduler_output)
 
     def take_draft_token_ids(self) -> DraftTokenIds | None:
-        draft_token_ids = self._dllm_last_draft_token_ids
-        if draft_token_ids is not None:
-            self._dllm_last_draft_token_ids = None
-        else:
-            draft_token_ids = super().take_draft_token_ids()
-        if draft_token_ids is None:
-            return None
-        expected_req_ids = self._dllm_expected_draft_req_ids
-        if expected_req_ids is not None:
-            validate_runtime_draft_handoff_coverage(
-                expected_req_ids=expected_req_ids,
-                produced_req_ids=list(draft_token_ids.req_ids),
-            )
-            self._dllm_expected_draft_req_ids = None
-        for req_id, next_block in zip(
-            draft_token_ids.req_ids,
-            draft_token_ids.draft_token_ids,
-            strict=True,
-        ):
-            self._dllm_helper.take_draft_token_ids(
-                DllmWorkerStep(
-                    request_id=req_id,
-                    sampled_token_ids=(),
-                    next_input_block=tuple(next_block),
-                ),
-            )
+        mr = self.model_runner
+        take_dllm = getattr(mr, "take_dllm_draft_token_ids", None)
+        if callable(take_dllm):
+            draft_token_ids = take_dllm()
+            if draft_token_ids is not None:
+                for req_id, next_block in zip(
+                    draft_token_ids.req_ids,
+                    draft_token_ids.draft_token_ids,
+                    strict=True,
+                ):
+                    self._dllm_helper.take_draft_token_ids(
+                        DllmWorkerStep(
+                            request_id=req_id,
+                            sampled_token_ids=(),
+                            next_input_block=tuple(next_block),
+                        ),
+                    )
+                return draft_token_ids
+        draft_token_ids = super().take_draft_token_ids()
         return draft_token_ids
 
 

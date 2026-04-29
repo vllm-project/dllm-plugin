@@ -13,6 +13,7 @@ def _install_alias() -> None:
     sys.modules.setdefault("vllm_dllm_plugin", dllm_plugin)
     submods = (
         "config",
+        "gpu_model_runner",
         "grammar_utils",
         "models.mock_llada2",
         "models",

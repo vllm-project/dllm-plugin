@@ -31,6 +31,8 @@ export VLLM_USE_V2_MODEL_RUNNER=1
 
 There is **no supported fallback** from v2 to v1 for the mock-stack path: if your environment cannot enable the v2 model runner, treat the mock-stack integration test and operator workflow as **not applicable** until v2 is available—do not expect partial correctness on v1.
 
+**Two-phase execution:** On v2, inference does **not** attach final tokens in `execute_model`; the worker’s model runner returns `None` after forward and performs dLLM remasking in **phase two** (`sample_tokens` → `sample`). Structured-output grammar bitmasks arrive on that path (`GrammarOutput`), consistent with AR and vanilla spec-decode. Do **not** enable Eagle (or similar draft-model speculative decoding) together with the dLLM plugin stack for the same requests—the stacks are mutually exclusive for MVP.
+
 Keep `VLLM_ENABLE_V1_MULTIPROCESSING=0` for the documented integration test to avoid multiprocessing differences on single-process bring-up.
 
 ### Strict stack validation toggle
@@ -102,11 +104,14 @@ integration result remains auditable after pod cleanup.
 
 ## Helm GPU job (`tools/helm/dllm-plugin-gpu-test`)
 
-The chart is a **template**: default `values.yaml` uses **empty** `scheduling.nodeSelector`
-and `scheduling.extraTolerations` so the Job schedules anywhere GPU capacity exists.
-**You must fork** and set selectors/tolerations to match **your** cluster’s accelerator
-labels (see `tools/helm/dllm-plugin-gpu-test/README.md`). Do not assume organization-specific
-keys from another fleet apply to yours.
+The chart defaults include tolerations for **`nvidia.com/gpu`** (in the Job template) and
+the **jounce.io L4** GPU pool (`scheduling.extraTolerations` in `values.yaml`). If your
+cluster does not use those taints, clear or replace them (see
+`tools/helm/dllm-plugin-gpu-test/README.md`).
+
+The Job runs **`tests.pytestPaths`** from `values.yaml`, including **mock-stack GPU smoke**,
+**`DllmGPUModelRunner` monkeypatch + regex structured output**, and **two-phase MRV2**
+contract tests—override `tests.pytestPaths` if you need a narrower run.
 
 ## Notes
 

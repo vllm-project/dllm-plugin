@@ -57,4 +57,4 @@ spec:
               cd /app
               uv python pin 3.12
               uv sync --group dev --extra vllm
-              uv run pytest -q tests/test_vllm_mock_integration.py
+              uv run pytest -q{{- range .Values.tests.pytestPaths }} {{ . }}{{- end }}
