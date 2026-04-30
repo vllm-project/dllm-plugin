@@ -269,11 +269,6 @@ class DllmRuntimeWorker(VllmGPUWorker):
 
             self.model_runner = DllmGPUModelRunner(self.vllm_config, self.device)
 
-    def execute_model(self, scheduler_output: Any) -> Any:
-        """Phase one only: forward + stash state; sampling runs in ``sample_tokens``."""
-
-        return super().execute_model(scheduler_output)
-
     def take_draft_token_ids(self) -> DraftTokenIds | None:
         """Prefer dLLM runner hook ``take_dllm_draft_token_ids`` when present.
 

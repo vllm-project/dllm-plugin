@@ -35,14 +35,9 @@ def test_dllm_gpu_model_runner_overrides_phase_two_hooks() -> None:
     pytest.importorskip("vllm")
     from vllm.v1.worker.gpu.model_runner import GPUModelRunner
 
-    from dllm_plugin.gpu_model_runner import (
-        DllmGPUModelRunner,
-        HookedGPUModelRunner,
-        _GPUModelRunnerPrepareInputsFork,
-    )
+    from dllm_plugin.gpu_model_runner import DllmGPUModelRunner, HookedGPUModelRunner
 
     assert issubclass(DllmGPUModelRunner, HookedGPUModelRunner)
-    assert _GPUModelRunnerPrepareInputsFork is HookedGPUModelRunner
     assert HookedGPUModelRunner.prepare_inputs is not GPUModelRunner.prepare_inputs
     assert DllmGPUModelRunner.prepare_inputs is HookedGPUModelRunner.prepare_inputs
     assert (
@@ -63,3 +58,12 @@ def test_dllm_runtime_worker_wraps_init_device_for_dllm_runner() -> None:
     src = inspect.getsource(rw.DllmRuntimeWorker.init_device)
     assert "DllmGPUModelRunner" in src
     assert "super().init_device()" in src
+
+
+def test_dllm_runtime_worker_inherits_execute_model() -> None:
+    """``execute_model`` is stock v2 worker + runner; no redundant ``super()`` shim."""
+
+    pytest.importorskip("vllm")
+    from dllm_plugin.runtime_worker import DllmRuntimeWorker
+
+    assert "execute_model" not in DllmRuntimeWorker.__dict__

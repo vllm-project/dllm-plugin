@@ -273,12 +273,8 @@ class DllmGPUModelRunner(HookedGPUModelRunner):
         return out
 
 
-# Back-compat for tests and external references to the old private fork name.
-_GPUModelRunnerPrepareInputsFork = HookedGPUModelRunner
-
 __all__ = [
     "DllmGPUModelRunner",
     "HookedGPUModelRunner",
-    "_GPUModelRunnerPrepareInputsFork",
     "_dllm_architecture_match",
 ]
