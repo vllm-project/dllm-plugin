@@ -151,12 +151,19 @@ else:  # pragma: no cover
     _VLLM_INPUT_BATCH_LEGACY = False
 
 
-def _int_token_count(n: Any) -> int:
-    """Coerce token count: ``int`` on older vLLM; 0.20+ may use a scalar tensor."""
+def _prepare_inputs_padding_len(second: Any) -> int:
+    """Normalize ``prepare_inputs``'s second argument across vLLM versions.
 
-    if isinstance(n, torch.Tensor):
-        return int(n.detach().cpu().item())
-    return int(n)
+    Older releases pass ``num_tokens_after_padding`` as ``int`` or scalar tensor;
+    v0.20+ may pass a ``BatchExecutionDescriptor`` with ``num_tokens``.
+    """
+
+    n = getattr(second, "num_tokens", None)
+    if n is not None:
+        second = n
+    if isinstance(second, torch.Tensor):
+        return int(second.detach().cpu().item())
+    return int(second)
 
 
 def _dllm_architecture_match(vllm_config: Any) -> bool:
@@ -398,7 +405,7 @@ class DllmGPUModelRunner(GPUModelRunner):
         schedules ``DRAFT_SIZE`` logits rows per request without Eagle, so we take
         ``max(num_speculative_steps + 1, max_logits_per_request)``.
         """
-        num_tokens_after_padding = _int_token_count(num_tokens_after_padding)
+        num_tokens_after_padding = _prepare_inputs_padding_len(num_tokens_after_padding)
         if _VLLM_INPUT_BATCH_LEGACY:
             return self._prepare_inputs_v014(scheduler_output, num_tokens_after_padding)
 
