@@ -127,13 +127,11 @@ except ImportError:  # pragma: no cover
 
 if _VLLM:
     _gpu_mr_cls = cast(Any, GPUModelRunner)
-    # Mainline vLLM adds kwargs (``skip_attn_for_dummy_run``); v0.14.x ``execute_model``
-    # only accepts ``(scheduler_output, intermediate_tensors, dummy_run)``.
-    _VLLM_EXECUTE_HAS_SKIP_ATTN = (
-        "skip_attn_for_dummy_run"
-        in inspect.signature(
-            _gpu_mr_cls.execute_model,
-        ).parameters
+    # Forward only parameters the installed ``GPUModelRunner.execute_model`` accepts
+    # (e.g. ``skip_attn_for_dummy_run``, ``is_profile`` on v0.20+) so subclasses stay
+    # compatible across minors without ``TypeError`` on unexpected kwargs.
+    _EXECUTE_MODEL_PARAM_NAMES = frozenset(
+        inspect.signature(_gpu_mr_cls.execute_model).parameters
     )
     # v0.14.x: ``sample(..., sampling_metadata, grammar_output)`` — five parameters
     # including ``self``; newer releases drop ``sampling_metadata``.
@@ -148,7 +146,7 @@ if _VLLM:
         {},
     )
 else:  # pragma: no cover
-    _VLLM_EXECUTE_HAS_SKIP_ATTN = False
+    _EXECUTE_MODEL_PARAM_NAMES = frozenset()
     _VLLM_LEGACY_SAMPLE_5ARG = False
     _VLLM_INPUT_BATCH_LEGACY = False
 
@@ -209,6 +207,7 @@ class DllmGPUModelRunner(GPUModelRunner):
         intermediate_tensors: IntermediateTensorsType | None = None,
         dummy_run: bool = False,
         skip_attn_for_dummy_run: bool = False,
+        **kwargs: Any,
     ) -> ModelRunnerOutput | IntermediateTensorsType | None:
         self._dllm_pending_draft_ids = None
         if not dummy_run:
@@ -218,8 +217,11 @@ class DllmGPUModelRunner(GPUModelRunner):
             "intermediate_tensors": intermediate_tensors,
             "dummy_run": dummy_run,
         }
-        if _VLLM_EXECUTE_HAS_SKIP_ATTN:
+        if "skip_attn_for_dummy_run" in _EXECUTE_MODEL_PARAM_NAMES:
             kw["skip_attn_for_dummy_run"] = skip_attn_for_dummy_run
+        for name, val in kwargs.items():
+            if name in _EXECUTE_MODEL_PARAM_NAMES:
+                kw[name] = val
         return super().execute_model(**kw)
 
     def _prepare_inputs_v014(
