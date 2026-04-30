@@ -24,6 +24,7 @@ pin, re-check upstream APIs and update this file and `DESIGN_MVP.md` together
 | `SchedulerOutput.num_scheduled_tokens` (per request) | Set to **`DRAFT_SIZE`** for decode steps on the block path. |
 | `ModelRunnerOutput.sampled_token_ids` | **Committed** token IDs only; length **0..`DRAFT_SIZE`** (may be empty). |
 | Worker `take_draft_token_ids()` | Returns the **next-step input block** as `DraftTokenIds` for engine -> scheduler. |
+| Runner `take_dllm_draft_token_ids()` | **dLLM v2:** phase-two pop of the next block; worker delegates here when present (distinct from upstream spec-decode runner draft hooks). |
 | Scheduler `update_draft_token_ids` / `update_draft_token_ids_in_output` | Store the next block into `spec_token_ids`. **Must not** apply AR draft grammar to dLLM blocks (scheduler overrides for structured output / async). |
 
 **Runtime wiring note:** CLI overrides use runtime adapters (preferred:

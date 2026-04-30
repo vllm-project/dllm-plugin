@@ -275,6 +275,11 @@ class DllmRuntimeWorker(VllmGPUWorker):
         return super().execute_model(scheduler_output)
 
     def take_draft_token_ids(self) -> DraftTokenIds | None:
+        """Prefer dLLM runner hook ``take_dllm_draft_token_ids`` when present.
+
+        Upstream spec decode uses ``model_runner.take_draft_token_ids``; dLLM blocks use
+        runner ``take_dllm_draft_token_ids`` when implemented (see gpu_model_runner).
+        """
         mr = self.model_runner
         take_dllm = getattr(mr, "take_dllm_draft_token_ids", None)
         if callable(take_dllm):

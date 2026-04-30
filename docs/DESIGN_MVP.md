@@ -167,6 +167,7 @@ The plugin installs `DllmGPUModelRunner`, which subclasses vLLM’s `GPUModelRun
 | `SchedulerOutput.num_scheduled_tokens` (per request) | Set to `DRAFT_SIZE` for decode steps using the block path. |
 | `ModelRunnerOutput.sampled_token_ids` | **Committed** token IDs only, length 0..`DRAFT_SIZE` (may be empty). |
 | Worker `take_draft_token_ids()` | Returns **next-step input block** packaged as `DraftTokenIds` for engine → scheduler. |
+| Runner `take_dllm_draft_token_ids()` | **dLLM v2 only:** pops remasked next block after phase two; worker `take_draft_token_ids` calls this when defined (separate name from upstream spec-decode runner hooks — issue #10). |
 | Scheduler `update_draft_token_ids` / `update_draft_token_ids_in_output` | Store next block into `spec_token_ids`; **must not** apply AR draft grammar to dLLM blocks (override for structured output / async). |
 
 Mutually exclusive with true speculative decoding on the same requests: operators must not enable spec-decode + dLLM plugin stack together for the same run mode.

@@ -93,6 +93,10 @@ class _GPUModelRunnerPrepareInputsFork(GPUModelRunner):
 
     Differs from stock ``GPUModelRunner`` only through
     :meth:`get_expand_idx_mapping_block_size`, matching a plausible upstream hook.
+
+    **Rebase baseline:** track drift against upstream
+    ``GPUModelRunner.prepare_inputs`` at tag **`v0.20.0`**
+    (<https://github.com/vllm-project/vllm/tree/v0.20.0>) when merging vLLM churn.
     """
 
     def get_expand_idx_mapping_block_size(self, max_logits_per_req: int) -> int:
@@ -507,6 +511,8 @@ class DllmGPUModelRunner(_GPUModelRunnerPrepareInputsFork):
             and input_batch.num_draft_tokens > 0
         )
         if dllm_block:
+            # Async: return wrapper like stock ``GPUModelRunner.sample_tokens`` so the
+            # engine drives ``AsyncOutput.get_output()`` on the copy stream path.
             if self.use_async_scheduling:
                 return async_output
             return async_output.get_output()
@@ -533,7 +539,12 @@ class DllmGPUModelRunner(_GPUModelRunnerPrepareInputsFork):
         return async_output.get_output()
 
     def take_dllm_draft_token_ids(self) -> Any | None:
-        """Pop draft blocks produced by dLLM remasking (phase two)."""
+        """Pop draft blocks produced by dLLM remasking (phase two).
+
+        Named distinctly from upstream runner ``take_draft_token_ids`` so dLLM block
+        handoff does not collide with Eagle/spec-decoder drafts; the worker delegates
+        from its ``take_draft_token_ids`` (issue #10 — intentional naming deviation).
+        """
 
         out = self._dllm_pending_draft_ids
         self._dllm_pending_draft_ids = None

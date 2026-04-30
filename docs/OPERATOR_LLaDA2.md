@@ -15,6 +15,13 @@ uv sync --group dev --extra vllm
 - vLLM compatibility/minimum tested range follows `pyproject.toml`
   (`vllm>=0.20.0,<0.21`); track pin and hook confidence updates via issue `#2`.
 
+- **PyPI wheels vs companion plumbing:** A matching **`pyproject.toml` pin** does not
+  automatically mean every **`dllm_*`** field on **`SchedulerOutput`** or related
+  **`EngineCore`** batch paths exist on the wheel you installed. Until maintainers
+  confirm parity with stock PyPI builds, treat **GPU / Helm** integration runs as the
+  authority for structured-output E2E; merging plugin issues **#9** / **#10** does not
+  assert “works on PyPI vLLM alone” without that verification (see **#2**).
+
 - vLLM plugin loading enabled:
 
 ```bash
@@ -34,6 +41,15 @@ There is **no supported fallback** from v2 to v1 for the mock-stack path: if you
 **Two-phase execution:** On v2, inference does **not** attach final tokens in `execute_model`; the worker’s model runner returns `None` after forward and performs dLLM remasking in **phase two** (`sample_tokens` → `sample`). Structured-output grammar bitmasks arrive on that path (`GrammarOutput`), consistent with AR and vanilla spec-decode. Do **not** enable Eagle (or similar draft-model speculative decoding) together with the dLLM plugin stack for the same requests—the stacks are mutually exclusive for MVP.
 
 Keep `VLLM_ENABLE_V1_MULTIPROCESSING=0` for the documented integration test to avoid multiprocessing differences on single-process bring-up.
+
+### Draft handoff naming (#10)
+
+The engine still calls the worker’s **`take_draft_token_ids()`**. On the v2 stack,
+:class:`~dllm_plugin.gpu_model_runner.DllmGPUModelRunner` exposes
+**`take_dllm_draft_token_ids()`** (not the upstream runner hook name used by Eagle-style
+spec decode) so dLLM **`DraftTokenIds`** stay semantically separate from vanilla
+speculative drafts. :class:`~dllm_plugin.runtime_worker.DllmRuntimeWorker` prefers that
+method when present, then falls back to **`super().take_draft_token_ids()`**.
 
 ### Strict stack validation toggle
 

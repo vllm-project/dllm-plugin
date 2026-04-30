@@ -179,6 +179,8 @@ class DllmRuntimeScheduler(VllmScheduler):
     ) -> None:
         """Refresh deferred scheduler drafts without grammar shortening / -1 padding."""
 
+        # Always empty: dLLM blocks do not populate AR spec-decode invalid-token maps.
+        # If upstream starts relying on this field for dLLM-shaped batches, revisit.
         num_invalid_spec_tokens: dict[str, int] = {}
 
         sched_spec_tokens = scheduler_output.scheduled_spec_decode_tokens

@@ -11,6 +11,7 @@ from dllm_plugin.grammar_utils import (
     frontier_block_row,
     grammar_extra_transfer_slots,
     scheduled_spec_decode_tokens_for_grammar_bitmask,
+    valid_prefix_tokens_for_draft,
 )
 
 
@@ -55,3 +56,76 @@ def test_scheduled_spec_decode_tokens_non_so_passthrough() -> None:
         structured_output_manager=MagicMock(),
     )
     assert out["r"] == [1, 2, 3]
+
+
+def test_valid_prefix_tokens_for_draft_so_calls_validate_tokens() -> None:
+    """Grammar stub truncates invalid tail; bitmask scheduling sees prefix only."""
+
+    grammar = MagicMock()
+    grammar.validate_tokens = MagicMock(
+        side_effect=lambda toks: list(toks[:3]) if len(toks) > 3 else list(toks)
+    )
+    meta = MagicMock()
+    meta.grammar = grammar
+    req = MagicMock()
+    req.use_structured_output = True
+    req.structured_output_request = meta
+    som = MagicMock()
+    som.should_advance.return_value = True
+
+    draft = [10, 20, 30, 999, 888]
+    out = valid_prefix_tokens_for_draft(
+        request=req,
+        draft_tokens=draft,
+        structured_output_manager=som,
+    )
+    grammar.validate_tokens.assert_called_once_with(draft)
+    assert out == [10, 20, 30]
+
+
+def test_valid_prefix_tokens_when_should_advance_false_skips_validate() -> None:
+    grammar = MagicMock()
+    grammar.validate_tokens = MagicMock()
+    meta = MagicMock()
+    meta.grammar = grammar
+    req = MagicMock()
+    req.use_structured_output = True
+    req.structured_output_request = meta
+    som = MagicMock()
+    som.should_advance.return_value = False
+
+    draft = [1, 2, 3, 9]
+    out = valid_prefix_tokens_for_draft(
+        request=req,
+        draft_tokens=draft,
+        structured_output_manager=som,
+    )
+    grammar.validate_tokens.assert_not_called()
+    assert out == draft
+
+
+def test_scheduled_spec_decode_tokens_so_prefix_per_request() -> None:
+    def _validate(toks: list[int]) -> list[int]:
+        return toks[:1]
+
+    g_a = MagicMock()
+    g_a.validate_tokens = MagicMock(side_effect=_validate)
+    meta_a = MagicMock()
+    meta_a.grammar = g_a
+    req_a = MagicMock()
+    req_a.use_structured_output = True
+    req_a.structured_output_request = meta_a
+
+    req_b = MagicMock()
+    req_b.use_structured_output = False
+
+    som = MagicMock()
+    som.should_advance.return_value = True
+
+    out = scheduled_spec_decode_tokens_for_grammar_bitmask(
+        scheduled_spec_decode_tokens={"a": [7, 8, 9], "b": [4, 5]},
+        requests={"a": req_a, "b": req_b},
+        structured_output_manager=som,
+    )
+    assert out["a"] == [7]
+    assert out["b"] == [4, 5]
