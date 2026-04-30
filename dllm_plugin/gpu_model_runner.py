@@ -775,8 +775,9 @@ class DllmGPUModelRunner(GPUModelRunner):
             "sampler_output": sampler_output,
             "num_sampled_tokens": num_sampled,
             "copy_stream": self.output_copy_stream,
-            "copy_event": self.output_copy_event,
         }
+        if "copy_event" in _ao_params and hasattr(self, "output_copy_event"):
+            _ao_kw["copy_event"] = self.output_copy_event
         if "main_stream" in _ao_params:
             _ao_kw["main_stream"] = self.main_stream
         async_output = AsyncOutput(**_ao_kw)
