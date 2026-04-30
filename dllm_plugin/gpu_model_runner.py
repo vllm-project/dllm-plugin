@@ -151,6 +151,14 @@ else:  # pragma: no cover
     _VLLM_INPUT_BATCH_LEGACY = False
 
 
+def _int_token_count(n: Any) -> int:
+    """Coerce token count: ``int`` on older vLLM; 0.20+ may use a scalar tensor."""
+
+    if isinstance(n, torch.Tensor):
+        return int(n.detach().cpu().item())
+    return int(n)
+
+
 def _dllm_architecture_match(vllm_config: Any) -> bool:
     hf = getattr(getattr(vllm_config, "model_config", None), "hf_config", None)
     if hf is None:
@@ -382,7 +390,7 @@ class DllmGPUModelRunner(GPUModelRunner):
         )
 
     def prepare_inputs(
-        self, scheduler_output: SchedulerOutputType, num_tokens_after_padding: int
+        self, scheduler_output: SchedulerOutputType, num_tokens_after_padding: Any
     ) -> InputBatch:
         """Same as upstream, but ``expand_idx_mapping`` must cover full dLLM blocks.
 
@@ -390,6 +398,7 @@ class DllmGPUModelRunner(GPUModelRunner):
         schedules ``DRAFT_SIZE`` logits rows per request without Eagle, so we take
         ``max(num_speculative_steps + 1, max_logits_per_request)``.
         """
+        num_tokens_after_padding = _int_token_count(num_tokens_after_padding)
         if _VLLM_INPUT_BATCH_LEGACY:
             return self._prepare_inputs_v014(scheduler_output, num_tokens_after_padding)
 
