@@ -139,3 +139,10 @@ contract tests—override `tests.pytestPaths` if you need a narrower run.
 - **Bitmask buffer sizing:** If ``speculative_config.num_speculative_tokens`` is unset,
   raise it to at least ``DRAFT_SIZE - 1`` when using structured outputs at scale, or rely on
   a vLLM build that extends grammar-bitmask allocation for large dLLM blocks.
+- **Two-stage grammar (GPU + frontier):** vLLM applies the batch grammar bitmask on GPU
+  logits; the plugin may apply an additional **frontier-row** mask on CPU-materialized
+  block logits before remasking — both target the same frontier semantics (first invalid
+  grammar position).
+- **Test-only env:** ``VLLM_DLLM_SKIP_FIRST_BLOCK_SEED=1`` skips seeding the first dLLM
+  draft block for new requests (used by GPU grammar tests). Do **not** set this in
+  production-like deployments.

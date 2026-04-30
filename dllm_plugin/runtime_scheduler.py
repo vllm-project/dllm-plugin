@@ -141,6 +141,7 @@ class DllmRuntimeScheduler(VllmScheduler):
         """Ensure first-step dLLM draft block is initialized for new requests."""
 
         super().add_request(request)
+        # Test-only: skip first-block seed for GPU grammar tests (see OPERATOR doc).
         if os.environ.get("VLLM_DLLM_SKIP_FIRST_BLOCK_SEED") == "1":
             return
         live_req = self.requests.get(request.request_id)

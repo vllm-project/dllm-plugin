@@ -17,8 +17,7 @@ _MISSING = object()
 try:
     from vllm.tracing import instrument
 except ImportError:  # pragma: no cover
-    # vLLM 0.14.x ships ``vllm/tracing.py`` only; there is no ``instrument``
-    # decorator (that API lives under ``vllm/tracing/`` in newer releases).
+    # ``vllm`` not installed (e.g. CI without ``--extra vllm``): no-op decorator.
     def instrument(
         obj: Any | None = None,
         *,

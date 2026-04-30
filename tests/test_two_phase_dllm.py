@@ -35,9 +35,23 @@ def test_dllm_gpu_model_runner_overrides_phase_two_hooks() -> None:
     pytest.importorskip("vllm")
     from vllm.v1.worker.gpu.model_runner import GPUModelRunner
 
-    from dllm_plugin.gpu_model_runner import DllmGPUModelRunner
+    from dllm_plugin.gpu_model_runner import (
+        DllmGPUModelRunner,
+        _GPUModelRunnerPrepareInputsFork,
+    )
 
-    assert DllmGPUModelRunner.prepare_inputs is not GPUModelRunner.prepare_inputs
+    assert issubclass(DllmGPUModelRunner, _GPUModelRunnerPrepareInputsFork)
+    assert (
+        _GPUModelRunnerPrepareInputsFork.prepare_inputs
+        is not GPUModelRunner.prepare_inputs
+    )
+    assert (
+        DllmGPUModelRunner.prepare_inputs
+        is _GPUModelRunnerPrepareInputsFork.prepare_inputs
+    )
+    assert DllmGPUModelRunner.get_expand_idx_mapping_block_size is not (
+        _GPUModelRunnerPrepareInputsFork.get_expand_idx_mapping_block_size
+    )
     assert DllmGPUModelRunner.sample is not GPUModelRunner.sample
     assert DllmGPUModelRunner.sample_tokens is not GPUModelRunner.sample_tokens
     assert DllmGPUModelRunner.execute_model is not GPUModelRunner.execute_model

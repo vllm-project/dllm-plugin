@@ -7,6 +7,14 @@ Keeps parity with stock :class:`~vllm.v1.worker.gpu.model_runner.GPUModelRunner`
 non-dLLM batches; on dLLM block decode (scheduled spec decode slots), overrides
 :meth:`sample` to run block remasking instead of AR sampling + rejection.
 
+**Target vLLM:** ``0.20.x`` only (no legacy 0.14 / pre-``ExecuteModelState`` paths).
+
+``prepare_inputs`` is forked from upstream and kept aligned via a single hook,
+:meth:`_GPUModelRunnerPrepareInputsFork.get_expand_idx_mapping_block_size`, intended
+to match a future upstream extension point. :class:`DllmGPUModelRunner` widens that
+hook for dLLM architectures. Maintainers should expect periodic rebases when
+``GPUModelRunner.prepare_inputs`` changes (see milestone #19 / issue #2).
+
 See ``docs/DESIGN_MVP.md`` for the two-phase contract.
 """
 
@@ -17,6 +25,23 @@ from typing import Any, cast
 
 import numpy as np
 import torch
+from vllm.sequence import IntermediateTensors as IntermediateTensorsType
+from vllm.v1.core.sched.output import GrammarOutput as GrammarOutputType
+from vllm.v1.core.sched.output import SchedulerOutput as SchedulerOutputType
+from vllm.v1.outputs import ModelRunnerOutput
+from vllm.v1.worker.gpu.async_utils import AsyncOutput
+from vllm.v1.worker.gpu.buffer_utils import async_copy_to_gpu
+from vllm.v1.worker.gpu.input_batch import (
+    InputBatch,
+    combine_sampled_and_draft_tokens,
+    expand_idx_mapping,
+    get_num_sampled_and_rejected,
+    prepare_pos_seq_lens,
+    prepare_prefill_inputs,
+)
+from vllm.v1.worker.gpu.model_runner import GPUModelRunner
+from vllm.v1.worker.gpu.pp_utils import pp_broadcast, pp_receive
+from vllm.v1.worker.gpu.sample.output import SamplerOutput
 
 from dllm_plugin.config import (
     DLLM_MOCK_STACK_MODEL_ID,
@@ -29,140 +54,14 @@ from dllm_plugin.grammar_utils import (
 )
 from dllm_plugin.worker import DllmWorker
 
-try:
-    from vllm.v1.worker.gpu.buffer_utils import async_copy_to_gpu
-except ImportError:  # pragma: no cover - vLLM 0.14.x had no standalone helper
-
-    def async_copy_to_gpu(
-        x: torch.Tensor | np.ndarray,
-        out: torch.Tensor | None = None,
-        device: torch.device | None = None,
-    ) -> torch.Tensor:
-        """Match newer ``vllm.v1.worker.gpu.buffer_utils.async_copy_to_gpu``."""
-
-        if isinstance(x, np.ndarray):
-            x = torch.from_numpy(x)
-        assert x.is_cpu
-
-        if out is None:
-            assert device is not None
-            out = torch.empty_like(x, device=device)
-
-        tmp = x.pin_memory()
-        assert tmp is not x
-        return out.copy_(tmp, non_blocking=True)
-
-
-try:
-    from vllm.v1.worker.gpu.pp_utils import pp_broadcast, pp_receive
-except ImportError:  # pragma: no cover - vLLM 0.14.x had no ``gpu/pp_utils.py``
-
-    def pp_broadcast(
-        sampled_token_ids: torch.Tensor,
-        num_sampled: torch.Tensor,
-        num_rejected: torch.Tensor,
-    ) -> None:
-        from vllm.distributed.parallel_state import get_pp_group
-
-        pp = get_pp_group()
-        assert pp.is_last_rank
-        assert sampled_token_ids.dtype == torch.int64
-        torch.distributed.broadcast(
-            sampled_token_ids.contiguous(),
-            src=pp.last_rank,
-            group=pp.device_group,
-        )
-        combined = torch.stack((num_sampled, num_rejected), dim=0)
-        torch.distributed.broadcast(combined, src=pp.last_rank, group=pp.device_group)
-
-    def pp_receive(
-        num_reqs: int, max_sample_len: int = 1
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        from vllm.distributed.parallel_state import get_pp_group
-
-        pp = get_pp_group()
-        assert not pp.is_last_rank
-        sampled_tokens = torch.empty(
-            num_reqs,
-            max_sample_len,
-            dtype=torch.int64,
-            device=pp.device,
-        )
-        torch.distributed.broadcast(
-            sampled_tokens,
-            src=pp.last_rank,
-            group=pp.device_group,
-        )
-        combined = torch.empty(2, num_reqs, dtype=torch.int32, device=pp.device)
-        torch.distributed.broadcast(combined, src=pp.last_rank, group=pp.device_group)
-        num_sampled, num_rejected = combined.unbind(dim=0)
-        return sampled_tokens, num_sampled, num_rejected
-
-
-try:
-    from vllm.sequence import IntermediateTensors as IntermediateTensorsType
-    from vllm.v1.core.sched.output import GrammarOutput as GrammarOutputType
-    from vllm.v1.core.sched.output import SchedulerOutput as SchedulerOutputType
-    from vllm.v1.outputs import ModelRunnerOutput
-    from vllm.v1.worker.gpu.async_utils import AsyncOutput
-    from vllm.v1.worker.gpu.attn_utils import build_attn_metadata
-    from vllm.v1.worker.gpu.input_batch import (
-        InputBatch,
-        combine_sampled_and_draft_tokens,
-        expand_idx_mapping,
-        get_num_sampled_and_rejected,
-        prepare_pos_seq_lens,
-        prepare_prefill_inputs,
-    )
-    from vllm.v1.worker.gpu.model_runner import GPUModelRunner
-    from vllm.v1.worker.gpu.sample.output import SamplerOutput
-
-    _VLLM = True
-except ImportError:  # pragma: no cover
-    _VLLM = False
-    GPUModelRunner = object
-    IntermediateTensorsType = Any
-    GrammarOutputType = Any
-    SchedulerOutputType = Any
-
-if _VLLM:
-    _gpu_mr_cls = cast(Any, GPUModelRunner)
-    # Forward only parameters the installed ``GPUModelRunner.execute_model`` accepts
-    # (e.g. ``skip_attn_for_dummy_run``, ``is_profile`` on v0.20+) so subclasses stay
-    # compatible across minors without ``TypeError`` on unexpected kwargs.
-    _EXECUTE_MODEL_PARAM_NAMES = frozenset(
-        inspect.signature(_gpu_mr_cls.execute_model).parameters
-    )
-    # v0.14.x: ``sample(..., sampling_metadata, grammar_output)`` — five parameters
-    # including ``self``; newer releases drop ``sampling_metadata``.
-    _VLLM_LEGACY_SAMPLE_5ARG = (
-        len(inspect.signature(_gpu_mr_cls.sample).parameters) >= 5
-    )
-    # Mainline ``InputBatch`` adds ``expanded_local_pos``, DCP fields, etc.; v0.14.x
-    # matches the older dataclass (``mrope_positions``, ``attn_metadata``, …).
-    _VLLM_INPUT_BATCH_LEGACY = "expanded_local_pos" not in getattr(
-        InputBatch,
-        "__dataclass_fields__",
-        {},
-    )
-    _VLLM_INPUT_BATCH_HAS_REQ_PADDING = "num_reqs_after_padding" in getattr(
-        InputBatch,
-        "__dataclass_fields__",
-        {},
-    )
-else:  # pragma: no cover
-    _EXECUTE_MODEL_PARAM_NAMES = frozenset()
-    _VLLM_LEGACY_SAMPLE_5ARG = False
-    _VLLM_INPUT_BATCH_LEGACY = False
-    _VLLM_INPUT_BATCH_HAS_REQ_PADDING = False
+_gpu_mr_cls = cast(Any, GPUModelRunner)
+_EXECUTE_MODEL_PARAM_NAMES = frozenset(
+    inspect.signature(_gpu_mr_cls.execute_model).parameters
+)
 
 
 def _unpack_prepare_inputs_batch_arg(second: Any, num_reqs: int) -> tuple[int, int]:
-    """Return ``(num_tokens_after_padding, num_reqs_padded)`` for ``prepare_inputs``.
-
-    v0.20+ passes ``BatchExecutionDescriptor`` (``num_tokens``, optional ``num_reqs``);
-    older releases pass ``int`` or scalar tensor token counts only.
-    """
+    """Return ``(num_tokens_after_padding, num_reqs_padded)`` for ``prepare_inputs``."""
 
     desc_nt = getattr(second, "num_tokens", None)
     if desc_nt is not None:
@@ -189,233 +88,27 @@ def _dllm_architecture_match(vllm_config: Any) -> bool:
     return bool(names.intersection(dllm_names))
 
 
-class DllmGPUModelRunner(GPUModelRunner):
-    """v2 GPU model runner with dLLM block sampling in phase two."""
+class _GPUModelRunnerPrepareInputsFork(GPUModelRunner):
+    """Fork of ``GPUModelRunner.prepare_inputs`` for vLLM **0.20.x** layout.
 
-    def __init__(self, vllm_config: Any, device: torch.device) -> None:
-        if not _VLLM:
-            raise RuntimeError("DllmGPUModelRunner requires vLLM.")
-        super().__init__(vllm_config, device)
-        # v0.14.x ``GPUModelRunner`` never assigns this until ``execute_model`` runs;
-        # mainline initializes ``execute_model_state = None`` in ``__init__``. Align.
-        if not hasattr(self, "execute_model_state"):
-            self.execute_model_state = None
-        #: Width for sampled-token tensor rows (rejection / post_update layout).
-        self._dllm_slot_width = max(self.num_speculative_steps + 1, DRAFT_SIZE)
-        self._dllm_helper = DllmWorker(require_v2_model_runner=True)
-        self._dllm_scheduled_spec_decode_tokens: dict[str, tuple[int, ...]] = {}
-        self._dllm_so_frontier_flat_indices: dict[str, int] | None = None
-        self._dllm_so_frontier_block_rows: dict[str, int | None] | None = None
-        self._dllm_so_valid_prefix_lens: dict[str, int] | None = None
-        self._dllm_pending_draft_ids: Any = None
+    Differs from stock ``GPUModelRunner`` only through
+    :meth:`get_expand_idx_mapping_block_size`, matching a plausible upstream hook.
+    """
 
-    def _dllm_capture_scheduler_extras(
-        self, scheduler_output: SchedulerOutputType
-    ) -> None:
-        if not _dllm_architecture_match(self.vllm_config):
-            return
-        raw = getattr(scheduler_output, "scheduled_spec_decode_tokens", None) or {}
-        self._dllm_scheduled_spec_decode_tokens = {k: tuple(v) for k, v in raw.items()}
-        self._dllm_so_frontier_flat_indices = getattr(
-            scheduler_output, "dllm_so_frontier_flat_indices", None
-        )
-        self._dllm_so_frontier_block_rows = getattr(
-            scheduler_output, "dllm_so_frontier_block_rows", None
-        )
-        self._dllm_so_valid_prefix_lens = getattr(
-            scheduler_output, "dllm_so_valid_prefix_lens", None
-        )
+    def get_expand_idx_mapping_block_size(self, max_logits_per_req: int) -> int:
+        """Triton ``BLOCK_SIZE`` for :func:`~expand_idx_mapping`.
+
+        Stock ``GPUModelRunner`` (0.20.x) uses ``num_speculative_steps + 1`` only;
+        this fork also bounds below by ``max_logits_per_req`` so wide per-request
+        logit rows remain valid. Subclasses may widen further.
+        """
+
+        return max(self.num_speculative_steps + 1, max_logits_per_req)
 
     @torch.inference_mode()
-    def execute_model(
-        self,
-        scheduler_output: SchedulerOutputType,
-        intermediate_tensors: IntermediateTensorsType | None = None,
-        dummy_run: bool = False,
-        skip_attn_for_dummy_run: bool = False,
-        **kwargs: Any,
-    ) -> ModelRunnerOutput | IntermediateTensorsType | None:
-        self._dllm_pending_draft_ids = None
-        if not dummy_run:
-            self._dllm_capture_scheduler_extras(scheduler_output)
-        kw: dict[str, Any] = {
-            "scheduler_output": scheduler_output,
-            "intermediate_tensors": intermediate_tensors,
-            "dummy_run": dummy_run,
-        }
-        if "skip_attn_for_dummy_run" in _EXECUTE_MODEL_PARAM_NAMES:
-            kw["skip_attn_for_dummy_run"] = skip_attn_for_dummy_run
-        for name, val in kwargs.items():
-            if name in _EXECUTE_MODEL_PARAM_NAMES:
-                kw[name] = val
-        return super().execute_model(**kw)
-
-    def _prepare_inputs_v014(
-        self, scheduler_output: SchedulerOutputType, num_tokens_after_padding: int
-    ) -> InputBatch:
-        """v0.14.x ``InputBatch`` / ``prepare_inputs`` (incl. ``attn_metadata``)."""
-
-        num_tokens = scheduler_output.total_num_scheduled_tokens
-        assert num_tokens > 0
-        num_reqs = len(scheduler_output.num_scheduled_tokens)
-
-        req_ids = sorted(
-            scheduler_output.num_scheduled_tokens.keys(),
-            key=lambda k: scheduler_output.num_scheduled_tokens[k],
-        )
-        num_scheduled_tokens = np.array(
-            [scheduler_output.num_scheduled_tokens[i] for i in req_ids],
-            dtype=np.int32,
-        )
-
-        idx_mapping_list = [
-            self.req_states.req_id_to_index[req_id] for req_id in req_ids
-        ]
-        idx_mapping_np = np.array(idx_mapping_list, dtype=np.int32)
-        idx_mapping = self.tmp_idx_mapping.copy_to_gpu(idx_mapping_np)
-
-        if not scheduler_output.scheduled_spec_decode_tokens:
-            total_num_draft_tokens = 0
-            total_num_logits = num_reqs
-            cu_num_logits_np = np.arange(num_reqs + 1, dtype=np.int32)
-            cu_num_logits = torch.arange(
-                num_reqs + 1, device=self.device, dtype=torch.int32
-            )
-            expanded_idx_mapping = idx_mapping
-        else:
-            draft_tokens = scheduler_output.scheduled_spec_decode_tokens
-            num_draft_tokens = np.array(
-                [
-                    len(draft_tokens[req_id]) if req_id in draft_tokens else 0
-                    for req_id in req_ids
-                ],
-                dtype=np.int32,
-            )
-            total_num_draft_tokens = int(num_draft_tokens.sum())
-            total_num_logits = num_reqs + total_num_draft_tokens
-
-            num_logits = num_draft_tokens + 1
-            cu_num_logits_np = np.empty(num_reqs + 1, dtype=np.int32)
-            cu_num_logits_np[0] = 0
-            np.cumsum(num_logits, out=cu_num_logits_np[1:])
-            cu_num_logits = self.tmp_cu_num_logits.copy_to_gpu(cu_num_logits_np)
-
-            max_logits_per_req = int(np.max(num_logits))
-            max_expand_len = max(self.num_speculative_steps + 1, max_logits_per_req)
-            expanded_idx_mapping = expand_idx_mapping(
-                idx_mapping,
-                total_num_logits,
-                cu_num_logits,
-                max_expand_len,
-            )
-
-        block_tables = self.block_tables.gather_block_tables(idx_mapping)
-
-        query_start_loc_np = np.empty(self.max_num_reqs + 1, dtype=np.int32)
-        query_start_loc_np[0] = 0
-        np.cumsum(num_scheduled_tokens, out=query_start_loc_np[1 : num_reqs + 1])
-        query_start_loc_np[num_reqs + 1 :] = num_tokens
-        self.tmp_query_start_loc.copy_to_gpu(
-            query_start_loc_np,
-            out=self.input_buffers.query_start_loc,
-        )
-        query_start_loc_np = query_start_loc_np[: num_reqs + 1]
-        query_start_loc_cpu = torch.from_numpy(query_start_loc_np)
-        query_start_loc = self.input_buffers.query_start_loc[: num_reqs + 1]
-
-        prepare_prefill_inputs(
-            self.input_buffers.input_ids,
-            self.req_states.next_prefill_tokens,
-            idx_mapping,
-            query_start_loc,
-            self.req_states.prefill_token_ids.gpu,
-            self.req_states.prefill_len.gpu,
-            self.req_states.num_computed_tokens.gpu,
-        )
-
-        prepare_pos_seq_lens(
-            idx_mapping,
-            query_start_loc,
-            self.req_states.num_computed_tokens.gpu,
-            self.input_buffers.positions,
-            self.input_buffers.seq_lens,
-        )
-        seq_lens = self.input_buffers.seq_lens[:num_reqs]
-
-        if self.uses_mrope:
-            self.mrope_states.prepare_mrope_positions(
-                idx_mapping,
-                query_start_loc,
-                self.req_states.prefill_len.gpu,
-                self.req_states.num_computed_tokens.gpu,
-                self.input_buffers.mrope_positions,
-            )
-
-        logits_indices = combine_sampled_and_draft_tokens(
-            self.input_buffers.input_ids,
-            idx_mapping,
-            self.req_states.last_sampled_tokens,
-            query_start_loc,
-            seq_lens,
-            self.req_states.prefill_len.gpu,
-            self.req_states.draft_tokens,
-            cu_num_logits,
-            total_num_logits,
-        )
-
-        slot_mappings = self.block_tables.compute_slot_mappings(
-            query_start_loc, self.input_buffers.positions[:num_tokens]
-        )
-
-        attn_metadata = build_attn_metadata(
-            attn_metadata_builders=self.attn_metadata_builders,
-            num_reqs=num_reqs,
-            num_tokens=num_tokens,
-            query_start_loc_gpu=query_start_loc,
-            query_start_loc_cpu=query_start_loc_cpu,
-            seq_lens=self.input_buffers.seq_lens,
-            max_seq_len=self.max_model_len,
-            block_tables=block_tables,
-            slot_mappings=slot_mappings,
-            kv_cache_config=self.kv_cache_config,
-        )
-
-        input_ids = self.input_buffers.input_ids[:num_tokens_after_padding]
-        positions = self.input_buffers.positions[:num_tokens_after_padding]
-        mrope_positions = self.input_buffers.mrope_positions[
-            :, :num_tokens_after_padding
-        ]
-        return InputBatch(
-            req_ids=req_ids,
-            num_reqs=num_reqs,
-            idx_mapping=idx_mapping,
-            idx_mapping_np=idx_mapping_np,
-            expanded_idx_mapping=expanded_idx_mapping,
-            num_scheduled_tokens=num_scheduled_tokens,
-            num_tokens=num_tokens,
-            num_tokens_after_padding=num_tokens_after_padding,
-            num_draft_tokens=total_num_draft_tokens,
-            query_start_loc=query_start_loc,
-            query_start_loc_np=query_start_loc_np,
-            seq_lens=seq_lens,
-            input_ids=input_ids,
-            positions=positions,
-            mrope_positions=mrope_positions,
-            attn_metadata=attn_metadata,
-            logits_indices=logits_indices,
-            cu_num_logits=cu_num_logits,
-            cu_num_logits_np=cu_num_logits_np,
-        )
-
     def prepare_inputs(
         self, scheduler_output: SchedulerOutputType, batch_padding: Any
     ) -> InputBatch:
-        """Same as upstream, but ``expand_idx_mapping`` must cover full dLLM blocks.
-
-        Stock code uses ``num_speculative_steps + 1`` as the triton block size; dLLM
-        schedules ``DRAFT_SIZE`` logits rows per request without Eagle, so we take
-        ``max(num_speculative_steps + 1, max_logits_per_request)``.
-        """
         num_tokens = scheduler_output.total_num_scheduled_tokens
         assert num_tokens > 0
         num_tokens_per_req = scheduler_output.num_scheduled_tokens
@@ -423,8 +116,6 @@ class DllmGPUModelRunner(GPUModelRunner):
         num_tokens_after_padding, num_reqs_padded = _unpack_prepare_inputs_batch_arg(
             batch_padding, num_reqs
         )
-        if _VLLM_INPUT_BATCH_LEGACY:
-            return self._prepare_inputs_v014(scheduler_output, num_tokens_after_padding)
 
         req_ids = sorted(num_tokens_per_req, key=num_tokens_per_req.get)
         numtoks_iter = map(num_tokens_per_req.get, req_ids)
@@ -461,7 +152,7 @@ class DllmGPUModelRunner(GPUModelRunner):
             cu_num_logits = async_copy_to_gpu(cu_num_logits_np, device=self.device)
 
             max_logits_per_req = int(np.max(num_logits))
-            max_expand_len = max(self.num_speculative_steps + 1, max_logits_per_req)
+            max_expand_len = self.get_expand_idx_mapping_block_size(max_logits_per_req)
             expanded_idx_mapping, expanded_local_pos = expand_idx_mapping(
                 idx_mapping, total_num_logits, cu_num_logits, max_expand_len
             )
@@ -520,19 +211,18 @@ class DllmGPUModelRunner(GPUModelRunner):
             total_num_logits,
         )
 
-        seq_lens_cpu_upper_bound: torch.Tensor | None = None
-        if _VLLM_INPUT_BATCH_HAS_REQ_PADDING:
-            seq_lens_cpu_upper_bound_np = np.zeros(num_reqs_padded, dtype=np.int32)
-            np.add(
-                self.req_states.num_computed_tokens_np[idx_mapping_np],
-                num_scheduled_tokens,
-                out=seq_lens_cpu_upper_bound_np[:num_reqs],
-            )
-            seq_lens_cpu_upper_bound = torch.from_numpy(seq_lens_cpu_upper_bound_np)
+        seq_lens_cpu_upper_bound_np = np.zeros(num_reqs_padded, dtype=np.int32)
+        np.add(
+            self.req_states.num_computed_tokens_np[idx_mapping_np],
+            num_scheduled_tokens,
+            out=seq_lens_cpu_upper_bound_np[:num_reqs],
+        )
+        seq_lens_cpu_upper_bound = torch.from_numpy(seq_lens_cpu_upper_bound_np)
 
-        batch_kw: dict[str, Any] = dict(
+        return InputBatch(
             req_ids=req_ids,
             num_reqs=num_reqs,
+            num_reqs_after_padding=num_reqs_padded,
             idx_mapping=idx_mapping,
             idx_mapping_np=idx_mapping_np,
             expanded_idx_mapping=expanded_idx_mapping,
@@ -544,6 +234,7 @@ class DllmGPUModelRunner(GPUModelRunner):
             query_start_loc=query_start_loc,
             query_start_loc_np=query_start_loc_np,
             seq_lens=seq_lens,
+            seq_lens_cpu_upper_bound=seq_lens_cpu_upper_bound,
             dcp_local_seq_lens=dcp_local_seq_lens,
             input_ids=self.input_buffers.input_ids[:num_tokens_after_padding],
             positions=self.input_buffers.positions[:num_tokens_after_padding],
@@ -552,39 +243,80 @@ class DllmGPUModelRunner(GPUModelRunner):
             cu_num_logits_np=cu_num_logits_np,
             has_structured_output_reqs=scheduler_output.has_structured_output_requests,
         )
-        if _VLLM_INPUT_BATCH_HAS_REQ_PADDING:
-            assert seq_lens_cpu_upper_bound is not None
-            batch_kw["num_reqs_after_padding"] = num_reqs_padded
-            batch_kw["seq_lens_cpu_upper_bound"] = seq_lens_cpu_upper_bound
-        return InputBatch(**batch_kw)
+
+
+class DllmGPUModelRunner(_GPUModelRunnerPrepareInputsFork):
+    """v2 GPU model runner with dLLM block sampling in phase two."""
+
+    def __init__(self, vllm_config: Any, device: torch.device) -> None:
+        super().__init__(vllm_config, device)
+        #: Width for sampled-token tensor rows (rejection / post_update layout).
+        self._dllm_slot_width = max(self.num_speculative_steps + 1, DRAFT_SIZE)
+        self._dllm_helper = DllmWorker(require_v2_model_runner=True)
+        self._dllm_scheduled_spec_decode_tokens: dict[str, tuple[int, ...]] = {}
+        self._dllm_so_frontier_flat_indices: dict[str, int] | None = None
+        self._dllm_so_frontier_block_rows: dict[str, int | None] | None = None
+        self._dllm_so_valid_prefix_lens: dict[str, int] | None = None
+        self._dllm_pending_draft_ids: Any = None
+
+    def get_expand_idx_mapping_block_size(self, max_logits_per_req: int) -> int:
+        n = super().get_expand_idx_mapping_block_size(max_logits_per_req)
+        if _dllm_architecture_match(self.vllm_config):
+            return max(n, DRAFT_SIZE)
+        return n
+
+    def _dllm_capture_scheduler_extras(
+        self, scheduler_output: SchedulerOutputType
+    ) -> None:
+        if not _dllm_architecture_match(self.vllm_config):
+            return
+        raw = getattr(scheduler_output, "scheduled_spec_decode_tokens", None) or {}
+        self._dllm_scheduled_spec_decode_tokens = {k: tuple(v) for k, v in raw.items()}
+        self._dllm_so_frontier_flat_indices = getattr(
+            scheduler_output, "dllm_so_frontier_flat_indices", None
+        )
+        self._dllm_so_frontier_block_rows = getattr(
+            scheduler_output, "dllm_so_frontier_block_rows", None
+        )
+        self._dllm_so_valid_prefix_lens = getattr(
+            scheduler_output, "dllm_so_valid_prefix_lens", None
+        )
+
+    @torch.inference_mode()
+    def execute_model(
+        self,
+        scheduler_output: SchedulerOutputType,
+        intermediate_tensors: IntermediateTensorsType | None = None,
+        dummy_run: bool = False,
+        skip_attn_for_dummy_run: bool = False,
+        **kwargs: Any,
+    ) -> ModelRunnerOutput | IntermediateTensorsType | None:
+        self._dllm_pending_draft_ids = None
+        if not dummy_run:
+            self._dllm_capture_scheduler_extras(scheduler_output)
+        kw: dict[str, Any] = {
+            "scheduler_output": scheduler_output,
+            "intermediate_tensors": intermediate_tensors,
+            "dummy_run": dummy_run,
+        }
+        if "skip_attn_for_dummy_run" in _EXECUTE_MODEL_PARAM_NAMES:
+            kw["skip_attn_for_dummy_run"] = skip_attn_for_dummy_run
+        for name, val in kwargs.items():
+            if name in _EXECUTE_MODEL_PARAM_NAMES:
+                kw[name] = val
+        return super().execute_model(**kw)
 
     def sample(
         self,
         hidden_states: torch.Tensor,
         input_batch: InputBatch,
-        third: Any,
-        fourth: GrammarOutputType | None = None,
+        grammar_output: GrammarOutputType | None,
     ) -> tuple[SamplerOutput, torch.Tensor, torch.Tensor]:
-        if _VLLM_LEGACY_SAMPLE_5ARG:
-            sampling_metadata, grammar_output = third, fourth
-        else:
-            grammar_output = third
-
         if not (
             _dllm_architecture_match(self.vllm_config)
             and input_batch.num_draft_tokens > 0
         ):
-            if _VLLM_LEGACY_SAMPLE_5ARG:
-                return super().sample(
-                    hidden_states,
-                    input_batch,
-                    sampling_metadata,
-                    grammar_output,
-                )
             return super().sample(hidden_states, input_batch, grammar_output)
-
-        if _VLLM_LEGACY_SAMPLE_5ARG:
-            del sampling_metadata
 
         # Late import avoids circular import with runtime_worker.
         from dllm_plugin.runtime_worker import (
@@ -595,6 +327,9 @@ class DllmGPUModelRunner(GPUModelRunner):
         sample_hidden_states = hidden_states[input_batch.logits_indices]
         logits = self.model.compute_logits(sample_hidden_states)
 
+        # Two-stage grammar: vLLM applies the full batch bitmask on GPU; we then
+        # refine the frontier row on CPU-float logits for dLLM remask (first invalid
+        # position per scheduler metadata — consistent with packed bitmask layout).
         if grammar_output is not None:
             self.structured_outputs_worker.apply_grammar_bitmask(
                 logits,
@@ -706,34 +441,20 @@ class DllmGPUModelRunner(GPUModelRunner):
     def sample_tokens(
         self, grammar_output: GrammarOutputType | None
     ) -> AsyncOutput | ModelRunnerOutput | None:
-        # Keep logic aligned with vllm GPUModelRunner.sample_tokens (last synced:
-        # upstream execute_model → None, sample_tokens applies grammar + sampling).
         state = self.execute_model_state
         if state is None:
             return None
-        # vLLM 0.14.x: ``execute_model_state`` is a 3-tuple. Later releases use a
-        # 7-tuple (incl. ``model_inputs``); v0.20+ uses ``ExecuteModelState`` (no
-        # ``model_inputs``). Delegate the legacy case to stock ``sample_tokens``.
-        if isinstance(state, tuple) and len(state) == 3:
-            return cast(Any, GPUModelRunner).sample_tokens(self, grammar_output)
-
-        if hasattr(state, "input_batch"):
-            input_batch = state.input_batch
-            attn_metadata = state.attn_metadata
-            slot_mappings_by_layer = state.slot_mappings_by_layer
-            hidden_states = state.hidden_states
-            aux_hidden_states = state.aux_hidden_states
-            kv_connector_output = state.kv_connector_output
-        else:
-            (
-                input_batch,
-                _model_inputs,
-                attn_metadata,
-                slot_mappings_by_layer,
-                hidden_states,
-                aux_hidden_states,
-                kv_connector_output,
-            ) = state
+        if not hasattr(state, "input_batch"):
+            raise TypeError(
+                "Expected ExecuteModelState from vLLM 0.20.x; got "
+                f"{type(state).__name__}"
+            )
+        input_batch = state.input_batch
+        attn_metadata = state.attn_metadata
+        slot_mappings_by_layer = state.slot_mappings_by_layer
+        hidden_states = state.hidden_states
+        aux_hidden_states = state.aux_hidden_states
+        kv_connector_output = state.kv_connector_output
         self.execute_model_state = None
 
         if not self.is_last_pp_rank:
@@ -769,18 +490,13 @@ class DllmGPUModelRunner(GPUModelRunner):
             prompt_logprobs_dict=prompt_logprobs_dict,
             kv_connector_output=kv_connector_output,
         )
-        _ao_params = inspect.signature(AsyncOutput.__init__).parameters
-        _ao_kw: dict[str, Any] = {
-            "model_runner_output": model_runner_output,
-            "sampler_output": sampler_output,
-            "num_sampled_tokens": num_sampled,
-            "copy_stream": self.output_copy_stream,
-        }
-        if "copy_event" in _ao_params and hasattr(self, "output_copy_event"):
-            _ao_kw["copy_event"] = self.output_copy_event
-        if "main_stream" in _ao_params:
-            _ao_kw["main_stream"] = self.main_stream
-        async_output = AsyncOutput(**_ao_kw)
+        async_output = AsyncOutput(
+            model_runner_output=model_runner_output,
+            sampler_output=sampler_output,
+            num_sampled_tokens=num_sampled,
+            main_stream=self.main_stream,
+            copy_stream=self.output_copy_stream,
+        )
 
         self.postprocess(
             input_batch, sampler_output.sampled_token_ids, num_sampled, num_rejected

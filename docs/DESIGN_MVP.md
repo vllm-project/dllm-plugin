@@ -148,6 +148,8 @@ On the **v2 GPU model runner** stack, the engine actually performs **two phases*
 
 The plugin installs `DllmGPUModelRunner`, which subclasses vLLM’s `GPUModelRunner` and moves **dLLM block remasking** into `sample` / `sample_tokens`, alongside stock `apply_grammar_bitmask` behavior when `GrammarOutput` is provided. Scheduler extras for frontier structured-output repair (`dllm_so_*` on `SchedulerOutput`) are copied in `execute_model` and consumed next to `grammar_output` in phase two—there is no separate grammar application on `execute_model` outputs.
 
+`prepare_inputs` is forked for **vLLM 0.20.x** only; it stays aligned with upstream via an overridable **`get_expand_idx_mapping_block_size`** hook (base fork vs. dLLM widening in `DllmGPUModelRunner`) so the diff can shrink if vLLM adopts the same seam.
+
 **Mutual exclusion:** do not combine Eagle (or other target+draft-model) speculative decoding with the dLLM block path on the same run; the runner skips `speculator.propose` when servicing a dLLM block batch and emits drafts via the same `take_draft_token_ids` hook spec decode uses.
 
 **CUDA graphs:** prefer `enforce_eager` or non-`FULL` cudagraph modes for dLLM until any capture/replay path is validated against the custom `sample` branch; treating this like other non-standard sampling paths is the supported MVP stance.
