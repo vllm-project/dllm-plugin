@@ -9,7 +9,10 @@ from typing import Any, cast
 
 from dllm_plugin.config import DLLM_MOCK_STACK_MODEL_ID, DRAFT_SIZE
 from dllm_plugin.remasking import Llada2DefaultRemaskingPolicy
-from dllm_plugin.validation import assert_compatible_stack
+from dllm_plugin.validation import (
+    assert_compatible_stack,
+    assert_runtime_worker_v2_model_runner,
+)
 from dllm_plugin.worker import DllmWorker, DllmWorkerStep
 
 _MISSING = object()
@@ -258,6 +261,10 @@ class DllmRuntimeWorker(VllmGPUWorker):
             )
         super().__init__(*args, **kwargs)
         assert_compatible_stack(self.vllm_config, caller="DllmRuntimeWorker.__init__")
+        assert_runtime_worker_v2_model_runner(
+            use_v2_model_runner=self.use_v2_model_runner,
+            caller="DllmRuntimeWorker.__init__",
+        )
         self._dllm_helper = DllmWorker(require_v2_model_runner=True)
 
     @instrument(span_name="Init device")

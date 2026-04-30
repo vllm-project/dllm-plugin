@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import importlib
+import warnings
 from collections.abc import Iterable
 from typing import Any
 
@@ -171,4 +172,39 @@ def assert_compatible_stack(
         )
 
 
-__all__ = ["assert_compatible_stack"]
+def assert_runtime_worker_v2_model_runner(
+    *,
+    use_v2_model_runner: bool,
+    caller: str,
+    strict: bool | None = None,
+) -> None:
+    """Require v2 model runner for ``DllmRuntimeWorker`` when strict.
+
+    Issue **#10** treats ``VLLM_USE_V2_MODEL_RUNNER=1`` as first-class for the mock
+    stack. When strict validation is off (env or explicit ``strict=False``), emit a
+    **warning** instead of raising so monkeypatch / debug workflows keep working.
+    """
+
+    if use_v2_model_runner:
+        return
+
+    def _ctx() -> str:
+        return f" (context: {caller!r})"
+
+    if not resolve_strict_stack_validation(strict):
+        warnings.warn(
+            "DllmRuntimeWorker expects VLLM_USE_V2_MODEL_RUNNER=1 for the dLLM plugin "
+            "mock stack; v1 model-runner paths are unsupported and may fail later."
+            f"{_ctx()}",
+            stacklevel=2,
+        )
+        return
+
+    raise ValueError(
+        "DllmRuntimeWorker requires the v2 model runner for the dLLM plugin stack; "
+        "set VLLM_USE_V2_MODEL_RUNNER=1 (see docs/OPERATOR_LLaDA2.md, issue #10)"
+        f"{_ctx()}",
+    )
+
+
+__all__ = ["assert_compatible_stack", "assert_runtime_worker_v2_model_runner"]

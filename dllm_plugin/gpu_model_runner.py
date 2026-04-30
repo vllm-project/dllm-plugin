@@ -37,7 +37,7 @@ from dllm_plugin.vllm_gpu_model_runner_fork import HookedGPUModelRunner
 from dllm_plugin.worker import DllmWorker
 
 
-def _dllm_architecture_match(vllm_config: Any) -> bool:
+def dllm_architecture_match(vllm_config: Any) -> bool:
     hf = getattr(getattr(vllm_config, "model_config", None), "hf_config", None)
     if hf is None:
         return False
@@ -65,12 +65,12 @@ class DllmGPUModelRunner(HookedGPUModelRunner):
 
     def get_expand_idx_mapping_block_size(self, max_logits_per_req: int) -> int:
         n = super().get_expand_idx_mapping_block_size(max_logits_per_req)
-        if _dllm_architecture_match(self.vllm_config):
+        if dllm_architecture_match(self.vllm_config):
             return max(n, DRAFT_SIZE)
         return n
 
     def get_pp_receive_max_sample_len(self) -> int:
-        if _dllm_architecture_match(self.vllm_config):
+        if dllm_architecture_match(self.vllm_config):
             return self._dllm_slot_width
         return super().get_pp_receive_max_sample_len()
 
@@ -99,7 +99,7 @@ class DllmGPUModelRunner(HookedGPUModelRunner):
 
     def should_run_speculator_proposal_phase(self, input_batch: InputBatch) -> bool:
         if (
-            _dllm_architecture_match(self.vllm_config)
+            dllm_architecture_match(self.vllm_config)
             and input_batch.num_draft_tokens > 0
         ):
             return False
@@ -114,7 +114,7 @@ class DllmGPUModelRunner(HookedGPUModelRunner):
         self._dllm_pending_draft_ids = None
         if dummy_run:
             return
-        if not _dllm_architecture_match(self.vllm_config):
+        if not dllm_architecture_match(self.vllm_config):
             return
         raw = getattr(scheduler_output, "scheduled_spec_decode_tokens", None) or {}
         self._dllm_scheduled_spec_decode_tokens = {k: tuple(v) for k, v in raw.items()}
@@ -135,7 +135,7 @@ class DllmGPUModelRunner(HookedGPUModelRunner):
         grammar_output: GrammarOutputType | None,
     ) -> tuple[SamplerOutput, torch.Tensor, torch.Tensor]:
         if not (
-            _dllm_architecture_match(self.vllm_config)
+            dllm_architecture_match(self.vllm_config)
             and input_batch.num_draft_tokens > 0
         ):
             return super().sample(hidden_states, input_batch, grammar_output)
@@ -276,5 +276,5 @@ class DllmGPUModelRunner(HookedGPUModelRunner):
 __all__ = [
     "DllmGPUModelRunner",
     "HookedGPUModelRunner",
-    "_dllm_architecture_match",
+    "dllm_architecture_match",
 ]

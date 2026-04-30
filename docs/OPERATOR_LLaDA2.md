@@ -91,6 +91,11 @@ name. **Subclasses** of those adapters are rejected until validation is relaxed
 or extended—by design for MVP mock-stack gatekeeping; forks should adjust
 validation if they introduce subclassed workers/schedulers.
 
+When strict validation is **on** (default), constructing `DllmRuntimeWorker` also
+runs `assert_runtime_worker_v2_model_runner`: if the v2 model runner is not enabled
+(`VLLM_USE_V2_MODEL_RUNNER=1`), startup raises **ValueError** (issue [**#10**](https://github.com/vllm-project/dllm-plugin/issues/10)).
+With strict off, the same mismatch emits a **warning** instead.
+
 ## First block initialization
 
 - The scheduler initializes `Request.spec_token_ids` for new requests when empty.

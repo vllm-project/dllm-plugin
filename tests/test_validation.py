@@ -12,7 +12,10 @@ from dllm_plugin.config import (
     DLLM_STRICT_STACK_VALIDATION_ENV_VAR,
     LLADA2_ARCHITECTURE_NAME,
 )
-from dllm_plugin.validation import assert_compatible_stack
+from dllm_plugin.validation import (
+    assert_compatible_stack,
+    assert_runtime_worker_v2_model_runner,
+)
 
 
 def _build_vllm_config(
@@ -189,3 +192,34 @@ def test_assert_compatible_stack_includes_caller_in_errors() -> None:
     with pytest.raises(ValueError) as excinfo:
         assert_compatible_stack(cfg, caller="my_unit_test")
     assert "context: 'my_unit_test'" in str(excinfo.value)
+
+
+def test_assert_runtime_worker_v2_ok_when_v2_enabled() -> None:
+    assert_runtime_worker_v2_model_runner(
+        use_v2_model_runner=True,
+        caller="test",
+        strict=True,
+    )
+
+
+def test_assert_runtime_worker_v2_raises_when_strict_and_v1() -> None:
+    with pytest.raises(ValueError, match="requires the v2 model runner") as excinfo:
+        assert_runtime_worker_v2_model_runner(
+            use_v2_model_runner=False,
+            caller="test_strict_v1",
+            strict=True,
+        )
+    assert "context: 'test_strict_v1'" in str(excinfo.value)
+
+
+def test_assert_runtime_worker_v2_warns_when_not_strict_and_v1(
+    recwarn: pytest.WarningsRecorder,
+) -> None:
+    assert_runtime_worker_v2_model_runner(
+        use_v2_model_runner=False,
+        caller="test_warn_v1",
+        strict=False,
+    )
+    assert len(recwarn) == 1
+    assert issubclass(recwarn[0].category, UserWarning)
+    assert "VLLM_USE_V2_MODEL_RUNNER=1" in str(recwarn[0].message)
