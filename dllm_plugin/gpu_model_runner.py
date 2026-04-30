@@ -145,25 +145,36 @@ if _VLLM:
         "__dataclass_fields__",
         {},
     )
+    _VLLM_INPUT_BATCH_HAS_REQ_PADDING = "num_reqs_after_padding" in getattr(
+        InputBatch,
+        "__dataclass_fields__",
+        {},
+    )
 else:  # pragma: no cover
     _EXECUTE_MODEL_PARAM_NAMES = frozenset()
     _VLLM_LEGACY_SAMPLE_5ARG = False
     _VLLM_INPUT_BATCH_LEGACY = False
+    _VLLM_INPUT_BATCH_HAS_REQ_PADDING = False
 
 
-def _prepare_inputs_padding_len(second: Any) -> int:
-    """Normalize ``prepare_inputs``'s second argument across vLLM versions.
+def _unpack_prepare_inputs_batch_arg(second: Any, num_reqs: int) -> tuple[int, int]:
+    """Return ``(num_tokens_after_padding, num_reqs_padded)`` for ``prepare_inputs``.
 
-    Older releases pass ``num_tokens_after_padding`` as ``int`` or scalar tensor;
-    v0.20+ may pass a ``BatchExecutionDescriptor`` with ``num_tokens``.
+    v0.20+ passes ``BatchExecutionDescriptor`` (``num_tokens``, optional ``num_reqs``);
+    older releases pass ``int`` or scalar tensor token counts only.
     """
 
-    n = getattr(second, "num_tokens", None)
-    if n is not None:
-        second = n
+    desc_nt = getattr(second, "num_tokens", None)
+    if desc_nt is not None:
+        if isinstance(desc_nt, torch.Tensor):
+            ntok = int(desc_nt.detach().cpu().item())
+        else:
+            ntok = int(desc_nt)
+        num_reqs_padded = int(getattr(second, "num_reqs", None) or num_reqs)
+        return ntok, num_reqs_padded
     if isinstance(second, torch.Tensor):
-        return int(second.detach().cpu().item())
-    return int(second)
+        return int(second.detach().cpu().item()), num_reqs
+    return int(second), num_reqs
 
 
 def _dllm_architecture_match(vllm_config: Any) -> bool:
@@ -397,7 +408,7 @@ class DllmGPUModelRunner(GPUModelRunner):
         )
 
     def prepare_inputs(
-        self, scheduler_output: SchedulerOutputType, num_tokens_after_padding: Any
+        self, scheduler_output: SchedulerOutputType, batch_padding: Any
     ) -> InputBatch:
         """Same as upstream, but ``expand_idx_mapping`` must cover full dLLM blocks.
 
@@ -405,14 +416,15 @@ class DllmGPUModelRunner(GPUModelRunner):
         schedules ``DRAFT_SIZE`` logits rows per request without Eagle, so we take
         ``max(num_speculative_steps + 1, max_logits_per_request)``.
         """
-        num_tokens_after_padding = _prepare_inputs_padding_len(num_tokens_after_padding)
-        if _VLLM_INPUT_BATCH_LEGACY:
-            return self._prepare_inputs_v014(scheduler_output, num_tokens_after_padding)
-
         num_tokens = scheduler_output.total_num_scheduled_tokens
         assert num_tokens > 0
         num_tokens_per_req = scheduler_output.num_scheduled_tokens
         num_reqs = len(num_tokens_per_req)
+        num_tokens_after_padding, num_reqs_padded = _unpack_prepare_inputs_batch_arg(
+            batch_padding, num_reqs
+        )
+        if _VLLM_INPUT_BATCH_LEGACY:
+            return self._prepare_inputs_v014(scheduler_output, num_tokens_after_padding)
 
         req_ids = sorted(num_tokens_per_req, key=num_tokens_per_req.get)
         numtoks_iter = map(num_tokens_per_req.get, req_ids)
@@ -459,8 +471,8 @@ class DllmGPUModelRunner(GPUModelRunner):
         np.cumsum(num_scheduled_tokens, out=query_start_loc_np[1 : num_reqs + 1])
         query_start_loc_np[num_reqs + 1 :] = num_tokens
         async_copy_to_gpu(query_start_loc_np, out=self.input_buffers.query_start_loc)
-        query_start_loc_np = query_start_loc_np[: num_reqs + 1]
-        query_start_loc = self.input_buffers.query_start_loc[: num_reqs + 1]
+        query_start_loc_np = query_start_loc_np[: num_reqs_padded + 1]
+        query_start_loc = self.input_buffers.query_start_loc[: num_reqs_padded + 1]
 
         if self.req_states.any_prefills(idx_mapping_np):
             prepare_prefill_inputs(
@@ -480,7 +492,7 @@ class DllmGPUModelRunner(GPUModelRunner):
             self.input_buffers.positions,
             self.input_buffers.seq_lens,
         )
-        seq_lens = self.input_buffers.seq_lens[:num_reqs]
+        seq_lens = self.input_buffers.seq_lens[:num_reqs_padded]
 
         dcp_local_seq_lens = None
         if self.use_dcp:
@@ -494,7 +506,7 @@ class DllmGPUModelRunner(GPUModelRunner):
                 self.dcp_rank,
                 self.cp_interleave,
             )
-            dcp_local_seq_lens = self.input_buffers.dcp_local_seq_lens[:num_reqs]
+            dcp_local_seq_lens = self.input_buffers.dcp_local_seq_lens[:num_reqs_padded]
 
         logits_indices = combine_sampled_and_draft_tokens(
             self.input_buffers.input_ids,
@@ -508,7 +520,17 @@ class DllmGPUModelRunner(GPUModelRunner):
             total_num_logits,
         )
 
-        return InputBatch(
+        seq_lens_cpu_upper_bound: torch.Tensor | None = None
+        if _VLLM_INPUT_BATCH_HAS_REQ_PADDING:
+            seq_lens_cpu_upper_bound_np = np.zeros(num_reqs_padded, dtype=np.int32)
+            np.add(
+                self.req_states.num_computed_tokens_np[idx_mapping_np],
+                num_scheduled_tokens,
+                out=seq_lens_cpu_upper_bound_np[:num_reqs],
+            )
+            seq_lens_cpu_upper_bound = torch.from_numpy(seq_lens_cpu_upper_bound_np)
+
+        batch_kw: dict[str, Any] = dict(
             req_ids=req_ids,
             num_reqs=num_reqs,
             idx_mapping=idx_mapping,
@@ -530,6 +552,11 @@ class DllmGPUModelRunner(GPUModelRunner):
             cu_num_logits_np=cu_num_logits_np,
             has_structured_output_reqs=scheduler_output.has_structured_output_requests,
         )
+        if _VLLM_INPUT_BATCH_HAS_REQ_PADDING:
+            assert seq_lens_cpu_upper_bound is not None
+            batch_kw["num_reqs_after_padding"] = num_reqs_padded
+            batch_kw["seq_lens_cpu_upper_bound"] = seq_lens_cpu_upper_bound
+        return InputBatch(**batch_kw)
 
     def sample(
         self,
