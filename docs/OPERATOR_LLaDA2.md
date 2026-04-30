@@ -47,6 +47,8 @@ There is **no supported fallback** from v2 to v1 for the mock-stack path: if you
 
 Keep `VLLM_ENABLE_V1_MULTIPROCESSING=0` for the documented integration test to avoid multiprocessing differences on single-process bring-up.
 
+**Async scheduling:** Mock-stack integration and GPU grammar tests use **`async_scheduling=False`**. The runner still branches on **`use_async_scheduling`** for dLLM block batches, but **async scheduling + structured outputs + dLLM** has **no CI coverage**—treat it as **unsupported for MVP** until explicit tests exist (milestone [**#19**](https://github.com/vllm-project/dllm-plugin/issues/19) follow-up).
+
 **Pipeline parallelism (PP):** On dLLM architectures, block sampling uses a wider per-request token row than vanilla AR sampling when speculative decoding is off (``DRAFT_SIZE`` vs ``num_speculative_steps + 1``). The plugin aligns ``pp_receive`` / ``pp_broadcast`` tensor widths so ranks agree with ``torch.distributed.broadcast`` shape rules. Multi-rank PP + dLLM is still **lightly exercised** compared to single-GPU mock CI—treat full PP stacks as higher risk until you have your own smoke runs.
 
 ### Draft handoff naming (#10)
@@ -162,10 +164,16 @@ contract tests—override `tests.pytestPaths` if you need a narrower run.
 - **Bitmask buffer sizing:** If ``speculative_config.num_speculative_tokens`` is unset,
   raise it to at least ``DRAFT_SIZE - 1`` when using structured outputs at scale, or rely on
   a vLLM build that extends grammar-bitmask allocation for large dLLM blocks.
+- **`num_invalid_spec_tokens`:** The plugin leaves this map empty when refreshing drafts for
+  dLLM-shaped batches (documented in scheduler code). Safe today; re-check if upstream begins
+  relying on this field for non–spec-decode behavior on mixed batches.
 - **Two-stage grammar (GPU + frontier):** vLLM applies the batch grammar bitmask on GPU
   logits; the plugin may apply an additional **frontier-row** mask on CPU-materialized
   block logits before remasking — both target the same frontier semantics (first invalid
   grammar position).
 - **Test-only env:** ``VLLM_DLLM_SKIP_FIRST_BLOCK_SEED=1`` skips seeding the first dLLM
   draft block for new requests (used by GPU grammar tests). Do **not** set this in
-  production-like deployments.
+  production-like deployments. Full first-block seed + regex SO can remain sensitive to
+  bitmask row allocation vs draft scheduling until upstream alignment improves (issue **#2**).
+- **Async + SO:** Same stance as the v2 runner section above—**not** MVP-validated; keep
+  ``async_scheduling=False`` for assurance unless you own the risk.

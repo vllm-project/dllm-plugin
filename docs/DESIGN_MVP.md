@@ -154,6 +154,8 @@ The plugin installs `DllmGPUModelRunner`, which subclasses **`HookedGPUModelRunn
 
 **CUDA graphs:** prefer `enforce_eager` or non-`FULL` cudagraph modes for dLLM until any capture/replay path is validated against the custom `sample` branch; treating this like other non-standard sampling paths is the supported MVP stance.
 
+**Async scheduling + structured outputs:** Contract tests and GPU smoke use `async_scheduling=False`. The fork still handles `use_async_scheduling` on the dLLM block path, but **async + SO + dLLM** is **not CI-validated**—document as unsupported for mock-stack MVP until dedicated integration tests land (orchestration **#19**).
+
 **Commit-0:** In `update_from_output`, if `sampled_token_ids` is empty for a request, the scheduler rolls back `num_computed_tokens` by the number of tokens scheduled that step (typically `DRAFT_SIZE` in this MVP design).
 
 ---
