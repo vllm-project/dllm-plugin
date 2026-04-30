@@ -708,23 +708,32 @@ class DllmGPUModelRunner(GPUModelRunner):
     ) -> AsyncOutput | ModelRunnerOutput | None:
         # Keep logic aligned with vllm GPUModelRunner.sample_tokens (last synced:
         # upstream execute_model → None, sample_tokens applies grammar + sampling).
-        if self.execute_model_state is None:
+        state = self.execute_model_state
+        if state is None:
             return None
-        # vLLM 0.14.x: ``execute_model_state`` is ``(hidden_states, input_batch,
-        # sampling_metadata)``. Newer releases stash a larger tuple (KV connector,
-        # aux hidden states, …). Delegate to stock ``GPUModelRunner.sample_tokens``.
-        if len(self.execute_model_state) == 3:
+        # vLLM 0.14.x: ``execute_model_state`` is a 3-tuple. Later releases use a
+        # 7-tuple (incl. ``model_inputs``); v0.20+ uses ``ExecuteModelState`` (no
+        # ``model_inputs``). Delegate the legacy case to stock ``sample_tokens``.
+        if isinstance(state, tuple) and len(state) == 3:
             return cast(Any, GPUModelRunner).sample_tokens(self, grammar_output)
 
-        (
-            input_batch,
-            model_inputs,
-            attn_metadata,
-            slot_mappings_by_layer,
-            hidden_states,
-            aux_hidden_states,
-            kv_connector_output,
-        ) = self.execute_model_state
+        if hasattr(state, "input_batch"):
+            input_batch = state.input_batch
+            attn_metadata = state.attn_metadata
+            slot_mappings_by_layer = state.slot_mappings_by_layer
+            hidden_states = state.hidden_states
+            aux_hidden_states = state.aux_hidden_states
+            kv_connector_output = state.kv_connector_output
+        else:
+            (
+                input_batch,
+                _model_inputs,
+                attn_metadata,
+                slot_mappings_by_layer,
+                hidden_states,
+                aux_hidden_states,
+                kv_connector_output,
+            ) = state
         self.execute_model_state = None
 
         if not self.is_last_pp_rank:
