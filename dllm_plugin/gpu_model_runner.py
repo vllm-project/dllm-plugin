@@ -263,6 +263,45 @@ class DllmGPUModelRunner(_GPUModelRunnerPrepareInputsFork):
         self._dllm_so_valid_prefix_lens: dict[str, int] | None = None
         self._dllm_pending_draft_ids: Any = None
 
+    def _pp_max_sample_len_for_broadcast(self) -> int:
+        """Row width for PP ``sampled_token_ids`` (must match every PP rank).
+
+        ``torch.distributed.broadcast`` requires identical tensor shapes. Stock AR
+        sampling uses ``num_speculative_steps + 1`` columns; dLLM block sampling uses
+        ``max(num_speculative_steps + 1, DRAFT_SIZE)`` (see ``_dllm_slot_width``).
+        Non-last ranks call :func:`~vllm.v1.worker.gpu.pp_utils.pp_receive` with this
+        width; last rank must broadcast a tensor with the same second dimension (padding
+        AR-only rows when a dLLM model falls back to ``super().sample`` within a step).
+        """
+
+        if _dllm_architecture_match(self.vllm_config):
+            return self._dllm_slot_width
+        return self.num_speculative_steps + 1
+
+    def _maybe_pad_sampler_output_sample_width_for_pp(
+        self, sampler_output: SamplerOutput
+    ) -> SamplerOutput:
+        """Pad ``sampled_token_ids`` so PP broadcast shape matches ``pp_receive``."""
+
+        if not self.use_pp:
+            return sampler_output
+        need = self._pp_max_sample_len_for_broadcast()
+        cur = sampler_output.sampled_token_ids
+        if cur.shape[1] >= need:
+            return sampler_output
+        padded = torch.full(
+            (cur.shape[0], need),
+            -1,
+            dtype=torch.int64,
+            device=cur.device,
+        )
+        padded[:, : cur.shape[1]] = cur
+        return SamplerOutput(
+            sampled_token_ids=padded,
+            logprobs_tensors=sampler_output.logprobs_tensors,
+            num_nans=sampler_output.num_nans,
+        )
+
     def get_expand_idx_mapping_block_size(self, max_logits_per_req: int) -> int:
         n = super().get_expand_idx_mapping_block_size(max_logits_per_req)
         if _dllm_architecture_match(self.vllm_config):
@@ -461,16 +500,20 @@ class DllmGPUModelRunner(_GPUModelRunnerPrepareInputsFork):
         kv_connector_output = state.kv_connector_output
         self.execute_model_state = None
 
+        pp_sample_width = self._pp_max_sample_len_for_broadcast()
         if not self.is_last_pp_rank:
             sampled, num_sampled, num_rejected = pp_receive(
                 input_batch.num_reqs,
-                max_sample_len=self.num_speculative_steps + 1,
+                max_sample_len=pp_sample_width,
             )
             self.postprocess(input_batch, sampled, num_sampled, num_rejected)
             return None
 
         sampler_output, num_sampled, num_rejected = self.sample(
             hidden_states, input_batch, grammar_output
+        )
+        sampler_output = self._maybe_pad_sampler_output_sample_width_for_pp(
+            sampler_output
         )
 
         if self.use_pp:

@@ -22,6 +22,11 @@ uv sync --group dev --extra vllm
   authority for structured-output E2E; merging plugin issues **#9** / **#10** does not
   assert “works on PyPI vLLM alone” without that verification (see **#2**).
 
+- **Companion vLLM PR / commit:** When an upstream (or fork) change set exists for the
+  engine / `SchedulerOutput` plumbing, link it from issue [**#2**](https://github.com/vllm-project/dllm-plugin/issues/2)
+  and paste the URL into the **active plugin PR** so operators are not left searching
+  for the “other half” of the integration.
+
 - vLLM plugin loading enabled:
 
 ```bash
@@ -41,6 +46,8 @@ There is **no supported fallback** from v2 to v1 for the mock-stack path: if you
 **Two-phase execution:** On v2, inference does **not** attach final tokens in `execute_model`; the worker’s model runner returns `None` after forward and performs dLLM remasking in **phase two** (`sample_tokens` → `sample`). Structured-output grammar bitmasks arrive on that path (`GrammarOutput`), consistent with AR and vanilla spec-decode. Do **not** enable Eagle (or similar draft-model speculative decoding) together with the dLLM plugin stack for the same requests—the stacks are mutually exclusive for MVP.
 
 Keep `VLLM_ENABLE_V1_MULTIPROCESSING=0` for the documented integration test to avoid multiprocessing differences on single-process bring-up.
+
+**Pipeline parallelism (PP):** On dLLM architectures, block sampling uses a wider per-request token row than vanilla AR sampling when speculative decoding is off (``DRAFT_SIZE`` vs ``num_speculative_steps + 1``). The plugin aligns ``pp_receive`` / ``pp_broadcast`` tensor widths so ranks agree with ``torch.distributed.broadcast`` shape rules. Multi-rank PP + dLLM is still **lightly exercised** compared to single-GPU mock CI—treat full PP stacks as higher risk until you have your own smoke runs.
 
 ### Draft handoff naming (#10)
 
