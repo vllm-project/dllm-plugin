@@ -38,9 +38,14 @@ from vllm.sequence import IntermediateTensors
 from dllm_plugin.validation import assert_compatible_stack
 
 try:
-    from vllm.model_executor.layers.attention.layer import Attention
+    # vLLM 0.18+ (approx): ``Attention`` lives in ``attention.py``, re-exported
+    # from ``model_executor.layers.attention``.
+    from vllm.model_executor.layers.attention import Attention
 except ImportError:  # pragma: no cover - depends on vLLM minor layout.
-    from vllm.attention.layer import Attention
+    try:
+        from vllm.model_executor.layers.attention.layer import Attention
+    except ImportError:  # pragma: no cover
+        from vllm.attention.layer import Attention
 
 
 class DllmMockLlada2ForCausalLM(nn.Module):
