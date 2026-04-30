@@ -37,24 +37,23 @@ def test_dllm_gpu_model_runner_overrides_phase_two_hooks() -> None:
 
     from dllm_plugin.gpu_model_runner import (
         DllmGPUModelRunner,
+        HookedGPUModelRunner,
         _GPUModelRunnerPrepareInputsFork,
     )
 
-    assert issubclass(DllmGPUModelRunner, _GPUModelRunnerPrepareInputsFork)
+    assert issubclass(DllmGPUModelRunner, HookedGPUModelRunner)
+    assert _GPUModelRunnerPrepareInputsFork is HookedGPUModelRunner
+    assert HookedGPUModelRunner.prepare_inputs is not GPUModelRunner.prepare_inputs
+    assert DllmGPUModelRunner.prepare_inputs is HookedGPUModelRunner.prepare_inputs
     assert (
-        _GPUModelRunnerPrepareInputsFork.prepare_inputs
-        is not GPUModelRunner.prepare_inputs
-    )
-    assert (
-        DllmGPUModelRunner.prepare_inputs
-        is _GPUModelRunnerPrepareInputsFork.prepare_inputs
-    )
-    assert DllmGPUModelRunner.get_expand_idx_mapping_block_size is not (
-        _GPUModelRunnerPrepareInputsFork.get_expand_idx_mapping_block_size
+        DllmGPUModelRunner.get_expand_idx_mapping_block_size
+        is not HookedGPUModelRunner.get_expand_idx_mapping_block_size
     )
     assert DllmGPUModelRunner.sample is not GPUModelRunner.sample
-    assert DllmGPUModelRunner.sample_tokens is not GPUModelRunner.sample_tokens
-    assert DllmGPUModelRunner.execute_model is not GPUModelRunner.execute_model
+    assert DllmGPUModelRunner.sample_tokens is HookedGPUModelRunner.sample_tokens
+    assert "sample_tokens" not in DllmGPUModelRunner.__dict__
+    assert DllmGPUModelRunner.execute_model is HookedGPUModelRunner.execute_model
+    assert "execute_model" not in DllmGPUModelRunner.__dict__
 
 
 def test_dllm_runtime_worker_wraps_init_device_for_dllm_runner() -> None:

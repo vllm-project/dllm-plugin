@@ -146,9 +146,9 @@ On the **v2 GPU model runner** stack, the engine actually performs **two phases*
 
 ### 6.1 Two-phase API alignment (v2)
 
-The plugin installs `DllmGPUModelRunner`, which subclasses vLLM’s `GPUModelRunner` and moves **dLLM block remasking** into `sample` / `sample_tokens`, alongside stock `apply_grammar_bitmask` behavior when `GrammarOutput` is provided. Scheduler extras for frontier structured-output repair (`dllm_so_*` on `SchedulerOutput`) are copied in `execute_model` and consumed next to `grammar_output` in phase two—there is no separate grammar application on `execute_model` outputs.
+The plugin installs `DllmGPUModelRunner`, which subclasses **`HookedGPUModelRunner`** (`dllm_plugin.vllm_gpu_model_runner_fork`): that intermediate class tracks **v0.20.x** `GPUModelRunner.prepare_inputs` and `sample_tokens` with small hooks (expand-map width, PP tensor width, optional speculator phase, `execute_model` prelude). **`DllmGPUModelRunner` only overrides `sample`** for dLLM block remasking—plus hook implementations and `take_dllm_draft_token_ids`—while inheriting phase-two orchestration from the fork. Stock `apply_grammar_bitmask` runs when `GrammarOutput` is provided. Scheduler extras for frontier structured-output repair (`dllm_so_*` on `SchedulerOutput`) are captured in `before_execute_model` and consumed next to `grammar_output` in phase two—there is no separate grammar application on `execute_model` outputs.
 
-`prepare_inputs` is forked for **vLLM 0.20.x** only; it stays aligned with upstream via an overridable **`get_expand_idx_mapping_block_size`** hook (base fork vs. dLLM widening in `DllmGPUModelRunner`) so the diff can shrink if vLLM adopts the same seam.
+`prepare_inputs` stays aligned with tag **v0.20.0** via **`get_expand_idx_mapping_block_size`** (widened further in `DllmGPUModelRunner` for dLLM architectures); upstream adoption of the same seam would shrink the fork.
 
 **Mutual exclusion:** do not combine Eagle (or other target+draft-model) speculative decoding with the dLLM block path on the same run; the runner skips `speculator.propose` when servicing a dLLM block batch and emits drafts via the same `take_draft_token_ids` hook spec decode uses.
 
