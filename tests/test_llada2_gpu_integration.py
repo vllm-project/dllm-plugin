@@ -105,17 +105,15 @@ def test_llada2_real_weights_llm_generate(
     monkeypatch.setenv("VLLM_DLLM_USE_MOCK_MODEL", "0")
 
     # Create LLM with real model
-    # NOTE: Do NOT use trust_remote_code - it causes vLLM to use HF auto_map model
-    # instead of our registered plugin model. The config will be loaded from
-    # the registered model architecture, not from HuggingFace custom code.
-    #
-    # WORKAROUND: Use model_impl parameter to force vLLM to use our plugin model
-    # This bypasses the standard model loading and validation flow
-    # TODO: Remove model_impl once vLLM properly validates registered architectures
+    # WORKAROUND: Use both trust_remote_code=True and model_impl parameter
+    # - trust_remote_code=True: Allows loading custom config from HF
+    # - model_impl: Forces vLLM to use our plugin model instead of HF auto_map
+    # This combination should bypass validation while using our registered model
+    # TODO: Remove workaround once vLLM properly validates registered architectures
     llm = LLM(
         model=str(llada2_mini_model_dir),
         tokenizer=str(llada2_mini_model_dir),
-        trust_remote_code=False,  # MUST be False to use registry model
+        trust_remote_code=True,  # Required for custom config loading
         model_impl="dllm_plugin.models.llada2:LLaDA2ForCausalLM",  # Force our model
         enforce_eager=True,
         tensor_parallel_size=1,
