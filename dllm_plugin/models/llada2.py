@@ -550,6 +550,16 @@ class LLaDA2ForCausalLM(nn.Module):
             hidden_states = self.norm(hidden_states)
             return hidden_states
 
+        # Create default positions if not provided (LLaDA2 doesn't use RoPE,
+        # but vLLM's Attention layer may need positions for indexing)
+        if positions is None:
+            batch_size, seq_len = hidden_states.shape[:2]
+            positions = (
+                torch.arange(seq_len, dtype=torch.long, device=hidden_states.device)
+                .unsqueeze(0)
+                .expand(batch_size, -1)
+            )
+
         # Transformer layers
         for layer_idx, layer in enumerate(self.layers):
             hidden_states = layer(

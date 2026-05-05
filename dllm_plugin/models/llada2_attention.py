@@ -201,11 +201,11 @@ class LLaDA2BlockAttention(nn.Module):
         # Apply attention
         if self._use_dual_chunk:
             attn_output = self._forward_dual_chunk(
-                q, k, v, kv_cache, attn_metadata, kv_scale
+                q, k, v, positions, kv_cache, attn_metadata, kv_scale
             )
         else:
             attn_output = self._forward_metadata_modification(
-                q, k, v, kv_cache, attn_metadata, kv_scale
+                q, k, v, positions, kv_cache, attn_metadata, kv_scale
             )
 
         # Output projection
@@ -217,6 +217,7 @@ class LLaDA2BlockAttention(nn.Module):
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
+        positions: torch.Tensor,
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
         kv_scale: float = 1.0,
@@ -245,6 +246,7 @@ class LLaDA2BlockAttention(nn.Module):
         # scheduler/worker sets up metadata correctly for block visibility.
 
         return self.attn(
+            positions=positions,
             query=query,
             key=key,
             value=value,
@@ -258,6 +260,7 @@ class LLaDA2BlockAttention(nn.Module):
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
+        positions: torch.Tensor,
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
         kv_scale: float = 1.0,
