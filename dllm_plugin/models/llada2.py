@@ -615,8 +615,11 @@ class LLaDA2ForCausalLM(nn.Module):
                     expert_weights[int(layer_id)][int(expert_id)][param_name] = (
                         loaded_weight
                     )
-                    loaded_params.add(name)
-                    mapped_names_loaded.append(f"{checkpoint_name} -> {name} (expert)")
+                    # NOTE: Don't add individual expert weights to loaded_params here
+                    # They'll be stacked and added as w13_weight/w2_weight later
+                    mapped_names_loaded.append(
+                        f"{checkpoint_name} -> {name} (expert, will stack)"
+                    )
                 continue
 
             # Load regular parameters
@@ -641,15 +644,59 @@ class LLaDA2ForCausalLM(nn.Module):
             # 3. Apply TP sharding if tp_size > 1
             # 4. Assign to layer.mlp.experts.w13_weight and w2_weight
 
-            # Placeholder: Mark as loaded but don't actually stack
-            # Real implementation in follow-up commit
-            for expert_id in experts_dict:
-                for param_name in experts_dict[expert_id]:
-                    # Note: Use MODEL parameter name format (no 'model.' prefix)
-                    full_name = (
-                        f"layers.{layer_id}.mlp.experts.{expert_id}.{param_name}"
+            # Stack expert weights for FusedMoE
+            # Each expert has gate_proj, up_proj, down_proj weights
+            # FusedMoE expects w13_weight (gate+up stacked) and w2_weight (down)
+
+            w13_list = []
+            w2_list = []
+
+            for expert_id in range(self.num_experts):
+                if expert_id not in experts_dict:
+                    raise ValueError(
+                        f"Missing expert {expert_id} weights for layer {layer_id}"
                     )
-                    loaded_params.add(full_name)
+
+                expert_params = experts_dict[expert_id]
+
+                # Get gate_proj and up_proj, stack into w13
+                gate_weight = expert_params.get("gate_proj.weight")
+                up_weight = expert_params.get("up_proj.weight")
+
+                if gate_weight is None or up_weight is None:
+                    raise ValueError(
+                        f"Missing gate_proj or up_proj for "
+                        f"layer {layer_id} expert {expert_id}"
+                    )
+
+                # Stack gate and up vertically (dim=0)
+                w13_weight = torch.cat([gate_weight, up_weight], dim=0)
+                w13_list.append(w13_weight)
+
+                # Get down_proj as w2
+                down_weight = expert_params.get("down_proj.weight")
+                if down_weight is None:
+                    raise ValueError(
+                        f"Missing down_proj for layer {layer_id} expert {expert_id}"
+                    )
+                w2_list.append(down_weight)
+
+            # Stack all experts into single tensors
+            # Shape: (num_experts, intermediate_size*2, hidden_size) for w13
+            # Shape: (num_experts, hidden_size, intermediate_size) for w2
+            stacked_w13 = torch.stack(w13_list, dim=0)
+            stacked_w2 = torch.stack(w2_list, dim=0)
+
+            # Assign to FusedMoE layer
+            layer = self.layers[layer_id]
+            layer.mlp.experts.w13_weight = nn.Parameter(
+                stacked_w13, requires_grad=False
+            )
+            layer.mlp.experts.w2_weight = nn.Parameter(stacked_w2, requires_grad=False)
+
+            # Track STACKED weights in loaded_params (not individual expert weights)
+            loaded_params.add(f"layers.{layer_id}.mlp.experts.w13_weight")
+            loaded_params.add(f"layers.{layer_id}.mlp.experts.w2_weight")
 
         # Mark lm_head.weight as loaded if weight tying is enabled
         # (it shares the same Parameter object as embed_tokens.weight, so loading
