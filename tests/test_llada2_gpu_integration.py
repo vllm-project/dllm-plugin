@@ -45,50 +45,51 @@ from dllm_plugin import register_dllm  # noqa: E402
 
 register_dllm()
 
-# TEMPORARY WORKAROUND: Monkeypatch ModelConfig validation
-# vLLM's ModelConfig.__post_init__() validates runner support based on the
-# model_type from config (e.g., 'llama'), but doesn't check ModelRegistry
-# for custom architectures registered by plugins. This causes validation to
-# fail even though our LLaDA2MoeModelLM architecture is properly registered.
+# TEMPORARY WORKAROUND: Monkeypatch ModelConfig._verify_runner_supported
+# vLLM's ModelConfig validates runner support based on model_type from config
+# (e.g., 'llama'), but doesn't check ModelRegistry for custom architectures
+# registered by plugins. This causes validation to fail even though our
+# LLaDA2MoeModelLM architecture is properly registered.
 #
-# This monkeypatch disables the validation check to allow our registered model
-# to load. This is NOT the intended use pattern - we need a proper fix in vLLM
+# This monkeypatch makes the validation always pass for LLaDA2 models.
+# This is NOT the intended use pattern - we need a proper fix in vLLM
 # that checks ModelRegistry during validation.
 #
 # TODO: File vLLM issue requesting ModelRegistry lookup during runner validation
 # TODO: Remove this monkeypatch once vLLM properly supports plugin architectures
 import vllm.config.model  # noqa: E402
 
-_original_model_config_post_init = vllm.config.model.ModelConfig.__post_init__
+_original_verify_runner_supported = (
+    vllm.config.model.ModelConfig._verify_runner_supported
+)
 
 
-def _patched_model_config_post_init(self, *args, **kwargs):
-    """Patched __post_init__ that skips runner validation for LLaDA2 models."""
-    # In Pydantic v2, architectures field isn't set when __post_init__ is called
-    # Check the model path instead to detect our test fixture
-    is_llada2 = hasattr(self, "model") and "llada2" in str(self.model).lower()
+def _patched_verify_runner_supported(self) -> None:
+    """Patched _verify_runner_supported that allows LLaDA2 models."""
+    # Check if this is a LLaDA2 model by path or architecture
+    is_llada2 = (hasattr(self, "model") and "llada2" in str(self.model).lower()) or (
+        hasattr(self, "hf_config")
+        and hasattr(self.hf_config, "architectures")
+        and any(
+            "llada2" in arch.lower() for arch in (self.hf_config.architectures or [])
+        )
+    )
 
     if is_llada2:
         print(
             f"[WORKAROUND] Bypassing runner validation for LLaDA2 model: {self.model}",
             flush=True,
         )
-        # Call original __post_init__ for initialization, but catch ValidationError
-        try:
-            _original_model_config_post_init(self, *args, **kwargs)
-        except ValueError as e:
-            if "does not support `--runner generate`" in str(e):
-                # This is the validation error we want to bypass - swallow it
-                print("[WORKAROUND] Suppressed runner validation error", flush=True)
-            else:
-                # Different error - re-raise
-                raise
-    else:
-        # For non-LLaDA2 models, call original validation normally
-        _original_model_config_post_init(self, *args, **kwargs)
+        # Skip validation for LLaDA2 models - they're registered in ModelRegistry
+        return
+
+    # For non-LLaDA2 models, call original validation
+    _original_verify_runner_supported(self)
 
 
-vllm.config.model.ModelConfig.__post_init__ = _patched_model_config_post_init
+vllm.config.model.ModelConfig._verify_runner_supported = (
+    _patched_verify_runner_supported
+)
 
 from dllm_plugin.config import DRAFT_SIZE  # noqa: E402
 from tests.gpu_memory import gpu_memory_utilization, kv_cache_memory_bytes  # noqa: E402
