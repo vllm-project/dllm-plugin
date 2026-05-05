@@ -562,12 +562,39 @@ class LLaDA2ForCausalLM(nn.Module):
 
         # Transformer layers
         for layer_idx, layer in enumerate(self.layers):
+            # Debug: Validate input shape
+            expected_shape = (
+                hidden_states.shape[0],
+                hidden_states.shape[1],
+                self.hidden_size,
+            )
+            if hidden_states.shape != expected_shape:
+                raise ValueError(
+                    f"Layer {layer_idx} input shape mismatch: "
+                    f"expected {expected_shape}, got {hidden_states.shape}"
+                )
+
+            # Debug: Check for NaN/Inf
+            if torch.isnan(hidden_states).any() or torch.isinf(hidden_states).any():
+                raise ValueError(f"Layer {layer_idx} input contains NaN or Inf values")
+
             hidden_states = layer(
                 hidden_states=hidden_states,
                 positions=positions,
                 kv_cache=kv_caches[layer_idx],
                 attn_metadata=attn_metadata,
             )
+
+            # Debug: Validate output shape
+            if hidden_states.shape != expected_shape:
+                raise ValueError(
+                    f"Layer {layer_idx} output shape mismatch: "
+                    f"expected {expected_shape}, got {hidden_states.shape}"
+                )
+
+            # Debug: Check for NaN/Inf after layer
+            if torch.isnan(hidden_states).any() or torch.isinf(hidden_states).any():
+                raise ValueError(f"Layer {layer_idx} output contains NaN or Inf values")
 
         # Final norm
         hidden_states = self.norm(hidden_states)
