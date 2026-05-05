@@ -428,6 +428,11 @@ class LLaDA2ForCausalLM(nn.Module):
         self.vocab_size = self.config.vocab_size
         self.num_layers = self.config.num_hidden_layers
 
+        # MoE architecture parameters (needed for weight loading)
+        self.num_experts = getattr(
+            self.config, "num_experts", LLADA2_DEFAULT_NUM_EXPERTS
+        )
+
         # Embedding layer
         self.embed_tokens = VocabParallelEmbedding(
             self.vocab_size,
