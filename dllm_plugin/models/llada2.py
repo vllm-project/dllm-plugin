@@ -636,6 +636,12 @@ class LLaDA2ForCausalLM(nn.Module):
             elif ".mlp.down_proj." in name and ".mlp.experts." not in name:
                 name = name.replace(".mlp.down_proj.", ".mlp.shared_expert_down.")
 
+            # Map MoE router/gate bias parameter
+            # HF checkpoint: mlp.gate.expert_bias
+            # Model expects: mlp.gate.bias
+            if ".mlp.gate.expert_bias" in name:
+                name = name.replace(".mlp.gate.expert_bias", ".mlp.gate.bias")
+
             checkpoint_names_seen.append(checkpoint_name)
 
             # Skip lm_head if weight tying is enabled
