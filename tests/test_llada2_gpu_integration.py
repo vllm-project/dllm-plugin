@@ -39,6 +39,12 @@ import pytest
 pytest.importorskip("vllm")
 torch = pytest.importorskip("torch")
 
+# CRITICAL: Explicitly register plugin models
+# vLLM's automatic plugin discovery may not trigger, so we call it manually
+from dllm_plugin import register_dllm  # noqa: E402
+
+register_dllm()
+
 from dllm_plugin.config import DRAFT_SIZE  # noqa: E402
 from tests.gpu_memory import gpu_memory_utilization, kv_cache_memory_bytes  # noqa: E402
 
