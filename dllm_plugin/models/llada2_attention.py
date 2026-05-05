@@ -26,7 +26,14 @@ except ImportError:  # pragma: no cover
     except ImportError:
         from vllm.attention.layer import Attention
 
-from vllm.attention import AttentionMetadata
+try:
+    from vllm.attention.backends.abstract import AttentionMetadata
+except ImportError:  # pragma: no cover
+    try:
+        from vllm.attention import AttentionMetadata  # type: ignore
+    except ImportError:
+        # Fallback for type checking
+        AttentionMetadata = object  # type: ignore
 
 
 class LLaDA2BlockAttention(nn.Module):
