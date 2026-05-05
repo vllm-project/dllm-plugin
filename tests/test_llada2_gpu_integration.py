@@ -64,24 +64,11 @@ _original_model_config_post_init = vllm.config.model.ModelConfig.__post_init__
 
 def _patched_model_config_post_init(self, *args, **kwargs):
     """Patched __post_init__ that skips runner validation for LLaDA2 models."""
-    # Debug: Check what attributes are available
-    has_arch = hasattr(self, "architectures")
-    print(f"[DEBUG] __post_init__ called, hasattr architectures: {has_arch}")
-    if hasattr(self, "architectures"):
-        print(f"[DEBUG] architectures = {self.architectures}")
-    if hasattr(self, "model"):
-        print(f"[DEBUG] model = {self.model}")
-
-    # Check if this is a LLaDA2 architecture BEFORE running validation
-    # architectures field is set before __post_init__ is called
-    if (
-        hasattr(self, "architectures")
-        and self.architectures
-        and any("LLaDA2" in arch for arch in self.architectures)
-    ):
-        # Skip validation for our registered model - it has supported_runners
+    # In Pydantic v2, architectures field isn't set when __post_init__ is called
+    # Check the model path instead to detect our test fixture
+    if hasattr(self, "model") and "llada2" in str(self.model).lower():
         print(
-            f"[WORKAROUND] Bypassing runner validation for {self.architectures}",
+            f"[WORKAROUND] Bypassing runner validation for LLaDA2 model: {self.model}",
             flush=True,
         )
         # Don't call original __post_init__ - that would run the validation
