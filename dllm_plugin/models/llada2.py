@@ -453,12 +453,17 @@ class LLaDA2ForCausalLM(nn.Module):
             eps=getattr(self.config, "rms_norm_eps", 1e-6),
         )
 
-        # LM head
+        # LM head (with optional weight tying to embeddings)
         self.lm_head = ParallelLMHead(
             self.vocab_size,
             self.hidden_size,
             bias=False,
         )
+
+        # Weight tying: Share lm_head weights with embed_tokens if configured
+        # (Standard LLaMA pattern to reduce model size)
+        if getattr(self.config, "tie_word_embeddings", False):
+            self.lm_head.weight = self.embed_tokens.weight
 
         # Logits processor
         self.logits_processor = LogitsProcessor(self.vocab_size)
@@ -574,6 +579,11 @@ class LLaDA2ForCausalLM(nn.Module):
         )  # layer_id -> expert_id -> param_name -> tensor
 
         for name, loaded_weight in weights:
+            # Skip lm_head if weight tying is enabled
+            # (lm_head.weight is tied to embed_tokens.weight in __init__)
+            if getattr(self.config, "tie_word_embeddings", False) and "lm_head" in name:
+                continue
+
             # Skip expert weights in first pass (will stack later)
             if ".mlp.experts." in name:
                 # Parse: model.layers.{L}.mlp.experts.{E}.{param}
@@ -615,15 +625,14 @@ class LLaDA2ForCausalLM(nn.Module):
                     )
                     loaded_params.add(full_name)
 
-        # Handle weight tying for lm_head (common in LLaMA-style models)
-        # If lm_head.weight was not loaded from checkpoint, tie it to embed_tokens
-        if "lm_head.weight" not in loaded_params and "lm_head.weight" in params_dict:
-            # Check if embed_tokens.weight was loaded
-            embed_param_name = "embed_tokens.weight"
-            if embed_param_name in loaded_params:
-                # Tie lm_head weight to embed_tokens weight
-                self.lm_head.weight = self.embed_tokens.weight
-                loaded_params.add("lm_head.weight")
+        # Mark lm_head.weight as loaded if weight tying is enabled
+        # (it shares the same Parameter object as embed_tokens.weight, so loading
+        # embed_tokens.weight automatically "loads" lm_head.weight)
+        if (
+            getattr(self.config, "tie_word_embeddings", False)
+            and "embed_tokens.weight" in loaded_params
+        ):
+            loaded_params.add("lm_head.weight")
 
         # Return unloaded params
         return set(params_dict.keys()) - loaded_params
