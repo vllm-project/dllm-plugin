@@ -12,6 +12,7 @@ from typing import Any
 from dllm_plugin.config import (
     DLLM_MOCK_STACK_MODEL_ID,
     LLADA2_ARCHITECTURE_NAME,
+    LLADA2_HF_ARCHITECTURE_NAME,
     resolve_strict_stack_validation,
 )
 
@@ -64,7 +65,13 @@ def _get_model_architectures(vllm_config: Any) -> tuple[str, ...]:
 def _is_dllm_model_architecture(vllm_config: Any) -> bool:
     archs = set(_get_model_architectures(vllm_config))
     return bool(
-        archs.intersection({LLADA2_ARCHITECTURE_NAME, DLLM_MOCK_STACK_MODEL_ID}),
+        archs.intersection(
+            {
+                LLADA2_ARCHITECTURE_NAME,
+                LLADA2_HF_ARCHITECTURE_NAME,
+                DLLM_MOCK_STACK_MODEL_ID,
+            }
+        ),
     )
 
 
@@ -97,10 +104,14 @@ def assert_compatible_stack(
 
     archs = _get_model_architectures(vllm_config)
     if not _is_dllm_model_architecture(vllm_config):
+        expected = (
+            LLADA2_ARCHITECTURE_NAME,
+            LLADA2_HF_ARCHITECTURE_NAME,
+            DLLM_MOCK_STACK_MODEL_ID,
+        )
         raise ValueError(
             "dLLM runtime adapters require a dLLM-compatible model architecture "
-            f"(got architectures={archs!r}); expected one of "
-            f"{(LLADA2_ARCHITECTURE_NAME, DLLM_MOCK_STACK_MODEL_ID)!r}"
+            f"(got architectures={archs!r}); expected one of {expected!r}"
             f"{_ctx()}",
         )
 
