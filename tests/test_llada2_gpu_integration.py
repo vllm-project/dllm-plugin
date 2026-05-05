@@ -52,7 +52,8 @@ def llada2_mini_model_dir() -> Path | str:
     try:
         from transformers import AutoConfig  # type: ignore[import-untyped]
 
-        AutoConfig.from_pretrained(model_id)  # Test if model is available
+        # LLaDA2.0 uses custom architecture code, requires trust_remote_code
+        AutoConfig.from_pretrained(model_id, trust_remote_code=True)
         return model_id  # HF model ID, vLLM will download
     except Exception:
         # Fall back to local fixture (if available)
@@ -97,6 +98,7 @@ def test_llada2_real_weights_llm_generate(
     llm = LLM(
         model=str(llada2_mini_model_dir),
         tokenizer=str(llada2_mini_model_dir),
+        trust_remote_code=True,  # LLaDA2.0 uses custom architecture code
         enforce_eager=True,
         tensor_parallel_size=1,
         pipeline_parallel_size=1,  # PP=1 (PP>1 not supported in Phase 7)
@@ -154,6 +156,7 @@ def test_llada2_multi_step_generation(
     llm = LLM(
         model=str(llada2_mini_model_dir),
         tokenizer=str(llada2_mini_model_dir),
+        trust_remote_code=True,  # LLaDA2.0 uses custom architecture code
         enforce_eager=True,
         tensor_parallel_size=1,
         max_model_len=256,
@@ -217,6 +220,7 @@ def test_llada2_http_server_integration(
             str(llada2_mini_model_dir),
             "--tokenizer",
             str(llada2_mini_model_dir),
+            "--trust-remote-code",  # LLaDA2.0 uses custom architecture code
             "--host",
             "127.0.0.1",
             "--port",
@@ -311,6 +315,7 @@ def test_llada2_tensor_parallelism_tp2(
     llm = LLM(
         model=str(llada2_mini_model_dir),
         tokenizer=str(llada2_mini_model_dir),
+        trust_remote_code=True,  # LLaDA2.0 uses custom architecture code
         enforce_eager=True,
         tensor_parallel_size=2,  # TP=2
         pipeline_parallel_size=1,
@@ -359,6 +364,7 @@ def test_llada2_pipeline_parallelism_fails(
         LLM(
             model=str(llada2_mini_model_dir),
             tokenizer=str(llada2_mini_model_dir),
+            trust_remote_code=True,  # LLaDA2.0 uses custom architecture code
             enforce_eager=True,
             tensor_parallel_size=1,
             pipeline_parallel_size=2,  # PP > 1 should fail
@@ -397,6 +403,7 @@ def test_llada2_attention_backend_compatibility(
     llm = LLM(
         model=str(llada2_mini_model_dir),
         tokenizer=str(llada2_mini_model_dir),
+        trust_remote_code=True,  # LLaDA2.0 uses custom architecture code
         enforce_eager=True,
         tensor_parallel_size=1,
         max_model_len=256,
