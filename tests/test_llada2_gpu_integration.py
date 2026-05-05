@@ -95,10 +95,12 @@ def test_llada2_real_weights_llm_generate(
     monkeypatch.setenv("VLLM_DLLM_USE_MOCK_MODEL", "0")
 
     # Create LLM with real model
+    # NOTE: Do NOT use trust_remote_code=True here. We want vLLM to use our
+    # plugin model implementation, not the HuggingFace custom code. Our plugin
+    # registered the LLaDA2MoeModelLM architecture, so vLLM will use that.
     llm = LLM(
         model=str(llada2_mini_model_dir),
         tokenizer=str(llada2_mini_model_dir),
-        trust_remote_code=True,  # LLaDA2.0 uses custom architecture code
         enforce_eager=True,
         tensor_parallel_size=1,
         pipeline_parallel_size=1,  # PP=1 (PP>1 not supported in Phase 7)
@@ -153,10 +155,10 @@ def test_llada2_multi_step_generation(
     monkeypatch.setenv("VLLM_ENABLE_V1_MULTIPROCESSING", "0")
     monkeypatch.setenv("VLLM_DLLM_USE_MOCK_MODEL", "0")
 
+    # Use plugin model, not HuggingFace custom code
     llm = LLM(
         model=str(llada2_mini_model_dir),
         tokenizer=str(llada2_mini_model_dir),
-        trust_remote_code=True,  # LLaDA2.0 uses custom architecture code
         enforce_eager=True,
         tensor_parallel_size=1,
         max_model_len=256,
@@ -212,7 +214,7 @@ def test_llada2_http_server_integration(
     monkeypatch.setenv("VLLM_ENABLE_V1_MULTIPROCESSING", "0")
     monkeypatch.setenv("VLLM_DLLM_USE_MOCK_MODEL", "0")
 
-    # Start vLLM server
+    # Start vLLM server (use plugin model, not HuggingFace custom code)
     proc = subprocess.Popen(
         [
             "vllm",
@@ -220,7 +222,6 @@ def test_llada2_http_server_integration(
             str(llada2_mini_model_dir),
             "--tokenizer",
             str(llada2_mini_model_dir),
-            "--trust-remote-code",  # LLaDA2.0 uses custom architecture code
             "--host",
             "127.0.0.1",
             "--port",
@@ -312,10 +313,10 @@ def test_llada2_tensor_parallelism_tp2(
     monkeypatch.setenv("VLLM_ENABLE_V1_MULTIPROCESSING", "0")
     monkeypatch.setenv("VLLM_DLLM_USE_MOCK_MODEL", "0")
 
+    # Use plugin model, not HuggingFace custom code
     llm = LLM(
         model=str(llada2_mini_model_dir),
         tokenizer=str(llada2_mini_model_dir),
-        trust_remote_code=True,  # LLaDA2.0 uses custom architecture code
         enforce_eager=True,
         tensor_parallel_size=2,  # TP=2
         pipeline_parallel_size=1,
@@ -359,12 +360,11 @@ def test_llada2_pipeline_parallelism_fails(
     monkeypatch.setenv("VLLM_ENABLE_V1_MULTIPROCESSING", "0")
     monkeypatch.setenv("VLLM_DLLM_USE_MOCK_MODEL", "0")
 
-    # Expect ValueError during model initialization
+    # Expect ValueError during model initialization (use plugin model)
     with pytest.raises(ValueError, match="Pipeline parallelism.*not supported"):
         LLM(
             model=str(llada2_mini_model_dir),
             tokenizer=str(llada2_mini_model_dir),
-            trust_remote_code=True,  # LLaDA2.0 uses custom architecture code
             enforce_eager=True,
             tensor_parallel_size=1,
             pipeline_parallel_size=2,  # PP > 1 should fail
@@ -400,10 +400,10 @@ def test_llada2_attention_backend_compatibility(
     monkeypatch.setenv("VLLM_DLLM_USE_MOCK_MODEL", "0")
     monkeypatch.setenv("VLLM_ATTENTION_BACKEND", backend)
 
+    # Use plugin model, not HuggingFace custom code
     llm = LLM(
         model=str(llada2_mini_model_dir),
         tokenizer=str(llada2_mini_model_dir),
-        trust_remote_code=True,  # LLaDA2.0 uses custom architecture code
         enforce_eager=True,
         tensor_parallel_size=1,
         max_model_len=256,
