@@ -567,13 +567,13 @@ class LLaDA2ForCausalLM(nn.Module):
     def compute_logits(
         self,
         hidden_states: torch.Tensor,
-        sampling_metadata,
+        sampling_metadata=None,
     ) -> torch.Tensor:
         """Compute logits from hidden states.
 
         Args:
             hidden_states: Hidden states, shape (batch, seq_len, hidden_size).
-            sampling_metadata: Sampling metadata from vLLM.
+            sampling_metadata: Sampling metadata from vLLM (None during profiling).
 
         Returns:
             Logits, shape (batch, seq_len, vocab_size).
