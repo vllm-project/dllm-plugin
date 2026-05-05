@@ -209,6 +209,19 @@ class HookedGPUModelRunner(GPUModelRunner):
 
         # Some input token ids are directly read from the last sampled tokens
         # and draft tokens. Also, get the logits indices to sample tokens from.
+        # Debug: Log tensor states before combine_sampled_and_draft_tokens
+        print("[DEBUG] Before combine_sampled_and_draft_tokens:")
+        print(f"  input_ids.shape={self.input_buffers.input_ids.shape}")
+        print(f"  idx_mapping.shape={idx_mapping.shape}")
+        last_sampled_shape = self.req_states.last_sampled_tokens.shape
+        print(f"  last_sampled_tokens.shape={last_sampled_shape}")
+        print(f"  query_start_loc.shape={query_start_loc.shape}")
+        print(f"  seq_lens.shape={seq_lens.shape}")
+        print(f"  prefill_len.shape={self.req_states.prefill_len.gpu.shape}")
+        print(f"  draft_tokens.shape={self.req_states.draft_tokens.shape}")
+        print(f"  cu_num_logits.shape={cu_num_logits.shape}")
+        print(f"  total_num_logits={total_num_logits}")
+
         logits_indices = combine_sampled_and_draft_tokens(
             self.input_buffers.input_ids,
             idx_mapping,

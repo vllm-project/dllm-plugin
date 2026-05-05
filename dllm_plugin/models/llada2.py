@@ -640,6 +640,17 @@ class LLaDA2ForCausalLM(nn.Module):
         print(f"[DEBUG] compute_logits output: logits.shape={logits.shape}")
         print(f"[DEBUG] compute_logits output: vocab_size={self.vocab_size}")
 
+        # Validate logits are reasonable
+        if torch.isnan(logits).any():
+            raise ValueError("Logits contain NaN values!")
+        if torch.isinf(logits).any():
+            raise ValueError("Logits contain Inf values!")
+
+        # Check min/max range (should be reasonable float values)
+        logits_min = logits.min().item()
+        logits_max = logits.max().item()
+        print(f"[DEBUG] Logits range: min={logits_min:.2f}, max={logits_max:.2f}")
+
         return logits
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
