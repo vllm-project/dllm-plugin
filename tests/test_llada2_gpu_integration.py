@@ -22,9 +22,17 @@ Run with:
 
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 from pathlib import Path
+
+# CRITICAL: Set environment variables BEFORE importing vllm
+# vLLM loads plugins during import based on VLLM_PLUGINS env var
+os.environ["VLLM_PLUGINS"] = "dllm"
+os.environ["VLLM_USE_V2_MODEL_RUNNER"] = "1"
+os.environ["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
+os.environ["VLLM_DLLM_USE_MOCK_MODEL"] = "0"
 
 import pytest
 
