@@ -615,6 +615,21 @@ class LLaDA2ForCausalLM(nn.Module):
         Returns:
             Logits, shape (batch, seq_len, vocab_size).
         """
+        # Debug: Validate hidden states before logits computation
+        print(f"[DEBUG] compute_logits: hidden_states.shape={hidden_states.shape}")
+        print(f"[DEBUG] compute_logits: hidden_states.dtype={hidden_states.dtype}")
+        print(f"[DEBUG] compute_logits: hidden_states.device={hidden_states.device}")
+
+        if torch.isnan(hidden_states).any():
+            raise ValueError("Hidden states contain NaN before logits computation")
+        if torch.isinf(hidden_states).any():
+            raise ValueError("Hidden states contain Inf before logits computation")
+
+        # Check tensor is contiguous
+        if not hidden_states.is_contiguous():
+            print("[DEBUG] Hidden states not contiguous, making contiguous")
+            hidden_states = hidden_states.contiguous()
+
         logits = self.logits_processor(
             self.lm_head,
             hidden_states,
