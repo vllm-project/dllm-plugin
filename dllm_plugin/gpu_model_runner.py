@@ -63,6 +63,14 @@ class DllmGPUModelRunner(HookedGPUModelRunner):
         self._dllm_so_valid_prefix_lens: dict[str, int] | None = None
         self._dllm_pending_draft_ids: Any = None
 
+    def shutdown(self) -> None:
+        """vLLM v1 worker calls this during engine teardown."""
+
+        parent = super()
+        fn = getattr(parent, "shutdown", None)
+        if callable(fn):
+            fn()
+
     def get_expand_idx_mapping_block_size(self, max_logits_per_req: int) -> int:
         n = super().get_expand_idx_mapping_block_size(max_logits_per_req)
         if dllm_architecture_match(self.vllm_config):

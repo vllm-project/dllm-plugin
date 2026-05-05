@@ -4,5 +4,6 @@
   "bos_token": "1",
   "eos_token": "2",
   "pad_token": "0",
-  "unk_token": "0"
+  "unk_token": "0",
+  "chat_template": "{%- for message in messages %}{{ message['content'] }}{%- endfor %}"
 }

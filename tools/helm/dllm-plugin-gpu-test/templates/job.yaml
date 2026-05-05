@@ -53,7 +53,22 @@ spec:
           args:
             - |
               set -euo pipefail
-              apt-get update -qq && apt-get install -qq -y git curl
+              export DEBIAN_FRONTEND=noninteractive
+              update_ok=0
+              for attempt in 1 2 3 4 5; do
+                if apt-get update -qq -o Acquire::Retries=6; then
+                  update_ok=1
+                  break
+                fi
+                sleep "$((attempt * 15))"
+              done
+              if [[ "${update_ok}" -ne 1 ]]; then
+                echo "apt-get update failed after 5 attempts; refusing install (fix mirrors/network)." >&2
+                exit 1
+              fi
+              apt-get install -y --no-install-recommends -qq git curl ca-certificates \
+                || { apt-get update -qq && apt-get install -y --no-install-recommends git curl ca-certificates; }
+              command -v curl
               curl -LsSf https://astral.sh/uv/install.sh | sh
               export PATH="$HOME/.local/bin:$PATH"
 

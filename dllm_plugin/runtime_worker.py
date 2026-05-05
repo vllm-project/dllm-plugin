@@ -13,7 +13,7 @@ from dllm_plugin.validation import (
     assert_compatible_stack,
     assert_runtime_worker_v2_model_runner,
 )
-from dllm_plugin.worker import DllmWorker, DllmWorkerStep
+from dllm_plugin.worker import DllmWorker, DllmWorkerStep, is_v2_model_runner_enabled
 
 _MISSING = object()
 
@@ -261,11 +261,15 @@ class DllmRuntimeWorker(VllmGPUWorker):
             )
         super().__init__(*args, **kwargs)
         assert_compatible_stack(self.vllm_config, caller="DllmRuntimeWorker.__init__")
+        # Align with ``DllmWorker`` / ``is_v2_model_runner_enabled()`` (env), so tests
+        # that monkeypatch ``VLLM_USE_V2_MODEL_RUNNER`` get ``ValueError`` from the
+        # assert below instead of ``RuntimeError`` from ``DllmWorker``.
+        effective_v2 = bool(self.use_v2_model_runner) and is_v2_model_runner_enabled()
         assert_runtime_worker_v2_model_runner(
-            use_v2_model_runner=self.use_v2_model_runner,
+            use_v2_model_runner=effective_v2,
             caller="DllmRuntimeWorker.__init__",
         )
-        self._dllm_helper = DllmWorker(require_v2_model_runner=True)
+        self._dllm_helper = DllmWorker(require_v2_model_runner=effective_v2)
 
     @instrument(span_name="Init device")
     def init_device(self) -> None:
