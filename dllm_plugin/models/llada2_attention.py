@@ -35,6 +35,12 @@ except ImportError:  # pragma: no cover
         # Fallback for type checking
         AttentionMetadata = object
 
+from vllm.model_executor.layers.layernorm import RMSNorm
+from vllm.model_executor.layers.linear import (
+    QKVParallelLinear,
+    RowParallelLinear,
+)
+
 
 class LLaDA2BlockAttention(nn.Module):
     """Block-style attention for LLaDA2.0 using virtual chunk decomposition.
@@ -91,6 +97,39 @@ class LLaDA2BlockAttention(nn.Module):
     ) -> None:
         super().__init__()
 
+        self.num_heads = num_heads
+        self.head_size = head_size
+        self.num_kv_heads = num_kv_heads if num_kv_heads is not None else num_heads
+        self.hidden_size = num_heads * head_size
+
+        # QKV projection (fused)
+        # HF checkpoint: attention.query_key_value.weight
+        # Fuses Q, K, V projections into single tensor for efficiency
+        self.qkv_proj = QKVParallelLinear(
+            self.hidden_size,
+            self.head_size,
+            self.num_heads,
+            self.num_kv_heads,
+            bias=False,
+            quant_config=quant_config,
+            prefix=f"{prefix}.qkv_proj",
+        )
+
+        # Q and K normalization (LLaDA2.0 specific)
+        # Applied after QKV projection, before attention
+        self.q_norm = RMSNorm(self.head_size, eps=1e-6)
+        self.k_norm = RMSNorm(self.head_size, eps=1e-6)
+
+        # Output projection
+        # HF checkpoint: attention.dense.weight
+        self.o_proj = RowParallelLinear(
+            self.hidden_size,
+            self.hidden_size,
+            bias=False,
+            quant_config=quant_config,
+            prefix=f"{prefix}.o_proj",
+        )
+
         # Use vLLM's standard Attention layer as backend
         # It auto-selects FlashAttention or FlashInfer based on environment
         # NOTE: LLaDA2 doesn't use sliding window, alibi, or blocksparse
@@ -108,10 +147,6 @@ class LLaDA2BlockAttention(nn.Module):
             attn_type=attn_type,
         )
 
-        self.num_heads = num_heads
-        self.head_size = head_size
-        self.num_kv_heads = num_kv_heads if num_kv_heads is not None else num_heads
-
         # Strategy selection: Try metadata modification first, fall back to dual-chunk
         # For MVP, we'll use dual-chunk as it's more explicit and easier to validate
         self._use_dual_chunk = (
@@ -120,34 +155,62 @@ class LLaDA2BlockAttention(nn.Module):
 
     def forward(
         self,
-        query: torch.Tensor,
-        key: torch.Tensor,
-        value: torch.Tensor,
+        hidden_states: torch.Tensor,
+        positions: torch.Tensor,
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
         kv_scale: float = 1.0,
     ) -> torch.Tensor:
-        """Apply block-style attention.
+        """Apply block-style attention with QKV projection.
 
         Args:
-            query: Query tensor, shape (batch_size, seq_len, num_heads * head_size).
-            key: Key tensor, shape (batch_size, seq_len, num_kv_heads * head_size).
-            value: Value tensor, shape (batch_size, seq_len, num_kv_heads * head_size).
+            hidden_states: Input tensor, shape (batch_size, seq_len, hidden_size).
+            positions: Position indices for RoPE (unused in LLaDA2.0).
             kv_cache: KV cache tensor (PagedAttention format).
             attn_metadata: Attention metadata from vLLM.
             kv_scale: Scaling factor for KV cache (default: 1.0).
 
         Returns:
-            Attention output, shape (batch_size, seq_len, num_heads * head_size).
+            Attention output, shape (batch_size, seq_len, hidden_size).
         """
+        # Project to Q, K, V
+        qkv, _ = self.qkv_proj(hidden_states)
+        q, k, v = qkv.split(
+            [
+                self.num_heads * self.head_size,
+                self.num_kv_heads * self.head_size,
+                self.num_kv_heads * self.head_size,
+            ],
+            dim=-1,
+        )
+
+        # Apply normalization (LLaDA2.0 specific)
+        # Reshape for per-head normalization
+        batch_size, seq_len = q.shape[0], q.shape[1]
+        q = q.view(batch_size, seq_len, self.num_heads, self.head_size)
+        k = k.view(batch_size, seq_len, self.num_kv_heads, self.head_size)
+
+        # Normalize Q and K per-head
+        q = self.q_norm(q)
+        k = self.k_norm(k)
+
+        # Reshape back
+        q = q.reshape(batch_size, seq_len, self.num_heads * self.head_size)
+        k = k.reshape(batch_size, seq_len, self.num_kv_heads * self.head_size)
+
+        # Apply attention
         if self._use_dual_chunk:
-            return self._forward_dual_chunk(
-                query, key, value, kv_cache, attn_metadata, kv_scale
+            attn_output = self._forward_dual_chunk(
+                q, k, v, kv_cache, attn_metadata, kv_scale
             )
         else:
-            return self._forward_metadata_modification(
-                query, key, value, kv_cache, attn_metadata, kv_scale
+            attn_output = self._forward_metadata_modification(
+                q, k, v, kv_cache, attn_metadata, kv_scale
             )
+
+        # Output projection
+        output, _ = self.o_proj(attn_output)
+        return output
 
     def _forward_dual_chunk(
         self,

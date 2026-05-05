@@ -362,14 +362,10 @@ class LLaDA2DecoderLayer(nn.Module):
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
 
-        # Block-style attention (note: signature simplified for MVP)
-        # Real integration requires proper query/key/value projections
-        # TODO(Phase 7): Add Q/K/V projection layers similar to standard transformers
-        # For now, this is a placeholder showing the integration point
+        # Block-style attention with QKV projection
         hidden_states = self.self_attn(
-            query=hidden_states,
-            key=hidden_states,
-            value=hidden_states,
+            hidden_states=hidden_states,
+            positions=positions,
             kv_cache=kv_cache,
             attn_metadata=attn_metadata,
         )
