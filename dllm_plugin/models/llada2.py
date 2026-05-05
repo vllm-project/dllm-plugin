@@ -579,6 +579,14 @@ class LLaDA2ForCausalLM(nn.Module):
         )  # layer_id -> expert_id -> param_name -> tensor
 
         for name, loaded_weight in weights:
+            # Handle checkpoint naming conventions
+            # HuggingFace checkpoints may use different names than vLLM models
+            # Map common HF naming patterns to vLLM parameter names
+            if name.startswith("model."):
+                name = name[len("model.") :]  # Remove 'model.' prefix
+            if "word_embeddings" in name:
+                name = name.replace("word_embeddings", "embed_tokens")
+
             # Skip lm_head if weight tying is enabled
             # (lm_head.weight is tied to embed_tokens.weight in __init__)
             if getattr(self.config, "tie_word_embeddings", False) and "lm_head" in name:
@@ -586,9 +594,10 @@ class LLaDA2ForCausalLM(nn.Module):
 
             # Skip expert weights in first pass (will stack later)
             if ".mlp.experts." in name:
-                # Parse: model.layers.{L}.mlp.experts.{E}.{param}
+                # Parse: layers.{L}.mlp.experts.{E}.{param}
+                # (Note: 'model.' prefix already removed above)
                 match = re.match(
-                    r"model\.layers\.(\d+)\.mlp\.experts\.(\d+)\.(.+)",
+                    r"layers\.(\d+)\.mlp\.experts\.(\d+)\.(.+)",
                     name,
                 )
                 if match:
