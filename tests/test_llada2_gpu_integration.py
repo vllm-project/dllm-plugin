@@ -60,22 +60,37 @@ pytestmark = pytest.mark.dllm_gpu_integration
 
 
 @pytest.fixture
-def llada2_mini_model_dir() -> Path:
-    """Get LLaDA2.0-mini local config directory.
+def llada2_mini_model_dir(tmp_path: Path) -> Path:
+    """Download or use cached LLaDA2.0-mini real model from HuggingFace.
 
-    Returns local fixture with config (no auto_map) for vLLM model loading.
-    Weights will be downloaded from HuggingFace during model initialization.
+    Downloads real LLaDA2.0-mini weights from HuggingFace for integration testing.
+    Uses HuggingFace Hub cache for fast re-runs.
 
     Returns:
-        Path: Local fixture directory with config.json and tokenizer files.
+        Path: Directory containing model weights, config.json, and tokenizer files.
+
+    Raises:
+        pytest.skip: If HuggingFace download fails (network issue, auth required, etc.)
     """
-    fixture_path = Path(__file__).parent / "fixtures" / "llada2_mini"
-    if not fixture_path.exists():
-        pytest.skip(
-            f"LLaDA2.0-mini fixture not available at {fixture_path}. "
-            f"Run setup script to create fixtures."
+    model_id = "inclusionAI/LLaDA2.0-mini"
+
+    try:
+        from huggingface_hub import snapshot_download
+
+        # Download to HuggingFace cache (persistent across test runs)
+        # This avoids re-downloading on every test execution
+        model_path = snapshot_download(
+            repo_id=model_id,
+            local_files_only=False,  # Allow network download
+            resume_download=True,  # Resume if interrupted
+            # Note: No auth token needed for public models
         )
-    return fixture_path
+        return Path(model_path)
+    except Exception as e:
+        pytest.skip(
+            f"Could not download {model_id} from HuggingFace: {e}. "
+            f"Network access required for Phase 7 GPU integration test."
+        )
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA GPU")
