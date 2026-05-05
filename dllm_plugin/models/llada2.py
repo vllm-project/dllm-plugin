@@ -735,12 +735,12 @@ class LLaDA2ForCausalLM(nn.Module):
             stacked_w13 = torch.stack(w13_list, dim=0)
             stacked_w2 = torch.stack(w2_list, dim=0)
 
-            # Assign to FusedMoE layer
+            # Load data into existing FusedMoE Parameters
+            # NOTE: Don't replace the Parameter objects, load into their .data
+            # vLLM's validation checks the Parameters registered during __init__
             layer = self.layers[layer_id]
-            layer.mlp.experts.w13_weight = nn.Parameter(
-                stacked_w13, requires_grad=False
-            )
-            layer.mlp.experts.w2_weight = nn.Parameter(stacked_w2, requires_grad=False)
+            layer.mlp.experts.w13_weight.data = stacked_w13
+            layer.mlp.experts.w2_weight.data = stacked_w2
 
             # Track STACKED weights in loaded_params (not individual expert weights)
             loaded_params.add(f"layers.{layer_id}.mlp.experts.w13_weight")
