@@ -599,6 +599,31 @@ class LLaDA2ForCausalLM(nn.Module):
             if "word_embeddings" in name:
                 name = name.replace("word_embeddings", "embed_tokens")
 
+            # Map attention layer parameters (HF -> vLLM)
+            # HF LLaDA2.0 uses: attention.query_key_value, attention.dense
+            # vLLM Attention uses: self_attn.qkv_proj, self_attn.o_proj
+            if ".attention.query_key_value." in name:
+                name = name.replace(
+                    ".attention.query_key_value.", ".self_attn.qkv_proj."
+                )
+            if ".attention.dense." in name:
+                name = name.replace(".attention.dense.", ".self_attn.o_proj.")
+            if ".attention.query_layernorm." in name:
+                name = name.replace(".attention.query_layernorm.", ".self_attn.q_norm.")
+            if ".attention.key_layernorm." in name:
+                name = name.replace(".attention.key_layernorm.", ".self_attn.k_norm.")
+
+            # Map shared expert parameters (non-expert MLP weights)
+            # HF checkpoint: layers.X.mlp.gate_proj.weight (shared expert)
+            # Model expects: layers.X.mlp.shared_expert_gate.weight
+            # NOTE: Only applies to NON-expert paths (parsed separately)
+            if ".mlp.gate_proj." in name and ".mlp.experts." not in name:
+                name = name.replace(".mlp.gate_proj.", ".mlp.shared_expert_gate.")
+            if ".mlp.up_proj." in name and ".mlp.experts." not in name:
+                name = name.replace(".mlp.up_proj.", ".mlp.shared_expert_up.")
+            if ".mlp.down_proj." in name and ".mlp.experts." not in name:
+                name = name.replace(".mlp.down_proj.", ".mlp.shared_expert_down.")
+
             checkpoint_names_seen.append(checkpoint_name)
 
             # Skip lm_head if weight tying is enabled
