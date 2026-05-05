@@ -735,20 +735,15 @@ class LLaDA2ForCausalLM(nn.Module):
             stacked_w13 = torch.stack(w13_list, dim=0)
             stacked_w2 = torch.stack(w2_list, dim=0)
 
-            # Load stacked weights using vLLM's weight_loader mechanism
-            # This ensures vLLM's validation recognizes them as loaded
+            # Load stacked weights directly into Parameter.data
+            # FusedMoE's custom weight_loader expects expert_id/shard_id args
+            # which don't apply to stacked weights, so use direct assignment
             layer = self.layers[layer_id]
+            layer.mlp.experts.w13_weight.data.copy_(stacked_w13)
+            layer.mlp.experts.w2_weight.data.copy_(stacked_w2)
 
-            # Load w13_weight
-            w13_param = layer.mlp.experts.w13_weight
-            weight_loader = getattr(w13_param, "weight_loader", default_weight_loader)
-            weight_loader(w13_param, stacked_w13)
+            # Track stacked weights as loaded
             loaded_params.add(f"layers.{layer_id}.mlp.experts.w13_weight")
-
-            # Load w2_weight
-            w2_param = layer.mlp.experts.w2_weight
-            weight_loader = getattr(w2_param, "weight_loader", default_weight_loader)
-            weight_loader(w2_param, stacked_w2)
             loaded_params.add(f"layers.{layer_id}.mlp.experts.w2_weight")
 
         # Mark lm_head.weight as loaded if weight tying is enabled
