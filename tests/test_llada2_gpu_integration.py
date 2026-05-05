@@ -145,10 +145,15 @@ def test_llada2_real_weights_llm_generate(
     # NOTE: Do NOT use trust_remote_code - it causes vLLM to use HF auto_map model
     # instead of our registered plugin model. The config will be loaded from
     # the registered model architecture, not from HuggingFace custom code.
+    #
+    # WORKAROUND: Use model_impl parameter to force vLLM to use our plugin model
+    # This bypasses the standard model loading and validation flow
+    # TODO: Remove model_impl once vLLM properly validates registered architectures
     llm = LLM(
         model=str(llada2_mini_model_dir),
         tokenizer=str(llada2_mini_model_dir),
         trust_remote_code=False,  # MUST be False to use registry model
+        model_impl="dllm_plugin.models.llada2:LLaDA2ForCausalLM",  # Force our model
         enforce_eager=True,
         tensor_parallel_size=1,
         pipeline_parallel_size=1,  # PP=1 (PP>1 not supported in Phase 7)
@@ -206,10 +211,13 @@ def test_llada2_multi_step_generation(
     # NOTE: Do NOT use trust_remote_code - it causes vLLM to use HF auto_map model
     # instead of our registered plugin model. The config will be loaded from
     # the registered model architecture, not from HuggingFace custom code.
+    #
+    # WORKAROUND: Use model_impl parameter to force vLLM to use our plugin model
     llm = LLM(
         model=str(llada2_mini_model_dir),
         tokenizer=str(llada2_mini_model_dir),
         trust_remote_code=False,  # MUST be False to use registry model
+        model_impl="dllm_plugin.models.llada2:LLaDA2ForCausalLM",  # Force our model
         enforce_eager=True,
         tensor_parallel_size=1,
         max_model_len=256,
@@ -368,10 +376,13 @@ def test_llada2_tensor_parallelism_tp2(
     # NOTE: Do NOT use trust_remote_code - it causes vLLM to use HF auto_map model
     # instead of our registered plugin model. The config will be loaded from
     # the registered model architecture, not from HuggingFace custom code.
+    #
+    # WORKAROUND: Use model_impl parameter to force vLLM to use our plugin model
     llm = LLM(
         model=str(llada2_mini_model_dir),
         tokenizer=str(llada2_mini_model_dir),
         trust_remote_code=False,  # MUST be False to use registry model
+        model_impl="dllm_plugin.models.llada2:LLaDA2ForCausalLM",  # Force our model
         enforce_eager=True,
         tensor_parallel_size=2,  # TP=2
         pipeline_parallel_size=1,
@@ -458,10 +469,13 @@ def test_llada2_attention_backend_compatibility(
     # NOTE: Do NOT use trust_remote_code - it causes vLLM to use HF auto_map model
     # instead of our registered plugin model. The config will be loaded from
     # the registered model architecture, not from HuggingFace custom code.
+    #
+    # WORKAROUND: Use model_impl parameter to force vLLM to use our plugin model
     llm = LLM(
         model=str(llada2_mini_model_dir),
         tokenizer=str(llada2_mini_model_dir),
         trust_remote_code=False,  # MUST be False to use registry model
+        model_impl="dllm_plugin.models.llada2:LLaDA2ForCausalLM",  # Force our model
         enforce_eager=True,
         tensor_parallel_size=1,
         max_model_len=256,
