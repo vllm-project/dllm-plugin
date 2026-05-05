@@ -66,17 +66,26 @@ def _patched_model_config_post_init(self, *args, **kwargs):
     """Patched __post_init__ that skips runner validation for LLaDA2 models."""
     # In Pydantic v2, architectures field isn't set when __post_init__ is called
     # Check the model path instead to detect our test fixture
-    if hasattr(self, "model") and "llada2" in str(self.model).lower():
+    is_llada2 = hasattr(self, "model") and "llada2" in str(self.model).lower()
+
+    if is_llada2:
         print(
             f"[WORKAROUND] Bypassing runner validation for LLaDA2 model: {self.model}",
             flush=True,
         )
-        # Don't call original __post_init__ - that would run the validation
-        # we want to skip
-        return
-
-    # For non-LLaDA2 models, call original validation
-    _original_model_config_post_init(self, *args, **kwargs)
+        # Call original __post_init__ for initialization, but catch ValidationError
+        try:
+            _original_model_config_post_init(self, *args, **kwargs)
+        except ValueError as e:
+            if "does not support `--runner generate`" in str(e):
+                # This is the validation error we want to bypass - swallow it
+                print("[WORKAROUND] Suppressed runner validation error", flush=True)
+            else:
+                # Different error - re-raise
+                raise
+    else:
+        # For non-LLaDA2 models, call original validation normally
+        _original_model_config_post_init(self, *args, **kwargs)
 
 
 vllm.config.model.ModelConfig.__post_init__ = _patched_model_config_post_init
