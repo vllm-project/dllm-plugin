@@ -306,6 +306,10 @@ class LLaDA2DecoderLayer(nn.Module):
         self.layer_idx = layer_idx
         self.hidden_size = config.hidden_size
 
+        # Extract vLLM configs for attention layer
+        cache_config = vllm_config.cache_config
+        quant_config = getattr(vllm_config, "quant_config", None)
+
         # Block-style attention
         self.self_attn = LLaDA2BlockAttention(
             num_heads=config.num_attention_heads,
@@ -313,6 +317,8 @@ class LLaDA2DecoderLayer(nn.Module):
             num_kv_heads=getattr(
                 config, "num_key_value_heads", config.num_attention_heads
             ),
+            cache_config=cache_config,
+            quant_config=quant_config,
             prefix=f"{prefix}.self_attn",
         )
 

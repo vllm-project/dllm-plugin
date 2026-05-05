@@ -83,27 +83,29 @@ class LLaDA2BlockAttention(nn.Module):
         scale: float | None = None,
         num_kv_heads: int | None = None,
         alibi_slopes: torch.Tensor | None = None,
-        sliding_window: int | None = None,
-        kv_cache_dtype: str = "auto",
-        blocksparse_params: dict | None = None,
+        cache_config=None,
+        quant_config=None,
         logits_soft_cap: float | None = None,
         prefix: str = "",
+        attn_type: str = "decoder",
     ) -> None:
         super().__init__()
 
         # Use vLLM's standard Attention layer as backend
         # It auto-selects FlashAttention or FlashInfer based on environment
+        # NOTE: LLaDA2 doesn't use sliding window, alibi, or blocksparse
         self.attn = Attention(
             num_heads=num_heads,
             head_size=head_size,
             scale=scale if scale is not None else (1.0 / (head_size**0.5)),
             num_kv_heads=num_kv_heads if num_kv_heads is not None else num_heads,
-            alibi_slopes=alibi_slopes,
-            sliding_window=sliding_window,
-            kv_cache_dtype=kv_cache_dtype,
-            blocksparse_params=blocksparse_params,
+            alibi_slopes=None,  # Not used in LLaDA2
+            cache_config=cache_config,
+            quant_config=quant_config,
             logits_soft_cap=logits_soft_cap,
+            per_layer_sliding_window=None,  # Not used in LLaDA2
             prefix=prefix,
+            attn_type=attn_type,
         )
 
         self.num_heads = num_heads
