@@ -193,7 +193,16 @@ class DllmGPUModelRunner(HookedGPUModelRunner):
 
         for i, req_id in enumerate(req_ids):
             lo, hi = int(cu[i]), int(cu[i + 1])
-            block_logits_tensor = logits[lo:hi]
+            # Extract logits for this request
+            # cu_num_logits includes primary token + draft tokens (e.g., 1 + 32 = 33)
+            # dLLM remasking only processes draft tokens (32), so skip first row
+            all_logits = logits[lo:hi]
+            if all_logits.shape[0] > self._dllm_helper.draft_size:
+                # Skip primary token logits (first row), keep only draft token logits
+                block_logits_tensor = all_logits[1:]
+            else:
+                # Fallback for edge cases (shouldn't happen with spec decode)
+                block_logits_tensor = all_logits
             block_logits = self._tensor_block_to_rows(block_logits_tensor)
 
             input_draft = validate_runtime_input_draft(
