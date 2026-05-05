@@ -13,7 +13,7 @@
   "intermediate_size": 5120,
   "max_position_embeddings": 32768,
   "max_window_layers": 28,
-  "model_type": "llada2_moe",
+  "model_type": "mistral",
   "moe_intermediate_size": 512,
   "moe_router_enable_expert_bias": true,
   "n_group": 8,
