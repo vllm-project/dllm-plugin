@@ -579,7 +579,7 @@ class LLaDA2ForCausalLM(nn.Module):
             Logits, shape (batch, seq_len, vocab_size).
         """
         logits = self.logits_processor(
-            self.lm_head.weight,
+            self.lm_head,
             hidden_states,
             sampling_metadata,
         )
