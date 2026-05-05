@@ -578,7 +578,14 @@ class LLaDA2ForCausalLM(nn.Module):
             lambda: defaultdict(dict)
         )  # layer_id -> expert_id -> param_name -> tensor
 
+        # Debug: Track what's happening during weight loading
+        checkpoint_names_seen = []
+        mapped_names_loaded = []
+        mapped_names_skipped = []
+
         for name, loaded_weight in weights:
+            checkpoint_name = name  # Save original for debugging
+
             # Handle checkpoint naming conventions
             # HuggingFace checkpoints may use different names than vLLM models
             # Map common HF naming patterns to vLLM parameter names
@@ -587,9 +594,12 @@ class LLaDA2ForCausalLM(nn.Module):
             if "word_embeddings" in name:
                 name = name.replace("word_embeddings", "embed_tokens")
 
+            checkpoint_names_seen.append(checkpoint_name)
+
             # Skip lm_head if weight tying is enabled
             # (lm_head.weight is tied to embed_tokens.weight in __init__)
             if getattr(self.config, "tie_word_embeddings", False) and "lm_head" in name:
+                mapped_names_skipped.append(f"{checkpoint_name} -> {name} (tied)")
                 continue
 
             # Skip expert weights in first pass (will stack later)
@@ -606,6 +616,7 @@ class LLaDA2ForCausalLM(nn.Module):
                         loaded_weight
                     )
                     loaded_params.add(name)
+                    mapped_names_loaded.append(f"{checkpoint_name} -> {name} (expert)")
                 continue
 
             # Load regular parameters
@@ -614,6 +625,11 @@ class LLaDA2ForCausalLM(nn.Module):
                 weight_loader = getattr(param, "weight_loader", default_weight_loader)
                 weight_loader(param, loaded_weight)
                 loaded_params.add(name)
+                mapped_names_loaded.append(f"{checkpoint_name} -> {name}")
+            else:
+                mapped_names_skipped.append(
+                    f"{checkpoint_name} -> {name} (NOT IN params_dict)"
+                )
 
         # Stack expert weights per layer (Phase 2 of loading)
         for layer_id, experts_dict in expert_weights.items():
@@ -644,5 +660,28 @@ class LLaDA2ForCausalLM(nn.Module):
         ):
             loaded_params.add("lm_head.weight")
 
+        # Debug logging: Print weight loading summary
+        print("\n[DEBUG] Weight loading summary:")
+        print(f"  Checkpoint weights seen: {len(checkpoint_names_seen)}")
+        print(f"  Mapped and loaded: {len(mapped_names_loaded)}")
+        print(f"  Skipped: {len(mapped_names_skipped)}")
+        print(f"  Model parameters expected: {len(params_dict)}")
+        print(f"  Loaded params tracked: {len(loaded_params)}")
+
+        # Print sample of what was loaded vs skipped
+        print("\n[DEBUG] Sample loaded (first 5):")
+        for item in mapped_names_loaded[:5]:
+            print(f"    {item}")
+
+        print("\n[DEBUG] Sample skipped (first 10):")
+        for item in mapped_names_skipped[:10]:
+            print(f"    {item}")
+
+        # Print expected params that weren't loaded
+        unloaded = set(params_dict.keys()) - loaded_params
+        print(f"\n[DEBUG] Unloaded params (first 10 of {len(unloaded)}):")
+        for param in list(unloaded)[:10]:
+            print(f"    {param}")
+
         # Return unloaded params
-        return set(params_dict.keys()) - loaded_params
+        return unloaded
