@@ -1,0 +1,28 @@
+git:
+  repoUrl: https://github.com/vllm-project/dllm-plugin.git
+  branch: feat/phase7-llada2-real-model
+
+gpu:
+  count: 1
+
+tests:
+  runServeHttpSmoke: false
+  pytestPaths:
+    - tests/test_llada2_gpu_integration.py::test_llada2_real_weights_llm_generate
+    - tests/test_llada2_gpu_integration.py::test_llada2_http_server_integration
+
+resources:
+  cpu: "8"
+  memory: 48Gi
+  ephemeralStorage: 60Gi
+
+testEnv:
+  DLLM_TEST_GPU_MEMORY_UTILIZATION: "0.9"
+
+scheduling:
+  nodeSelector: {}
+  extraTolerations:
+    - key: jounce.io/nodetype
+      operator: Equal
+      value: L4
+      effect: NoSchedule
