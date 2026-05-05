@@ -778,5 +778,5 @@ class LLaDA2ForCausalLM(nn.Module):
         for param in list(unloaded)[:10]:
             print(f"    {param}")
 
-        # Return unloaded params
-        return unloaded
+        # Return loaded params (vLLM expects set of successfully loaded param names)
+        return loaded_params
