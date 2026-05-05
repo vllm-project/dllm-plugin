@@ -42,6 +42,10 @@ DRAFT_SIZE: Final[int] = _read_draft_size()
 #: Exact registry string may be refined when ``register()`` lands (issue #5).
 LLADA2_ARCHITECTURE_NAME: Final[str] = "LLaDA2ForCausalLM"
 
+#: HuggingFace architecture name used by inclusionAI/LLaDA2.0-mini model config.
+#: Registered alongside LLADA2_ARCHITECTURE_NAME to support both naming conventions.
+LLADA2_HF_ARCHITECTURE_NAME: Final[str] = "LLaDA2MoeModelLM"
+
 #: Registered model id for the **mock / stub** forward used in Phases 2-6 stack
 #: testing (deterministic outputs; see milestone issue #24).
 DLLM_MOCK_STACK_MODEL_ID: Final[str] = "DllmMockLlada2StackTest"

@@ -96,6 +96,7 @@ def register_dllm() -> None:
         DLLM_MOCK_MODEL_CLASS_FQCN,
         DLLM_MOCK_STACK_MODEL_ID,
         LLADA2_ARCHITECTURE_NAME,
+        LLADA2_HF_ARCHITECTURE_NAME,
         LLADA2_REAL_MODEL_CLASS_FQCN,
     )
 
@@ -130,6 +131,21 @@ def register_dllm() -> None:
         _logger.debug(
             "dLLM plugin: architecture %r already registered, skipping",
             LLADA2_ARCHITECTURE_NAME,
+        )
+
+    # Register LLADA2_HF_ARCHITECTURE_NAME (HuggingFace naming convention)
+    # Points to same implementation as LLADA2_ARCHITECTURE_NAME
+    if LLADA2_HF_ARCHITECTURE_NAME not in supported:
+        ModelRegistry.register_model(LLADA2_HF_ARCHITECTURE_NAME, llada2_model_class)
+        _logger.debug(
+            "dLLM plugin: registered HF architecture %r -> %s",
+            LLADA2_HF_ARCHITECTURE_NAME,
+            llada2_model_class,
+        )
+    else:
+        _logger.debug(
+            "dLLM plugin: HF architecture %r already registered, skipping",
+            LLADA2_HF_ARCHITECTURE_NAME,
         )
 
     # Register DLLM_MOCK_STACK_MODEL_ID (always mock)
