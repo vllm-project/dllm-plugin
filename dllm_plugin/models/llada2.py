@@ -614,14 +614,30 @@ class LLaDA2ForCausalLM(nn.Module):
                 name = name.replace(".attention.key_layernorm.", ".self_attn.k_norm.")
 
             # Map shared expert parameters (non-expert MLP weights)
-            # HF checkpoint: layers.X.mlp.gate_proj.weight (shared expert)
-            # Model expects: layers.X.mlp.shared_expert_gate.weight
+            # HF checkpoint has two formats:
+            #   Layer 0: layers.0.mlp.gate_proj.weight
+            #   Layer 1+: layers.X.mlp.shared_experts.gate_proj.weight
+            # Model expects: layers.X.mlp.shared_expert_gate.weight (singular)
             # NOTE: Only applies to NON-expert paths (parsed separately)
-            if ".mlp.gate_proj." in name and ".mlp.experts." not in name:
+            if ".mlp.shared_experts.gate_proj." in name:
+                name = name.replace(
+                    ".mlp.shared_experts.gate_proj.", ".mlp.shared_expert_gate."
+                )
+            elif ".mlp.gate_proj." in name and ".mlp.experts." not in name:
                 name = name.replace(".mlp.gate_proj.", ".mlp.shared_expert_gate.")
-            if ".mlp.up_proj." in name and ".mlp.experts." not in name:
+
+            if ".mlp.shared_experts.up_proj." in name:
+                name = name.replace(
+                    ".mlp.shared_experts.up_proj.", ".mlp.shared_expert_up."
+                )
+            elif ".mlp.up_proj." in name and ".mlp.experts." not in name:
                 name = name.replace(".mlp.up_proj.", ".mlp.shared_expert_up.")
-            if ".mlp.down_proj." in name and ".mlp.experts." not in name:
+
+            if ".mlp.shared_experts.down_proj." in name:
+                name = name.replace(
+                    ".mlp.shared_experts.down_proj.", ".mlp.shared_expert_down."
+                )
+            elif ".mlp.down_proj." in name and ".mlp.experts." not in name:
                 name = name.replace(".mlp.down_proj.", ".mlp.shared_expert_down.")
 
             checkpoint_names_seen.append(checkpoint_name)
