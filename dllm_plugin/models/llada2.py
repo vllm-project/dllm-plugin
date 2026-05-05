@@ -457,6 +457,19 @@ class LLaDA2ForCausalLM(nn.Module):
         # Logits processor
         self.logits_processor = LogitsProcessor(self.vocab_size)
 
+    def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
+        """Apply token embeddings to input_ids.
+
+        Required by vLLM's VllmModel protocol for model validation.
+
+        Args:
+            input_ids: Input token IDs, shape (batch, seq_len).
+
+        Returns:
+            Token embeddings, shape (batch, seq_len, hidden_size).
+        """
+        return self.embed_tokens(input_ids)
+
     def forward(
         self,
         input_ids: torch.Tensor | None,
