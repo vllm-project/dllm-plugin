@@ -819,10 +819,39 @@ class LLaDA2ForCausalLM(nn.Module):
             stacked_w13 = torch.stack(w13_list, dim=0)
             stacked_w2 = torch.stack(w2_list, dim=0)
 
+            # Debug: Print shapes
+            print(
+                f"[DEBUG] Layer {layer_id}: stacked_w13.shape={stacked_w13.shape}, "
+                f"stacked_w2.shape={stacked_w2.shape}"
+            )
+
             # Load stacked weights directly into Parameter.data
             # FusedMoE's custom weight_loader expects expert_id/shard_id args
             # which don't apply to stacked weights, so use direct assignment
             layer = self.layers[layer_id]
+
+            # Debug: Print expected shapes
+            w13_expected = layer.mlp.experts.w13_weight.shape
+            w2_expected = layer.mlp.experts.w2_weight.shape
+            print(
+                f"[DEBUG] Layer {layer_id}: expected w13={w13_expected}, "
+                f"w2={w2_expected}"
+            )
+
+            # Verify shapes match
+            if stacked_w13.shape != layer.mlp.experts.w13_weight.shape:
+                raise ValueError(
+                    f"Layer {layer_id} w13_weight shape mismatch: "
+                    f"checkpoint={stacked_w13.shape}, "
+                    f"model={layer.mlp.experts.w13_weight.shape}"
+                )
+            if stacked_w2.shape != layer.mlp.experts.w2_weight.shape:
+                raise ValueError(
+                    f"Layer {layer_id} w2_weight shape mismatch: "
+                    f"checkpoint={stacked_w2.shape}, "
+                    f"model={layer.mlp.experts.w2_weight.shape}"
+                )
+
             layer.mlp.experts.w13_weight.data.copy_(stacked_w13)
             layer.mlp.experts.w2_weight.data.copy_(stacked_w2)
 
