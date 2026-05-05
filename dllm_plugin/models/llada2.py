@@ -683,7 +683,9 @@ class LLaDA2ForCausalLM(nn.Module):
                 )
 
         # Stack expert weights per layer (Phase 2 of loading)
+        print(f"\n[DEBUG] Stacking expert weights for {len(expert_weights)} layers")
         for layer_id, experts_dict in expert_weights.items():
+            print(f"[DEBUG] Layer {layer_id}: {len(experts_dict)} experts collected")
             # Prepare stacked weights for FusedMoE
             # TODO(Phase 7): Implement proper expert weight stacking
             # For now, this is a placeholder - full implementation requires:
