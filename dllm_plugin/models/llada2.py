@@ -629,8 +629,9 @@ class LLaDA2ForCausalLM(nn.Module):
             # Real implementation in follow-up commit
             for expert_id in experts_dict:
                 for param_name in experts_dict[expert_id]:
+                    # Note: Use MODEL parameter name format (no 'model.' prefix)
                     full_name = (
-                        f"model.layers.{layer_id}.mlp.experts.{expert_id}.{param_name}"
+                        f"layers.{layer_id}.mlp.experts.{expert_id}.{param_name}"
                     )
                     loaded_params.add(full_name)
 
