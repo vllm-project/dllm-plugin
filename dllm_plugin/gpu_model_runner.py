@@ -257,6 +257,7 @@ class DllmGPUModelRunner(HookedGPUModelRunner):
             sampled_token_ids=sampled[:, :width],
             logprobs_tensors=None,
             num_nans=None,
+            num_sampled=num_sampled,
         )
 
         num_sampled, num_rejected = get_num_sampled_and_rejected(
