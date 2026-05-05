@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: Apache-2.0
+# Phase 7 GPU integration test with minimal resources for shared cluster
+# Optimized for running on busy GPU nodes with limited available capacity
+
+job:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 0
+
+image:
+  repository: pytorch/pytorch
+  tag: 2.6.0-cuda12.4-cudnn9-devel
+  pullPolicy: IfNotPresent
+
+git:
+  repoUrl: https://github.com/vllm-project/dllm-plugin.git
+  branch: feat/phase7-llada2-real-model
+
+gpu:
+  count: 1
+
+# Phase 7 GPU integration tests
+tests:
+  runServeHttpSmoke: false
+  pytestPaths:
+    - tests/test_llada2_gpu_integration.py::test_llada2_real_weights_llm_generate
+
+# Try L4 node first (less contention than A100)
+scheduling:
+  nodeSelector:
+    cloud.google.com/gke-accelerator: nvidia-l4
+  extraTolerations:
+    - key: jounce.io/nodetype
+      operator: Equal
+      value: L4
+      effect: NoSchedule
+
+# Minimal resources to fit on busy node
+resources:
+  cpu: "4"
+  memory: 24Gi
+  ephemeralStorage: 50Gi
+
+# L4-16GB memory configuration
+testEnv:
+  DLLM_TEST_GPU_MEMORY_UTILIZATION: "0.85"
+  DLLM_TEST_KV_CACHE_MEMORY_BYTES: "134217728"  # 128MB

@@ -635,6 +635,11 @@ class LLaDA2ForCausalLM(nn.Module):
             hidden_states,
             sampling_metadata,
         )
+
+        # Debug: Validate logits output
+        print(f"[DEBUG] compute_logits output: logits.shape={logits.shape}")
+        print(f"[DEBUG] compute_logits output: vocab_size={self.vocab_size}")
+
         return logits
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
