@@ -86,6 +86,8 @@ class LLaDA2MoE(nn.Module):
         config: HuggingFace model config with MoE parameters.
         tp_size: Tensor parallelism world size.
         prefix: Parameter name prefix for weight loading.
+        is_dense_only: If True, only create shared expert (no routing/experts).
+                       Used for first_k_dense_replace layers.
     """
 
     def __init__(
@@ -93,12 +95,14 @@ class LLaDA2MoE(nn.Module):
         config: PretrainedConfig,
         tp_size: int,
         prefix: str = "",
+        is_dense_only: bool = False,
     ) -> None:
         super().__init__()
 
         self.config = config
         self.tp_size = tp_size
         self.hidden_size = config.hidden_size
+        self.is_dense_only = is_dense_only
 
         # MoE architecture parameters
         self.num_experts = getattr(config, "num_experts", LLADA2_DEFAULT_NUM_EXPERTS)
@@ -119,30 +123,35 @@ class LLaDA2MoE(nn.Module):
             config, "routed_scaling_factor", LLADA2_DEFAULT_ROUTED_SCALING_FACTOR
         )
 
-        # Validate TP configuration
-        if self.tp_size > self.num_experts:
-            raise ValueError(
-                f"Tensor parallelism size ({self.tp_size}) cannot exceed "
-                f"number of experts ({self.num_experts}) in LLaDA2MoE."
+        # Dense-only layers skip router and experts (only use shared expert)
+        if not is_dense_only:
+            # Validate TP configuration
+            if self.tp_size > self.num_experts:
+                raise ValueError(
+                    f"Tensor parallelism size ({self.tp_size}) cannot exceed "
+                    f"number of experts ({self.num_experts}) in LLaDA2MoE."
+                )
+
+            # Gate/router network (replicated across TP ranks)
+            self.gate = ReplicatedLinear(
+                self.hidden_size,
+                self.num_experts,
+                bias=True,
+                prefix=f"{prefix}.gate",
             )
 
-        # Gate/router network (replicated across TP ranks)
-        self.gate = ReplicatedLinear(
-            self.hidden_size,
-            self.num_experts,
-            bias=True,
-            prefix=f"{prefix}.gate",
-        )
-
-        # Routed experts (vLLM FusedMoE)
-        self.experts = FusedMoE(
-            num_experts=self.num_experts,
-            top_k=self.num_experts_per_tok,
-            hidden_size=self.hidden_size,
-            intermediate_size=self.moe_intermediate_size,
-            tp_size=self.tp_size,
-            prefix=f"{prefix}.experts",
-        )
+            # Routed experts (vLLM FusedMoE)
+            self.experts = FusedMoE(
+                num_experts=self.num_experts,
+                top_k=self.num_experts_per_tok,
+                hidden_size=self.hidden_size,
+                intermediate_size=self.moe_intermediate_size,
+                tp_size=self.tp_size,
+                prefix=f"{prefix}.experts",
+            )
+        else:
+            self.gate = None
+            self.experts = None
 
         # Shared expert (always active, not routed)
         if self.num_shared_experts > 0:
@@ -176,6 +185,8 @@ class LLaDA2MoE(nn.Module):
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """Apply MoE layer with group-limited routing.
 
+        For dense-only layers (is_dense_only=True), only the shared expert is used.
+
         Args:
             hidden_states: Input tensor, shape (batch_size, seq_len, hidden_size).
 
@@ -184,6 +195,16 @@ class LLaDA2MoE(nn.Module):
         """
         batch_size, seq_len, hidden_size = hidden_states.shape
 
+        # Dense-only mode: skip routing, only use shared expert
+        if self.is_dense_only:
+            # Shared expert: SwiGLU activation
+            gate_out = self.shared_expert_gate(hidden_states)
+            up_out = self.shared_expert_up(hidden_states)
+            shared_hidden = torch.nn.functional.silu(gate_out) * up_out
+            output = self.shared_expert_down(shared_hidden)
+            return output
+
+        # Full MoE mode with routing
         # 1. Compute gate logits and apply sigmoid (LLaDA2.0 specific)
         gate_logits = self.gate(hidden_states)  # (batch, seq_len, num_experts)
         router_logits = torch.sigmoid(gate_logits)  # Sigmoid, not softmax!
@@ -322,12 +343,17 @@ class LLaDA2DecoderLayer(nn.Module):
             prefix=f"{prefix}.self_attn",
         )
 
-        # MoE FFN
+        # MoE FFN (or dense-only for early layers)
+        # Check if this layer is dense-only (controlled by first_k_dense_replace)
+        first_k_dense = getattr(config, "first_k_dense_replace", 0)
+        is_dense_only = layer_idx < first_k_dense
+
         tp_size = get_tp_group().world_size
         self.mlp = LLaDA2MoE(
             config=config,
             tp_size=tp_size,
             prefix=f"{prefix}.mlp",
+            is_dense_only=is_dense_only,
         )
 
         # RMSNorm layers
@@ -683,16 +709,15 @@ class LLaDA2ForCausalLM(nn.Module):
                 )
 
         # Stack expert weights per layer (Phase 2 of loading)
-        for layer_id, experts_dict in expert_weights.items():
-            # Prepare stacked weights for FusedMoE
-            # TODO(Phase 7): Implement proper expert weight stacking
-            # For now, this is a placeholder - full implementation requires:
-            # 1. Fuse gate_proj + up_proj into w13_weight
-            # 2. Stack all experts' w13 and w2 weights
-            # 3. Apply TP sharding if tp_size > 1
-            # 4. Assign to layer.mlp.experts.w13_weight and w2_weight
+        # Skip dense-only layers (controlled by first_k_dense_replace)
+        first_k_dense = getattr(self.config, "first_k_dense_replace", 0)
 
-            # Stack expert weights for FusedMoE
+        for layer_id, experts_dict in expert_weights.items():
+            # Skip dense-only layers (they don't have expert weights)
+            if layer_id < first_k_dense:
+                continue
+
+            # Prepare stacked weights for FusedMoE
             # Each expert has gate_proj, up_proj, down_proj weights
             # FusedMoE expects w13_weight (gate+up stacked) and w2_weight (down)
 
