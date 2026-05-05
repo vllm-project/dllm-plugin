@@ -683,9 +683,7 @@ class LLaDA2ForCausalLM(nn.Module):
                 )
 
         # Stack expert weights per layer (Phase 2 of loading)
-        print(f"\n[DEBUG] Stacking expert weights for {len(expert_weights)} layers")
         for layer_id, experts_dict in expert_weights.items():
-            print(f"[DEBUG] Layer {layer_id}: {len(experts_dict)} experts collected")
             # Prepare stacked weights for FusedMoE
             # TODO(Phase 7): Implement proper expert weight stacking
             # For now, this is a placeholder - full implementation requires:
@@ -737,32 +735,20 @@ class LLaDA2ForCausalLM(nn.Module):
             stacked_w13 = torch.stack(w13_list, dim=0)
             stacked_w2 = torch.stack(w2_list, dim=0)
 
-            # Load data into existing FusedMoE Parameters
-            # NOTE: Don't replace the Parameter objects, load into their .data
-            # vLLM's validation checks the Parameters registered during __init__
+            # Load stacked weights using vLLM's weight_loader mechanism
+            # This ensures vLLM's validation recognizes them as loaded
             layer = self.layers[layer_id]
 
-            # Check if Parameters exist
-            if not hasattr(layer.mlp.experts, "w13_weight"):
-                print(f"[DEBUG] Layer {layer_id}: w13_weight doesn't exist, creating")
-                layer.mlp.experts.w13_weight = nn.Parameter(
-                    stacked_w13, requires_grad=False
-                )
-            else:
-                print(f"[DEBUG] Layer {layer_id}: w13_weight exists, loading data")
-                layer.mlp.experts.w13_weight.data = stacked_w13
-
-            if not hasattr(layer.mlp.experts, "w2_weight"):
-                print(f"[DEBUG] Layer {layer_id}: w2_weight doesn't exist, creating")
-                layer.mlp.experts.w2_weight = nn.Parameter(
-                    stacked_w2, requires_grad=False
-                )
-            else:
-                print(f"[DEBUG] Layer {layer_id}: w2_weight exists, loading data")
-                layer.mlp.experts.w2_weight.data = stacked_w2
-
-            # Track STACKED weights in loaded_params (not individual expert weights)
+            # Load w13_weight
+            w13_param = layer.mlp.experts.w13_weight
+            weight_loader = getattr(w13_param, "weight_loader", default_weight_loader)
+            weight_loader(w13_param, stacked_w13)
             loaded_params.add(f"layers.{layer_id}.mlp.experts.w13_weight")
+
+            # Load w2_weight
+            w2_param = layer.mlp.experts.w2_weight
+            weight_loader = getattr(w2_param, "weight_loader", default_weight_loader)
+            weight_loader(w2_param, stacked_w2)
             loaded_params.add(f"layers.{layer_id}.mlp.experts.w2_weight")
 
         # Mark lm_head.weight as loaded if weight tying is enabled
