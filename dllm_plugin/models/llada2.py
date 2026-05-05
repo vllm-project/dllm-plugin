@@ -510,10 +510,10 @@ class LLaDA2ForCausalLM(nn.Module):
 
     def forward(
         self,
-        input_ids: torch.Tensor | None,
-        positions: torch.Tensor,
-        kv_caches: list[torch.Tensor],
-        attn_metadata,
+        input_ids: torch.Tensor | None = None,
+        positions: torch.Tensor | None = None,
+        kv_caches: list[torch.Tensor] | None = None,
+        attn_metadata=None,
         intermediate_tensors: IntermediateTensors | None = None,
         inputs_embeds: torch.Tensor | None = None,
     ) -> torch.Tensor:
@@ -542,6 +542,13 @@ class LLaDA2ForCausalLM(nn.Module):
         else:
             # PP > 1 not supported, this path shouldn't be reached
             raise RuntimeError("PP > 1 not supported in Phase 7")
+
+        # Handle profiling mode (kv_caches/attn_metadata may be None)
+        if kv_caches is None or attn_metadata is None:
+            # Profiling mode: return embeddings without running layers
+            # vLLM will use this to estimate memory requirements
+            hidden_states = self.norm(hidden_states)
+            return hidden_states
 
         # Transformer layers
         for layer_idx, layer in enumerate(self.layers):
