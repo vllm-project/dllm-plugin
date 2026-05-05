@@ -778,5 +778,15 @@ class LLaDA2ForCausalLM(nn.Module):
         for param in list(unloaded)[:10]:
             print(f"    {param}")
 
+        # Debug: Show layer 0 MLP checkpoint names to diagnose naming issues
+        layer0_mlp_names = [
+            name
+            for name in checkpoint_names_seen
+            if "layers.0.mlp" in name or "model.layers.0.mlp" in name
+        ]
+        print(f"\n[DEBUG] Layer 0 MLP checkpoint names ({len(layer0_mlp_names)}):")
+        for name in sorted(layer0_mlp_names)[:20]:  # Show first 20
+            print(f"    {name}")
+
         # Return loaded params (vLLM expects set of successfully loaded param names)
         return loaded_params
