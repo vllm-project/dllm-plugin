@@ -126,6 +126,13 @@ class HookedGPUModelRunner(GPUModelRunner):
 
         # Get the number of draft tokens for each request.
         draft_tokens = scheduler_output.scheduled_spec_decode_tokens
+        print(f"[DEBUG] draft_tokens from scheduler: {draft_tokens}")
+        print(f"  type: {type(draft_tokens)}")
+        if draft_tokens:
+            print(f"  len: {len(draft_tokens)}")
+            for req_id in req_ids:
+                dt = draft_tokens.get(req_id, ())
+                print(f"  req {req_id}: {len(dt)} draft tokens")
         if not draft_tokens:
             # No draft token scheduled (common case).
             total_num_draft_tokens = 0
@@ -146,11 +153,16 @@ class HookedGPUModelRunner(GPUModelRunner):
             )
             total_num_draft_tokens = int(num_draft_tokens.sum())
             total_num_logits = num_reqs + total_num_draft_tokens
+            print("[DEBUG] Draft tokens branch:")
+            print(f"  num_draft_tokens: {num_draft_tokens}")
+            print(f"  total_num_draft_tokens: {total_num_draft_tokens}")
+            print(f"  total_num_logits: {total_num_logits}")
 
             num_logits = num_draft_tokens + 1
             cu_num_logits_np = np.empty(num_reqs + 1, dtype=np.int32)
             cu_num_logits_np[0] = 0
             np.cumsum(num_logits, out=cu_num_logits_np[1:])
+            print(f"  cu_num_logits_np: {cu_num_logits_np}")
             cu_num_logits = async_copy_to_gpu(cu_num_logits_np, device=self.device)
 
             max_logits_per_req = int(np.max(num_logits))
@@ -213,13 +225,18 @@ class HookedGPUModelRunner(GPUModelRunner):
         print("[DEBUG] Before combine_sampled_and_draft_tokens:")
         print(f"  input_ids.shape={self.input_buffers.input_ids.shape}")
         print(f"  idx_mapping.shape={idx_mapping.shape}")
+        print(f"  idx_mapping={idx_mapping}")
         last_sampled_shape = self.req_states.last_sampled_tokens.shape
         print(f"  last_sampled_tokens.shape={last_sampled_shape}")
         print(f"  query_start_loc.shape={query_start_loc.shape}")
+        print(f"  query_start_loc={query_start_loc}")
         print(f"  seq_lens.shape={seq_lens.shape}")
+        print(f"  seq_lens={seq_lens}")
         print(f"  prefill_len.shape={self.req_states.prefill_len.gpu.shape}")
         print(f"  draft_tokens.shape={self.req_states.draft_tokens.shape}")
+        print(f"  req_states.draft_tokens content={self.req_states.draft_tokens}")
         print(f"  cu_num_logits.shape={cu_num_logits.shape}")
+        print(f"  cu_num_logits={cu_num_logits}")
         print(f"  total_num_logits={total_num_logits}")
 
         logits_indices = combine_sampled_and_draft_tokens(
