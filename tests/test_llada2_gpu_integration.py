@@ -57,12 +57,16 @@ def llada2_mini_model_dir() -> Path | str:
     model_id = "inclusionAI/LLaDA2.0-mini"
 
     # Try HuggingFace download
+    # Note: We don't use AutoConfig check here because the config requires
+    # trust_remote_code, but our vLLM plugin model doesn't. Just return the ID
+    # and let vLLM's model loader handle it with our registered architecture.
     try:
-        from transformers import AutoConfig  # type: ignore[import-untyped]
+        import requests
 
-        # LLaDA2.0 uses custom architecture code, requires trust_remote_code
-        AutoConfig.from_pretrained(model_id, trust_remote_code=True)
-        return model_id  # HF model ID, vLLM will download
+        # Just check if the model exists on HF
+        resp = requests.head(f"https://huggingface.co/{model_id}", timeout=5)
+        if resp.status_code == 200:
+            return model_id  # HF model ID, vLLM will download with our plugin
     except Exception:
         # Fall back to local fixture (if available)
         fixture_path = Path(__file__).parent / "fixtures" / "llada2_mini"
@@ -103,13 +107,13 @@ def test_llada2_real_weights_llm_generate(
     monkeypatch.setenv("VLLM_DLLM_USE_MOCK_MODEL", "0")
 
     # Create LLM with real model
-    # NOTE: trust_remote_code=True is required to load the custom config file,
-    # but vLLM will still use our registered plugin model (not HF custom code)
-    # because LLaDA2MoeModelLM is registered in ModelRegistry and takes precedence.
+    # NOTE: Do NOT use trust_remote_code - it causes vLLM to use HF auto_map model
+    # instead of our registered plugin model. The config will be loaded from
+    # the registered model architecture, not from HuggingFace custom code.
     llm = LLM(
         model=str(llada2_mini_model_dir),
         tokenizer=str(llada2_mini_model_dir),
-        trust_remote_code=True,  # Required for custom config loading
+        trust_remote_code=False,  # MUST be False to use registry model
         enforce_eager=True,
         tensor_parallel_size=1,
         pipeline_parallel_size=1,  # PP=1 (PP>1 not supported in Phase 7)
@@ -164,11 +168,13 @@ def test_llada2_multi_step_generation(
     monkeypatch.setenv("VLLM_ENABLE_V1_MULTIPROCESSING", "0")
     monkeypatch.setenv("VLLM_DLLM_USE_MOCK_MODEL", "0")
 
-    # trust_remote_code required for config, but plugin model takes precedence
+    # NOTE: Do NOT use trust_remote_code - it causes vLLM to use HF auto_map model
+    # instead of our registered plugin model. The config will be loaded from
+    # the registered model architecture, not from HuggingFace custom code.
     llm = LLM(
         model=str(llada2_mini_model_dir),
         tokenizer=str(llada2_mini_model_dir),
-        trust_remote_code=True,  # Required for custom config loading
+        trust_remote_code=False,  # MUST be False to use registry model
         enforce_eager=True,
         tensor_parallel_size=1,
         max_model_len=256,
@@ -225,7 +231,7 @@ def test_llada2_http_server_integration(
     monkeypatch.setenv("VLLM_DLLM_USE_MOCK_MODEL", "0")
 
     # Start vLLM server
-    # NOTE: --trust-remote-code required for config, but plugin model takes precedence
+    # NOTE: Do NOT use --trust-remote-code - it causes vLLM to use HF auto_map model
     proc = subprocess.Popen(
         [
             "vllm",
@@ -233,7 +239,6 @@ def test_llada2_http_server_integration(
             str(llada2_mini_model_dir),
             "--tokenizer",
             str(llada2_mini_model_dir),
-            "--trust-remote-code",
             "--host",
             "127.0.0.1",
             "--port",
@@ -325,13 +330,13 @@ def test_llada2_tensor_parallelism_tp2(
     monkeypatch.setenv("VLLM_ENABLE_V1_MULTIPROCESSING", "0")
     monkeypatch.setenv("VLLM_DLLM_USE_MOCK_MODEL", "0")
 
-    # NOTE: trust_remote_code=True is required to load the custom config file,
-    # but vLLM will still use our registered plugin model (not HF custom code)
-    # because LLaDA2MoeModelLM is registered in ModelRegistry and takes precedence.
+    # NOTE: Do NOT use trust_remote_code - it causes vLLM to use HF auto_map model
+    # instead of our registered plugin model. The config will be loaded from
+    # the registered model architecture, not from HuggingFace custom code.
     llm = LLM(
         model=str(llada2_mini_model_dir),
         tokenizer=str(llada2_mini_model_dir),
-        trust_remote_code=True,  # Required for custom config loading
+        trust_remote_code=False,  # MUST be False to use registry model
         enforce_eager=True,
         tensor_parallel_size=2,  # TP=2
         pipeline_parallel_size=1,
@@ -415,13 +420,13 @@ def test_llada2_attention_backend_compatibility(
     monkeypatch.setenv("VLLM_DLLM_USE_MOCK_MODEL", "0")
     monkeypatch.setenv("VLLM_ATTENTION_BACKEND", backend)
 
-    # NOTE: trust_remote_code=True is required to load the custom config file,
-    # but vLLM will still use our registered plugin model (not HF custom code)
-    # because LLaDA2MoeModelLM is registered in ModelRegistry and takes precedence.
+    # NOTE: Do NOT use trust_remote_code - it causes vLLM to use HF auto_map model
+    # instead of our registered plugin model. The config will be loaded from
+    # the registered model architecture, not from HuggingFace custom code.
     llm = LLM(
         model=str(llada2_mini_model_dir),
         tokenizer=str(llada2_mini_model_dir),
-        trust_remote_code=True,  # Required for custom config loading
+        trust_remote_code=False,  # MUST be False to use registry model
         enforce_eager=True,
         tensor_parallel_size=1,
         max_model_len=256,
