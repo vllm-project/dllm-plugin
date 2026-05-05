@@ -28,6 +28,7 @@ from dllm_plugin.config import (
     DLLM_MOCK_STACK_MODEL_ID,
     DRAFT_SIZE,
     LLADA2_ARCHITECTURE_NAME,
+    LLADA2_HF_ARCHITECTURE_NAME,
 )
 from dllm_plugin.grammar_utils import (
     apply_packed_bitmask_inplace_logits_row,
@@ -45,7 +46,11 @@ def dllm_architecture_match(vllm_config: Any) -> bool:
     if isinstance(archs, str):
         archs = (archs,)
     names = {str(a) for a in archs}
-    dllm_names = {DLLM_MOCK_STACK_MODEL_ID, LLADA2_ARCHITECTURE_NAME}
+    dllm_names = {
+        DLLM_MOCK_STACK_MODEL_ID,
+        LLADA2_ARCHITECTURE_NAME,
+        LLADA2_HF_ARCHITECTURE_NAME,
+    }
     return bool(names.intersection(dllm_names))
 
 
