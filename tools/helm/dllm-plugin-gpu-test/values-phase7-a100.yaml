@@ -50,3 +50,4 @@ resources:
 testEnv:
   DLLM_TEST_GPU_MEMORY_UTILIZATION: "0.9"
   DLLM_TEST_KV_CACHE_MEMORY_BYTES: "268435456"  # 256MB
+  CUDA_LAUNCH_BLOCKING: "1"  # Synchronous CUDA for accurate error location
