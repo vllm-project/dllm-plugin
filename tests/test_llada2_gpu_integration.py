@@ -75,7 +75,7 @@ def llada2_mini_model_dir(tmp_path: Path) -> Path:
     model_id = "inclusionAI/LLaDA2.0-mini"
 
     try:
-        from huggingface_hub import snapshot_download
+        from huggingface_hub import snapshot_download  # type: ignore[import-untyped]
 
         # Download to HuggingFace cache (persistent across test runs)
         # This avoids re-downloading on every test execution

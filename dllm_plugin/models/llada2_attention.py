@@ -30,10 +30,10 @@ try:
     from vllm.attention.backends.abstract import AttentionMetadata
 except ImportError:  # pragma: no cover
     try:
-        from vllm.attention import AttentionMetadata  # type: ignore
+        from vllm.attention import AttentionMetadata
     except ImportError:
         # Fallback for type checking
-        AttentionMetadata = object  # type: ignore
+        AttentionMetadata = object
 
 
 class LLaDA2BlockAttention(nn.Module):

@@ -615,5 +615,15 @@ class LLaDA2ForCausalLM(nn.Module):
                     )
                     loaded_params.add(full_name)
 
+        # Handle weight tying for lm_head (common in LLaMA-style models)
+        # If lm_head.weight was not loaded from checkpoint, tie it to embed_tokens
+        if "lm_head.weight" not in loaded_params and "lm_head.weight" in params_dict:
+            # Check if embed_tokens.weight was loaded
+            embed_param_name = "embed_tokens.weight"
+            if embed_param_name in loaded_params:
+                # Tie lm_head weight to embed_tokens weight
+                self.lm_head.weight = self.embed_tokens.weight
+                loaded_params.add("lm_head.weight")
+
         # Return unloaded params
         return set(params_dict.keys()) - loaded_params
