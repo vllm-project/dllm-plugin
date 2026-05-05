@@ -46,38 +46,22 @@ pytestmark = pytest.mark.dllm_gpu_integration
 
 
 @pytest.fixture
-def llada2_mini_model_dir() -> Path | str:
-    """Get LLaDA2.0-mini model directory.
+def llada2_mini_model_dir() -> Path:
+    """Get LLaDA2.0-mini local config directory.
 
-    Tries to download from HuggingFace, falls back to test fixtures.
+    Returns local fixture with config (no auto_map) for vLLM model loading.
+    Weights will be downloaded from HuggingFace during model initialization.
 
     Returns:
-        Path or str: Model directory path or HuggingFace model ID.
+        Path: Local fixture directory with config.json and tokenizer files.
     """
-    model_id = "inclusionAI/LLaDA2.0-mini"
-
-    # Try HuggingFace download
-    # Note: We don't use AutoConfig check here because the config requires
-    # trust_remote_code, but our vLLM plugin model doesn't. Just return the ID
-    # and let vLLM's model loader handle it with our registered architecture.
-    try:
-        import requests
-
-        # Just check if the model exists on HF
-        resp = requests.head(f"https://huggingface.co/{model_id}", timeout=5)
-        if resp.status_code == 200:
-            return model_id  # HF model ID, vLLM will download with our plugin
-    except Exception:
-        # Fall back to local fixture (if available)
-        fixture_path = Path(__file__).parent / "fixtures" / "llada2_mini"
-        if fixture_path.exists():
-            return fixture_path
-
-        # Skip test if model unavailable
+    fixture_path = Path(__file__).parent / "fixtures" / "llada2_mini"
+    if not fixture_path.exists():
         pytest.skip(
-            f"LLaDA2.0-mini model not available. "
-            f"Tried HuggingFace ({model_id}) and local fixture ({fixture_path})."
+            f"LLaDA2.0-mini fixture not available at {fixture_path}. "
+            f"Run setup script to create fixtures."
         )
+    return fixture_path
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA GPU")
