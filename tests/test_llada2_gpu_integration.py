@@ -45,51 +45,13 @@ from dllm_plugin import register_dllm  # noqa: E402
 
 register_dllm()
 
-# TEMPORARY WORKAROUND: Monkeypatch ModelConfig._verify_runner_supported
-# vLLM's ModelConfig validates runner support based on model_type from config
-# (e.g., 'llama'), but doesn't check ModelRegistry for custom architectures
-# registered by plugins. This causes validation to fail even though our
-# LLaDA2MoeModelLM architecture is properly registered.
+# NOTE: Using model_impl parameter to bypass validation
+# vLLM's validation doesn't check ModelRegistry for plugin architectures.
+# The model_impl parameter directly specifies our plugin model class,
+# which should bypass the normal model_type-based validation.
 #
-# This monkeypatch makes the validation always pass for LLaDA2 models.
-# This is NOT the intended use pattern - we need a proper fix in vLLM
-# that checks ModelRegistry during validation.
-#
-# TODO: File vLLM issue requesting ModelRegistry lookup during runner validation
-# TODO: Remove this monkeypatch once vLLM properly supports plugin architectures
-import vllm.config.model  # noqa: E402
-
-_original_verify_runner_supported = (
-    vllm.config.model.ModelConfig._verify_runner_supported
-)
-
-
-def _patched_verify_runner_supported(self) -> None:
-    """Patched _verify_runner_supported that allows LLaDA2 models."""
-    # Check if this is a LLaDA2 model by path or architecture
-    is_llada2 = (hasattr(self, "model") and "llada2" in str(self.model).lower()) or (
-        hasattr(self, "hf_config")
-        and hasattr(self.hf_config, "architectures")
-        and any(
-            "llada2" in arch.lower() for arch in (self.hf_config.architectures or [])
-        )
-    )
-
-    if is_llada2:
-        print(
-            f"[WORKAROUND] Bypassing runner validation for LLaDA2 model: {self.model}",
-            flush=True,
-        )
-        # Skip validation for LLaDA2 models - they're registered in ModelRegistry
-        return
-
-    # For non-LLaDA2 models, call original validation
-    _original_verify_runner_supported(self)
-
-
-vllm.config.model.ModelConfig._verify_runner_supported = (
-    _patched_verify_runner_supported
-)
+# TODO: File vLLM issue requesting ModelRegistry lookup during validation
+# TODO: Remove model_impl workaround once vLLM properly supports plugin architectures
 
 from dllm_plugin.config import DRAFT_SIZE  # noqa: E402
 from tests.gpu_memory import gpu_memory_utilization, kv_cache_memory_bytes  # noqa: E402
