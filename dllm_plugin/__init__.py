@@ -51,13 +51,18 @@ _logger = logging.getLogger(__name__)
 def register_dllm() -> None:
     """Entry point for ``vllm.general_plugins`` (``dllm``).
 
-    When ``vllm`` is importable, registers **two** architecture names with
-    ``ModelRegistry``, both pointing at the same **mock** implementation for
-    Phases 2–6 stack testing (issues #5 and #24):
+    **Phase 7 update:** Registers architecture names with ``ModelRegistry``:
 
-    * :data:`~dllm_plugin.config.LLADA2_ARCHITECTURE_NAME` — placeholder
-      until the real HF-mapped module ships (issue #12 / Phase 7).
-    * :data:`~dllm_plugin.config.DLLM_MOCK_STACK_MODEL_ID` — explicit test id.
+    * :data:`~dllm_plugin.config.LLADA2_ARCHITECTURE_NAME` — Production LLaDA2.0
+      model with MoE and block-style attention (Phase 7 / issue #12). Use
+      ``VLLM_DLLM_USE_MOCK_MODEL=1`` to override with mock for testing.
+    * :data:`~dllm_plugin.config.DLLM_MOCK_STACK_MODEL_ID` — Explicit mock model
+      for Phases 2–6 stack testing (always uses mock implementation).
+
+    Environment variables:
+    * ``VLLM_DLLM_USE_MOCK_MODEL``: If set to ``1``/``true``/``yes``/``on``,
+      registers LLADA2_ARCHITECTURE_NAME to the mock model instead of real model.
+      Useful for testing Phases 2-6 behavior with real model disabled.
 
     Uses lazy ``"<module>:<Class>"`` registration so importing this package does
     not pull ``torch``/CUDA until the model class is needed.
@@ -91,21 +96,56 @@ def register_dllm() -> None:
         DLLM_MOCK_MODEL_CLASS_FQCN,
         DLLM_MOCK_STACK_MODEL_ID,
         LLADA2_ARCHITECTURE_NAME,
+        LLADA2_REAL_MODEL_CLASS_FQCN,
     )
 
+    # Determine which model to use for LLADA2_ARCHITECTURE_NAME
+    use_mock_raw = os.environ.get("VLLM_DLLM_USE_MOCK_MODEL", "").strip().lower()
+    use_mock_model = use_mock_raw in {"1", "true", "yes", "on"}
+
+    if use_mock_model:
+        llada2_model_class = DLLM_MOCK_MODEL_CLASS_FQCN
+        _logger.info(
+            "dLLM plugin: VLLM_DLLM_USE_MOCK_MODEL=1, using mock model for %s",
+            LLADA2_ARCHITECTURE_NAME,
+        )
+    else:
+        llada2_model_class = LLADA2_REAL_MODEL_CLASS_FQCN
+        _logger.info(
+            "dLLM plugin: Using real LLaDA2.0 model for %s (Phase 7)",
+            LLADA2_ARCHITECTURE_NAME,
+        )
+
     supported = ModelRegistry.get_supported_archs()
-    for arch in (LLADA2_ARCHITECTURE_NAME, DLLM_MOCK_STACK_MODEL_ID):
-        if arch in supported:
-            _logger.debug(
-                "dLLM plugin: architecture %r already registered, skipping",
-                arch,
-            )
-            continue
-        ModelRegistry.register_model(arch, DLLM_MOCK_MODEL_CLASS_FQCN)
+
+    # Register LLADA2_ARCHITECTURE_NAME (real or mock based on env var)
+    if LLADA2_ARCHITECTURE_NAME not in supported:
+        ModelRegistry.register_model(LLADA2_ARCHITECTURE_NAME, llada2_model_class)
         _logger.debug(
             "dLLM plugin: registered architecture %r -> %s",
-            arch,
+            LLADA2_ARCHITECTURE_NAME,
+            llada2_model_class,
+        )
+    else:
+        _logger.debug(
+            "dLLM plugin: architecture %r already registered, skipping",
+            LLADA2_ARCHITECTURE_NAME,
+        )
+
+    # Register DLLM_MOCK_STACK_MODEL_ID (always mock)
+    if DLLM_MOCK_STACK_MODEL_ID not in supported:
+        ModelRegistry.register_model(
+            DLLM_MOCK_STACK_MODEL_ID, DLLM_MOCK_MODEL_CLASS_FQCN
+        )
+        _logger.debug(
+            "dLLM plugin: registered architecture %r -> %s",
+            DLLM_MOCK_STACK_MODEL_ID,
             DLLM_MOCK_MODEL_CLASS_FQCN,
+        )
+    else:
+        _logger.debug(
+            "dLLM plugin: architecture %r already registered, skipping",
+            DLLM_MOCK_STACK_MODEL_ID,
         )
 
     from dllm_plugin.config import DLLM_APPLY_ENGINE_CORE_DRAFT_HOOK_ENV_VAR
