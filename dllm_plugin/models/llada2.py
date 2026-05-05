@@ -396,6 +396,9 @@ class LLaDA2ForCausalLM(nn.Module):
         prefix: Parameter name prefix (default: empty).
     """
 
+    # Declare supported vLLM runners
+    supported_runners = ["generate"]
+
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = "") -> None:
         super().__init__()
 
