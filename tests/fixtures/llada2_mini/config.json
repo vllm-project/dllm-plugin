@@ -46,5 +46,6 @@
   "use_rmsnorm": true,
   "use_sliding_window": false,
   "using_split_qkv_in_self_attention": false,
-  "vocab_size": 157184
+  "vocab_size": 157184,
+  "model_type": "llama"
 }
