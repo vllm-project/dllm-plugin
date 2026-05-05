@@ -62,24 +62,26 @@ import vllm.config.model  # noqa: E402
 _original_model_config_post_init = vllm.config.model.ModelConfig.__post_init__
 
 
-def _patched_model_config_post_init(self):
+def _patched_model_config_post_init(self, *args, **kwargs):
     """Patched __post_init__ that skips runner validation for LLaDA2 models."""
-    # Call original init
-    _original_model_config_post_init(self)
-
-    # Override validation failure for our registered architectures
-    # This allows LLaDA2MoeModelLM to load even though validation checked
-    # LlamaForCausalLM (from model_type='llama') instead of our plugin model
+    # Check if this is a LLaDA2 architecture BEFORE running validation
+    # architectures field is set before __post_init__ is called
     if (
         hasattr(self, "architectures")
         and self.architectures
         and any("LLaDA2" in arch for arch in self.architectures)
     ):
-        # Force accept our architecture - it's registered and has supported_runners
+        # Skip validation for our registered model - it has supported_runners
         print(
             f"[WORKAROUND] Bypassing runner validation for {self.architectures}",
             flush=True,
         )
+        # Don't call original __post_init__ - that would run the validation
+        # we want to skip
+        return
+
+    # For non-LLaDA2 models, call original validation
+    _original_model_config_post_init(self, *args, **kwargs)
 
 
 vllm.config.model.ModelConfig.__post_init__ = _patched_model_config_post_init
