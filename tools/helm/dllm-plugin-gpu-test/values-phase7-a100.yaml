@@ -36,8 +36,9 @@ scheduling:
   nodeSelector:
     cloud.google.com/gke-accelerator: nvidia-tesla-a100
   extraTolerations:
-    - key: nvidia.com/gpu
-      operator: Exists
+    - key: jounce.io/nodetype
+      operator: Equal
+      value: A100-40
       effect: NoSchedule
 
 resources:
