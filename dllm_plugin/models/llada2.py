@@ -562,39 +562,12 @@ class LLaDA2ForCausalLM(nn.Module):
 
         # Transformer layers
         for layer_idx, layer in enumerate(self.layers):
-            # Debug: Validate input shape
-            expected_shape = (
-                hidden_states.shape[0],
-                hidden_states.shape[1],
-                self.hidden_size,
-            )
-            if hidden_states.shape != expected_shape:
-                raise ValueError(
-                    f"Layer {layer_idx} input shape mismatch: "
-                    f"expected {expected_shape}, got {hidden_states.shape}"
-                )
-
-            # Debug: Check for NaN/Inf
-            if torch.isnan(hidden_states).any() or torch.isinf(hidden_states).any():
-                raise ValueError(f"Layer {layer_idx} input contains NaN or Inf values")
-
             hidden_states = layer(
                 hidden_states=hidden_states,
                 positions=positions,
                 kv_cache=kv_caches[layer_idx],
                 attn_metadata=attn_metadata,
             )
-
-            # Debug: Validate output shape
-            if hidden_states.shape != expected_shape:
-                raise ValueError(
-                    f"Layer {layer_idx} output shape mismatch: "
-                    f"expected {expected_shape}, got {hidden_states.shape}"
-                )
-
-            # Debug: Check for NaN/Inf after layer
-            if torch.isnan(hidden_states).any() or torch.isinf(hidden_states).any():
-                raise ValueError(f"Layer {layer_idx} output contains NaN or Inf values")
 
         # Final norm
         hidden_states = self.norm(hidden_states)
@@ -615,42 +588,11 @@ class LLaDA2ForCausalLM(nn.Module):
         Returns:
             Logits, shape (batch, seq_len, vocab_size).
         """
-        # Debug: Validate hidden states before logits computation
-        print(f"[DEBUG] compute_logits: hidden_states.shape={hidden_states.shape}")
-        print(f"[DEBUG] compute_logits: hidden_states.dtype={hidden_states.dtype}")
-        print(f"[DEBUG] compute_logits: hidden_states.device={hidden_states.device}")
-
-        if torch.isnan(hidden_states).any():
-            raise ValueError("Hidden states contain NaN before logits computation")
-        if torch.isinf(hidden_states).any():
-            raise ValueError("Hidden states contain Inf before logits computation")
-
-        # Check tensor is contiguous
-        if not hidden_states.is_contiguous():
-            print("[DEBUG] Hidden states not contiguous, making contiguous")
-            hidden_states = hidden_states.contiguous()
-
         logits = self.logits_processor(
             self.lm_head,
             hidden_states,
             sampling_metadata,
         )
-
-        # Debug: Validate logits output
-        print(f"[DEBUG] compute_logits output: logits.shape={logits.shape}")
-        print(f"[DEBUG] compute_logits output: vocab_size={self.vocab_size}")
-
-        # Validate logits are reasonable
-        if torch.isnan(logits).any():
-            raise ValueError("Logits contain NaN values!")
-        if torch.isinf(logits).any():
-            raise ValueError("Logits contain Inf values!")
-
-        # Check min/max range (should be reasonable float values)
-        logits_min = logits.min().item()
-        logits_max = logits.max().item()
-        print(f"[DEBUG] Logits range: min={logits_min:.2f}, max={logits_max:.2f}")
-
         return logits
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
@@ -835,24 +777,10 @@ class LLaDA2ForCausalLM(nn.Module):
             stacked_w13 = torch.stack(w13_list, dim=0)
             stacked_w2 = torch.stack(w2_list, dim=0)
 
-            # Debug: Print shapes
-            print(
-                f"[DEBUG] Layer {layer_id}: stacked_w13.shape={stacked_w13.shape}, "
-                f"stacked_w2.shape={stacked_w2.shape}"
-            )
-
             # Load stacked weights directly into Parameter.data
             # FusedMoE's custom weight_loader expects expert_id/shard_id args
             # which don't apply to stacked weights, so use direct assignment
             layer = self.layers[layer_id]
-
-            # Debug: Print expected shapes
-            w13_expected = layer.mlp.experts.w13_weight.shape
-            w2_expected = layer.mlp.experts.w2_weight.shape
-            print(
-                f"[DEBUG] Layer {layer_id}: expected w13={w13_expected}, "
-                f"w2={w2_expected}"
-            )
 
             # Verify shapes match
             if stacked_w13.shape != layer.mlp.experts.w13_weight.shape:
@@ -883,39 +811,6 @@ class LLaDA2ForCausalLM(nn.Module):
             and "embed_tokens.weight" in loaded_params
         ):
             loaded_params.add("lm_head.weight")
-
-        # Debug logging: Print weight loading summary
-        print("\n[DEBUG] Weight loading summary:")
-        print(f"  Checkpoint weights seen: {len(checkpoint_names_seen)}")
-        print(f"  Mapped and loaded: {len(mapped_names_loaded)}")
-        print(f"  Skipped: {len(mapped_names_skipped)}")
-        print(f"  Model parameters expected: {len(params_dict)}")
-        print(f"  Loaded params tracked: {len(loaded_params)}")
-
-        # Print sample of what was loaded vs skipped
-        print("\n[DEBUG] Sample loaded (first 5):")
-        for item in mapped_names_loaded[:5]:
-            print(f"    {item}")
-
-        print("\n[DEBUG] Sample skipped (first 10):")
-        for item in mapped_names_skipped[:10]:
-            print(f"    {item}")
-
-        # Print expected params that weren't loaded
-        unloaded = set(params_dict.keys()) - loaded_params
-        print(f"\n[DEBUG] Unloaded params (first 10 of {len(unloaded)}):")
-        for param in list(unloaded)[:10]:
-            print(f"    {param}")
-
-        # Debug: Show layer 0 MLP checkpoint names to diagnose naming issues
-        layer0_mlp_names = [
-            name
-            for name in checkpoint_names_seen
-            if "layers.0.mlp" in name or "model.layers.0.mlp" in name
-        ]
-        print(f"\n[DEBUG] Layer 0 MLP checkpoint names ({len(layer0_mlp_names)}):")
-        for name in sorted(layer0_mlp_names)[:20]:  # Show first 20
-            print(f"    {name}")
 
         # Return loaded params (vLLM expects set of successfully loaded param names)
         return loaded_params
