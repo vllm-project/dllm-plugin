@@ -89,6 +89,24 @@ class DllmRuntimeScheduler(VllmScheduler):
         """Attach precomputed grammar bitmask metadata for dLLM workers."""
 
         out = super().schedule()
+
+        # BUGFIX: Filter out requests that have already completed their max_tokens.
+        # This happens when max_tokens < DRAFT_SIZE (32) and a draft block has already
+        # satisfied the output requirement. The parent scheduler computes negative
+        # remaining tokens, which we must filter before they reach the model runner.
+        if out.num_scheduled_tokens:
+            req_ids_to_remove = []
+            for req_id, num_tokens in out.num_scheduled_tokens.items():
+                if num_tokens <= 0:
+                    req_ids_to_remove.append(req_id)
+
+            for req_id in req_ids_to_remove:
+                del out.num_scheduled_tokens[req_id]
+                if hasattr(out, "total_num_scheduled_tokens"):
+                    out.total_num_scheduled_tokens = sum(
+                        out.num_scheduled_tokens.values()
+                    )
+
         # Frontier repair metadata for dLLM structured outputs. Consumed in phase two
         # by :class:`~dllm_plugin.gpu_model_runner.DllmGPUModelRunner` (stashed from
         # ``SchedulerOutput`` in ``execute_model``). ``GrammarOutput`` still arrives via
@@ -206,6 +224,17 @@ class DllmRuntimeScheduler(VllmScheduler):
             sched_spec_tokens[req_id] = row
 
         scheduler_output.num_invalid_spec_tokens = num_invalid_spec_tokens
+
+    def make_spec_decoding_stats(self, *args, **kwargs) -> Any:
+        """Skip spec decode metrics for dLLM to avoid assertion failures.
+
+        The parent vLLM spec decode metrics assume traditional spec decode
+        where drafted tokens <= accepted tokens per step. dLLM uses fixed
+        32-token draft blocks that may exceed max_tokens, which violates
+        the parent metrics' assertions. We skip metrics collection for now.
+        """
+        # Return None to skip metrics (metrics are optional)
+        return None
 
     def update_from_output(
         self,
