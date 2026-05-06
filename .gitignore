@@ -25,3 +25,12 @@ htmlcov/
 .vscode/
 *.swp
 .DS_Store
+
+# Benchmarks (results should not be tracked)
+benchmarks/
+benchmarks.csv
+benchmarks.json
+
+# Temporary values files
+*-values.yaml
+values.yaml
