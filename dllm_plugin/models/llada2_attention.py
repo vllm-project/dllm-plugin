@@ -222,29 +222,89 @@ class LLaDA2BlockAttention(nn.Module):
         attn_metadata: AttentionMetadata,
         kv_scale: float = 1.0,
     ) -> torch.Tensor:
-        """Strategy 2: Dual-chunk attention (prefix + block).
+        """Strategy 2: Dual-chunk attention via virtual batch decomposition.
 
-        Explicitly computes two attention chunks:
-        1. Prefix chunk: Q=current_block, KV=committed_prefix
-        2. Block chunk: Q=current_block, KV=current_block
+        **Design:** Transform AttentionMetadata to create two virtual batches:
+        1. Prefix chunk: Q=current_block, KV=committed_prefix (non-causal)
+        2. Block chunk: Q=current_block, KV=current_block (non-causal)
 
-        Both chunks use `is_causal=False` for non-causal attention.
+        Follows vLLM's chunked_local_attention pattern:
+        https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/layers/attention/chunked_local_attention.py
 
-        **Note:** This is the MVP implementation. Future optimization will try
-        metadata modification (Strategy 1) for single-pass efficiency.
+        **Implementation Status:** Skeleton infrastructure in place but not yet
+        functional. Requires:
+        1. Access to vLLM 0.20+ environment (not available on macOS)
+        2. Understanding actual AttentionMetadata structure
+        3. Implementing make_block_attention_virtual_batches()
+        4. Threading num_prefix_tokens from scheduler to this layer
+
+        **Current behavior:** Delegates to single-pass attention (MVP fallback).
+        Assumes scheduler/worker configure metadata for block-style masking.
+
+        Returns:
+            Combined output: prefix_output + block_output (when implemented)
+            OR single-pass output (current fallback)
         """
-        # For MVP, delegate to standard vLLM attention with modified metadata
-        # The actual block-style masking is handled by the model runner's
-        # attention metadata preparation based on dLLM scheduler state
+        # TODO(Phase 7 - BLOCKED): Complete virtual batch implementation
+        # Blocker: Need vLLM environment to test metadata transformation
+        # See: dllm_plugin/attention/virtual_batches.py
 
-        # TODO(Phase 7): Implement explicit dual-chunk decomposition if needed
-        # For now, trust that vLLM's attention layer with is_causal=False
-        # and proper slot_mapping will handle block-style masks correctly
+        # Intended implementation (currently raises NotImplementedError):
+        #
+        # from dllm_plugin.attention.virtual_batches import (
+        #     make_block_attention_virtual_batches,
+        # )
+        #
+        # # Extract prefix length (TODO: thread from scheduler)
+        # num_prefix_tokens = self._extract_prefix_length(attn_metadata)
+        # block_size = query.shape[1]
+        #
+        # # Create virtual batches
+        # prefix_metadata, block_metadata = make_block_attention_virtual_batches(
+        #     attn_metadata=attn_metadata,
+        #     num_prefix_tokens=num_prefix_tokens,
+        #     block_size=block_size,
+        # )
+        #
+        # # Edge case: No prefix (first block)
+        # if prefix_metadata is None:
+        #     return self.attn(
+        #         positions=positions,
+        #         query=query,
+        #         key=key,
+        #         value=value,
+        #         kv_cache=kv_cache,
+        #         attn_metadata=block_metadata,
+        #         kv_scale=kv_scale,
+        #     )
+        #
+        # # Chunk 1: Prefix attention
+        # prefix_output = self.attn(
+        #     positions=positions,
+        #     query=query,
+        #     key=None,  # Use KV cache
+        #     value=None,  # Use KV cache
+        #     kv_cache=kv_cache,
+        #     attn_metadata=prefix_metadata,
+        #     kv_scale=kv_scale,
+        # )
+        #
+        # # Chunk 2: Block self-attention
+        # block_output = self.attn(
+        #     positions=positions,
+        #     query=query,
+        #     key=key,
+        #     value=value,
+        #     kv_cache=kv_cache,
+        #     attn_metadata=block_metadata,
+        #     kv_scale=kv_scale,
+        # )
+        #
+        # # Combine outputs (additive for overlapping queries, disjoint KV)
+        # return prefix_output + block_output
 
-        # The key insight: vLLM's PagedAttention already supports arbitrary
-        # attention patterns via slot_mapping. We just need to ensure the
-        # scheduler/worker sets up metadata correctly for block visibility.
-
+        # MVP FALLBACK: Delegate to single-pass attention
+        # This relies on scheduler/worker setting up metadata correctly
         return self.attn(
             positions=positions,
             query=query,
