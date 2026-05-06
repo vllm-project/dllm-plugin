@@ -154,23 +154,6 @@ class LLaDA2MoE(nn.Module):
                 tp_size=self.tp_size,
                 prefix=f"{prefix}.experts",
             )
-
-            # Phase 8: GPU capability detection and logging
-            try:
-                gpu_caps = detect_gpu_capabilities()
-                logger.info(
-                    "LLaDA2.0 MoE initialized on %s (compute %d.%d, %.1fGB) "
-                    "- torch.compile via @support_torch_compile decorator",
-                    gpu_caps.device_name,
-                    gpu_caps.compute_capability[0],
-                    gpu_caps.compute_capability[1],
-                    gpu_caps.total_memory_gb,
-                )
-            except Exception as e:
-                logger.warning(
-                    "GPU capability detection failed (non-fatal): %s",
-                    e,
-                )
         else:
             self.gate = None
             self.experts = None
@@ -469,6 +452,23 @@ class LLaDA2ForCausalLM(nn.Module):
                 "Pipeline parallelism (PP > 1) is not supported for LLaDA2ForCausalLM "
                 "in Phase 7 MVP. Use tensor parallelism (--tensor-parallel-size) for "
                 "multi-GPU inference. PP support may be added in a future phase."
+            )
+
+        # Log GPU capability (Phase 8)
+        try:
+            gpu_caps = detect_gpu_capabilities()
+            logger.info(
+                "LLaDA2.0 model initialized on %s (compute %d.%d, %.1fGB) "
+                "- torch.compile via @support_torch_compile decorator",
+                gpu_caps.device_name,
+                gpu_caps.compute_capability[0],
+                gpu_caps.compute_capability[1],
+                gpu_caps.total_memory_gb,
+            )
+        except Exception as e:
+            logger.warning(
+                "GPU capability detection failed (non-fatal): %s",
+                e,
             )
 
         self.vllm_config = vllm_config

@@ -79,18 +79,17 @@ def register_dllm() -> None:
     helper (no-op), not by omitting the call—so with both envs set, ``apply_*``
     still runs and returns without patching.
     """
-    print("[dLLM DEBUG] register_dllm() called", flush=True)
+    _logger.debug("dLLM plugin: register_dllm() called")
 
     if importlib.util.find_spec("vllm") is None:
-        print("[dLLM DEBUG] vllm not found, skipping registration", flush=True)
+        _logger.debug("dLLM plugin: vllm not found, skipping registration")
         return
 
     try:
         from vllm import ModelRegistry
 
-        print("[dLLM DEBUG] ModelRegistry imported successfully", flush=True)
-    except ImportError as e:
-        print(f"[dLLM DEBUG] ModelRegistry import failed: {e}", flush=True)
+        _logger.debug("dLLM plugin: ModelRegistry imported successfully")
+    except ImportError:
         _logger.debug(
             "vllm-dllm-plugin (dllm): vLLM spec found but import failed; "
             "skipping ModelRegistry registration.",
@@ -126,23 +125,14 @@ def register_dllm() -> None:
     supported = ModelRegistry.get_supported_archs()
 
     # Register LLADA2_ARCHITECTURE_NAME (real or mock based on env var)
-    print(
-        f"[dLLM DEBUG] Registering {LLADA2_ARCHITECTURE_NAME} -> {llada2_model_class}",
-        flush=True,
-    )
     if LLADA2_ARCHITECTURE_NAME not in supported:
         ModelRegistry.register_model(LLADA2_ARCHITECTURE_NAME, llada2_model_class)
-        print(
-            f"[dLLM DEBUG] Successfully registered {LLADA2_ARCHITECTURE_NAME}",
-            flush=True,
-        )
         _logger.debug(
             "dLLM plugin: registered architecture %r -> %s",
             LLADA2_ARCHITECTURE_NAME,
             llada2_model_class,
         )
     else:
-        print(f"[dLLM DEBUG] {LLADA2_ARCHITECTURE_NAME} already registered", flush=True)
         _logger.debug(
             "dLLM plugin: architecture %r already registered, skipping",
             LLADA2_ARCHITECTURE_NAME,
@@ -150,26 +140,14 @@ def register_dllm() -> None:
 
     # Register LLADA2_HF_ARCHITECTURE_NAME (HuggingFace naming convention)
     # Points to same implementation as LLADA2_ARCHITECTURE_NAME
-    print(
-        f"[dLLM DEBUG] Registering {LLADA2_HF_ARCHITECTURE_NAME}"
-        f" -> {llada2_model_class}",
-        flush=True,
-    )
     if LLADA2_HF_ARCHITECTURE_NAME not in supported:
         ModelRegistry.register_model(LLADA2_HF_ARCHITECTURE_NAME, llada2_model_class)
-        print(
-            f"[dLLM DEBUG] Successfully registered {LLADA2_HF_ARCHITECTURE_NAME}",
-            flush=True,
-        )
         _logger.debug(
             "dLLM plugin: registered HF architecture %r -> %s",
             LLADA2_HF_ARCHITECTURE_NAME,
             llada2_model_class,
         )
     else:
-        print(
-            f"[dLLM DEBUG] {LLADA2_HF_ARCHITECTURE_NAME} already registered", flush=True
-        )
         _logger.debug(
             "dLLM plugin: HF architecture %r already registered, skipping",
             LLADA2_HF_ARCHITECTURE_NAME,

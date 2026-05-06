@@ -147,11 +147,11 @@ class LLaDA2BlockAttention(nn.Module):
             attn_type=attn_type,
         )
 
-        # Strategy selection: Try metadata modification first, fall back to dual-chunk
-        # For MVP, we'll use dual-chunk as it's more explicit and easier to validate
-        self._use_dual_chunk = (
-            True  # TODO: Try metadata modification in future optimization
-        )
+        # Attention strategy: Dual-chunk approach (delegates to vLLM attention backend)
+        # Uses vLLM's PagedAttention with block-style metadata from scheduler.
+        # The scheduler/worker sets up attention metadata for block visibility;
+        # this layer trusts the backend to handle non-causal patterns correctly.
+        self._use_dual_chunk = True
 
     def forward(
         self,
