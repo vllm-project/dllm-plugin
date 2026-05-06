@@ -20,6 +20,8 @@ References:
 
 from __future__ import annotations
 
+import logging
+import os
 import re
 from collections import defaultdict
 from collections.abc import Iterable
@@ -53,8 +55,11 @@ from dllm_plugin.config import (
     LLADA2_DEFAULT_ROUTED_SCALING_FACTOR,
     LLADA2_DEFAULT_TOPK_GROUP,
 )
+from dllm_plugin.gpu_capability import detect_gpu_capabilities
 from dllm_plugin.models.llada2_attention import LLaDA2BlockAttention
 from dllm_plugin.validation import assert_compatible_stack
+
+logger = logging.getLogger(__name__)
 
 
 class LLaDA2MoE(nn.Module):
@@ -149,9 +154,57 @@ class LLaDA2MoE(nn.Module):
                 tp_size=self.tp_size,
                 prefix=f"{prefix}.experts",
             )
+
+            # Phase 8: torch.compile optimization on routing
+            self._routing_compiled = False
+            try:
+                gpu_caps = detect_gpu_capabilities()
+                disable_compile = os.environ.get("VLLM_DLLM_DISABLE_COMPILE", "false")
+                disable_compile = disable_compile.lower() in {"true", "1", "yes"}
+
+                if gpu_caps.supports_torch_compile() and not disable_compile:
+                    try:
+                        # Compile routing function for graph optimization
+                        # Mode "reduce-overhead" balances compile vs runtime
+                        self._apply_group_limited_topk = torch.compile(
+                            self._apply_group_limited_topk,
+                            mode="reduce-overhead",
+                            fullgraph=True,
+                        )
+                        self._routing_compiled = True
+                        logger.info(
+                            "torch.compile enabled for routing on %s (compute %d.%d)",
+                            gpu_caps.device_name,
+                            gpu_caps.compute_capability[0],
+                            gpu_caps.compute_capability[1],
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "torch.compile failed for routing, using eager mode: %s",
+                            e,
+                        )
+                else:
+                    if disable_compile:
+                        logger.info(
+                            "torch.compile disabled via VLLM_DLLM_DISABLE_COMPILE"
+                        )
+                    else:
+                        logger.info(
+                            "torch.compile not supported on %s (compute %d.%d)",
+                            gpu_caps.device_name,
+                            gpu_caps.compute_capability[0],
+                            gpu_caps.compute_capability[1],
+                        )
+            except Exception as e:
+                # Graceful fallback if GPU detection fails
+                logger.warning(
+                    "GPU capability detection failed, skipping torch.compile: %s",
+                    e,
+                )
         else:
             self.gate = None
             self.experts = None
+            self._routing_compiled = False
 
         # Shared expert (always active, not routed)
         if self.num_shared_experts > 0:
