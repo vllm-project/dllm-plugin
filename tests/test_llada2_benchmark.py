@@ -31,7 +31,7 @@ def llada2_mini_model_dir():
     try:
         from transformers import AutoConfig  # type: ignore[import-untyped]
 
-        AutoConfig.from_pretrained(model_id)
+        AutoConfig.from_pretrained(model_id, trust_remote_code=True)
         return model_id
     except Exception:
         # Fallback to local fixture if HF download fails
@@ -88,8 +88,6 @@ def vllm_server(
                 "dllm_plugin.Scheduler",
                 "--worker-cls",
                 "dllm_plugin.Worker",
-                "--async-scheduling",
-                "false",
             ],
             stdout=f,
             stderr=subprocess.STDOUT,
