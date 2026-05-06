@@ -126,15 +126,16 @@ def vllm_server(
 
 
 def test_llada2_guidellm_benchmark(vllm_server: str):
-    """Benchmark LLaDA2.0 using GuideLLM CLI with synchronous mode and streaming.
+    """Benchmark LLaDA2.0 using GuideLLM CLI with synchronous profile.
 
-    Measures performance metrics:
+    GuideLLM automatically handles streaming responses and measures:
     - TTFT (Time To First Token)
     - ITL (Inter-Token Latency)
     - TPS (Tokens Per Second)
     - E2E (End-to-End latency)
     """
-    # Run GuideLLM benchmark with synchronous mode and streaming enabled
+    # Run GuideLLM benchmark with synchronous profile
+    # Note: 'run' is the default command, streaming is automatic
     result = subprocess.run(
         [
             "guidellm",
@@ -143,9 +144,8 @@ def test_llada2_guidellm_benchmark(vllm_server: str):
             vllm_server,
             "--model",
             "llada2",
-            "--rate-type",
+            "--profile",
             "synchronous",
-            "--stream",  # Enable streaming
             "--max-seconds",
             "180",  # 3 minutes total
             "--data",
@@ -157,7 +157,7 @@ def test_llada2_guidellm_benchmark(vllm_server: str):
 
     # Print full output
     print("\n" + "=" * 80)
-    print("GuideLLM Benchmark Results (Synchronous + Streaming)")
+    print("GuideLLM Benchmark Results (Synchronous Profile)")
     print("=" * 80)
     print(result.stdout)
     if result.stderr:
