@@ -21,14 +21,14 @@ References:
 from __future__ import annotations
 
 import logging
-import os
 import re
 from collections import defaultdict
 from collections.abc import Iterable
 
 import torch
 import torch.nn as nn
-from transformers import PretrainedConfig  # type: ignore[import-untyped]
+from transformers import PretrainedConfig
+from vllm.compilation.decorators import support_torch_compile
 from vllm.config import VllmConfig
 from vllm.distributed.parallel_state import get_pp_group, get_tp_group
 from vllm.model_executor.layers.fused_moe import FusedMoE
@@ -155,56 +155,25 @@ class LLaDA2MoE(nn.Module):
                 prefix=f"{prefix}.experts",
             )
 
-            # Phase 8: torch.compile optimization on routing
-            self._routing_compiled = False
+            # Phase 8: GPU capability detection and logging
             try:
                 gpu_caps = detect_gpu_capabilities()
-                disable_compile = os.environ.get("VLLM_DLLM_DISABLE_COMPILE", "false")
-                disable_compile = disable_compile.lower() in {"true", "1", "yes"}
-
-                if gpu_caps.supports_torch_compile() and not disable_compile:
-                    try:
-                        # Compile routing function for graph optimization
-                        # Mode "reduce-overhead" balances compile vs runtime
-                        self._apply_group_limited_topk = torch.compile(
-                            self._apply_group_limited_topk,
-                            mode="reduce-overhead",
-                            fullgraph=True,
-                        )
-                        self._routing_compiled = True
-                        logger.info(
-                            "torch.compile enabled for routing on %s (compute %d.%d)",
-                            gpu_caps.device_name,
-                            gpu_caps.compute_capability[0],
-                            gpu_caps.compute_capability[1],
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            "torch.compile failed for routing, using eager mode: %s",
-                            e,
-                        )
-                else:
-                    if disable_compile:
-                        logger.info(
-                            "torch.compile disabled via VLLM_DLLM_DISABLE_COMPILE"
-                        )
-                    else:
-                        logger.info(
-                            "torch.compile not supported on %s (compute %d.%d)",
-                            gpu_caps.device_name,
-                            gpu_caps.compute_capability[0],
-                            gpu_caps.compute_capability[1],
-                        )
+                logger.info(
+                    "LLaDA2.0 MoE initialized on %s (compute %d.%d, %.1fGB) "
+                    "- torch.compile via @support_torch_compile decorator",
+                    gpu_caps.device_name,
+                    gpu_caps.compute_capability[0],
+                    gpu_caps.compute_capability[1],
+                    gpu_caps.total_memory_gb,
+                )
             except Exception as e:
-                # Graceful fallback if GPU detection fails
                 logger.warning(
-                    "GPU capability detection failed, skipping torch.compile: %s",
+                    "GPU capability detection failed (non-fatal): %s",
                     e,
                 )
         else:
             self.gate = None
             self.experts = None
-            self._routing_compiled = False
 
         # Shared expert (always active, not routed)
         if self.num_shared_experts > 0:
@@ -460,6 +429,9 @@ class LLaDA2DecoderLayer(nn.Module):
         return hidden_states
 
 
+@support_torch_compile(
+    dynamic_arg_dims={"input_ids": 0, "positions": 0},
+)
 class LLaDA2ForCausalLM(nn.Module):
     """LLaDA2.0 causal language model for vLLM.
 
@@ -468,6 +440,10 @@ class LLaDA2ForCausalLM(nn.Module):
     - Block-style non-causal attention
     - Tensor parallelism (TP) support
     - Proper weight loading from HuggingFace checkpoints
+
+    **Phase 8 Optimizations:** Supports vLLM torch.compile via `@support_torch_compile`
+    decorator. Compilation is automatic when vLLM's compilation config is enabled.
+    Routing and MoE layers benefit most from graph optimization.
 
     **Pipeline Parallelism:** NOT supported in Phase 7 MVP. Will raise ValueError
     if `pipeline_parallel_size > 1`. Use `--tensor-parallel-size` for multi-GPU.

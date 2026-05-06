@@ -121,7 +121,14 @@ def assert_compatible_stack(
             f"missing scheduler_config in vLLM config for dLLM runtime stack{_ctx()}",
         )
     try:
-        scheduler_cls = scheduler_config.get_scheduler_cls()
+        # vLLM 0.6.x: get_scheduler_cls() method
+        if hasattr(scheduler_config, "get_scheduler_cls"):
+            scheduler_cls = scheduler_config.get_scheduler_cls()
+        # vLLM 0.5.x/0.6.6: scheduler_cls attribute
+        elif hasattr(scheduler_config, "scheduler_cls"):
+            scheduler_cls = scheduler_config.scheduler_cls
+        else:
+            raise AttributeError("No scheduler_cls found in scheduler_config")
     except Exception as exc:
         raise ValueError(
             "failed to resolve scheduler class for dLLM runtime stack; use "
