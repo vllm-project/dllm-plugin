@@ -149,7 +149,7 @@ def test_llada2_guidellm_benchmark(vllm_server: str):
             "--max-seconds",
             "180",  # 3 minutes total
             "--data",
-            "synthetic-256-64",  # 256 input tokens, 64 output tokens
+            "prompt_tokens=256,output_tokens=64",  # Synthetic data specification
         ],
         capture_output=True,
         text=True,
