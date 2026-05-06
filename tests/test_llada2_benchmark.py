@@ -125,7 +125,7 @@ def vllm_server(
             proc.wait()
 
 
-def test_llada2_guidellm_benchmark(vllm_server: str):
+def test_llada2_guidellm_benchmark(vllm_server: str, llada2_mini_model_dir):
     """Benchmark LLaDA2.0 using GuideLLM CLI with synchronous profile.
 
     GuideLLM automatically handles streaming responses and measures:
@@ -150,6 +150,10 @@ def test_llada2_guidellm_benchmark(vllm_server: str):
             "180",  # 3 minutes total
             "--data",
             "prompt_tokens=256,output_tokens=64",  # Synthetic data specification
+            "--processor",
+            str(llada2_mini_model_dir),  # Tokenizer for synthetic data generation
+            "--processor-args",
+            '{"trust_remote_code": true}',  # Enable custom code for tokenizer
         ],
         capture_output=True,
         text=True,
