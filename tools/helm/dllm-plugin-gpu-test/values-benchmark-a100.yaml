@@ -26,11 +26,9 @@ gpu:
 tests:
   runServeHttpSmoke: false
   pytestPaths:
-    # Streaming benchmark
-    - tests/test_llada2_benchmark.py::test_llada2_benchmark_streaming
-    # Synchronous benchmark
-    - tests/test_llada2_benchmark.py::test_llada2_benchmark_synchronous
-  pytestArgs: "--run-benchmarks -v -s"  # Enable benchmarks, verbose, no capture
+    # GuideLLM benchmark (covers both streaming and synchronous)
+    - tests/test_llada2_benchmark.py::test_llada2_guidellm_benchmark
+  pytestArgs: "-v -s"  # Verbose, no capture
 
 # A100-40GB node pool configuration
 scheduling:

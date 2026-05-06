@@ -7,16 +7,14 @@ Measures performance metrics for real LLaDA2.0-mini model:
 - ITL (Inter-Token Latency)
 - E2E (End-to-End latency)
 
-Tests both synchronous and streaming modes.
+Tests both synchronous and streaming modes using GuideLLM CLI.
 """
 
 from __future__ import annotations
 
-import json
 import subprocess
 import time
 from pathlib import Path
-from typing import Any
 
 import pytest
 import requests  # type: ignore[import-untyped]
@@ -129,225 +127,45 @@ def vllm_server(
             proc.wait()
 
 
-def benchmark_request(
-    base_url: str,
-    prompt: str,
-    max_tokens: int,
-    stream: bool = False,
-) -> dict[str, Any]:
-    """Send a single benchmark request and measure metrics.
+def test_llada2_guidellm_benchmark(vllm_server: str):
+    """Benchmark LLaDA2.0 using GuideLLM CLI with synchronous mode and streaming.
 
-    Returns:
-        dict with keys: ttft, itl_avg, e2e, tokens_generated, tps
-    """
-    start_time = time.perf_counter()
-    first_token_time = None
-    token_times: list[float] = []
-    tokens_generated = 0
-    response_text = ""
-
-    if stream:
-        # Streaming mode
-        resp = requests.post(
-            f"{base_url}/v1/completions",
-            json={
-                "model": "llada2",
-                "prompt": prompt,
-                "max_tokens": max_tokens,
-                "temperature": 0.0,
-                "stream": True,
-            },
-            stream=True,
-        )
-        resp.raise_for_status()
-
-        for line in resp.iter_lines():
-            if not line:
-                continue
-            line_str = line.decode("utf-8")
-            if not line_str.startswith("data: "):
-                continue
-            data_str = line_str[6:]  # Remove "data: " prefix
-            if data_str.strip() == "[DONE]":
-                break
-
-            chunk_time = time.perf_counter()
-            try:
-                data = json.loads(data_str)
-                if "choices" in data and len(data["choices"]) > 0:
-                    choice = data["choices"][0]
-                    if "text" in choice and choice["text"]:
-                        if first_token_time is None:
-                            first_token_time = chunk_time
-                        else:
-                            token_times.append(chunk_time)
-                        tokens_generated += len(choice["text"].split())
-                        response_text += choice["text"]
-            except json.JSONDecodeError:
-                continue
-    else:
-        # Synchronous mode
-        resp = requests.post(
-            f"{base_url}/v1/completions",
-            json={
-                "model": "llada2",
-                "prompt": prompt,
-                "max_tokens": max_tokens,
-                "temperature": 0.0,
-                "stream": False,
-            },
-        )
-        resp.raise_for_status()
-        end_time = time.perf_counter()
-
-        data = resp.json()
-        if "choices" in data and len(data["choices"]) > 0:
-            response_text = data["choices"][0]["text"]
-            if "usage" in data:
-                tokens_generated = data["usage"].get("completion_tokens", 0)
-            else:
-                # Fallback: count tokens in response
-                tokens_generated = len(response_text.split())
-
-        # For synchronous, we don't have TTFT/ITL, only E2E
-        first_token_time = end_time
-        e2e = end_time - start_time
-        return {
-            "ttft": None,  # Not available in sync mode
-            "itl_avg": None,  # Not available in sync mode
-            "e2e": e2e,
-            "tokens_generated": tokens_generated,
-            "tps": tokens_generated / e2e if e2e > 0 else 0,
-        }
-
-    end_time = time.perf_counter()
-    e2e = end_time - start_time
-    ttft = (first_token_time - start_time) if first_token_time else None
-
-    # Calculate average ITL (inter-token latency)
-    if len(token_times) > 1:
-        itl_values = [
-            token_times[i] - token_times[i - 1] for i in range(1, len(token_times))
-        ]
-        itl_avg = sum(itl_values) / len(itl_values)
-    else:
-        itl_avg = None
-
-    tps = tokens_generated / e2e if e2e > 0 else 0
-
-    return {
-        "ttft": ttft,
-        "itl_avg": itl_avg,
-        "e2e": e2e,
-        "tokens_generated": tokens_generated,
-        "tps": tps,
-    }
-
-
-@pytest.mark.skipif(
-    "not config.getoption('--run-benchmarks', default=False)",
-    reason="Benchmark tests only run with --run-benchmarks flag",
-)
-def test_llada2_benchmark_streaming(vllm_server: str):
-    """Benchmark LLaDA2.0 streaming mode.
-
-    Measures:
+    Measures performance metrics:
     - TTFT (Time To First Token)
     - ITL (Inter-Token Latency)
     - TPS (Tokens Per Second)
     - E2E (End-to-End latency)
     """
-    prompt = "Once upon a time in a land far away, there lived a"
-    max_tokens = 50
+    # Run GuideLLM benchmark with synchronous mode and streaming enabled
+    result = subprocess.run(
+        [
+            "guidellm",
+            "benchmark",
+            "--target",
+            vllm_server,
+            "--model",
+            "llada2",
+            "--rate-type",
+            "synchronous",
+            "--stream",  # Enable streaming
+            "--max-seconds",
+            "180",  # 3 minutes total
+            "--data",
+            "synthetic-256-64",  # 256 input tokens, 64 output tokens
+        ],
+        capture_output=True,
+        text=True,
+    )
 
-    # Run 5 warmup requests
-    print("\n[Streaming] Running warmup requests...")
-    for _ in range(5):
-        benchmark_request(vllm_server, prompt, max_tokens=10, stream=True)
+    # Print full output
+    print("\n" + "=" * 80)
+    print("GuideLLM Benchmark Results (Synchronous + Streaming)")
+    print("=" * 80)
+    print(result.stdout)
+    if result.stderr:
+        print("Errors/Warnings:")
+        print(result.stderr)
+    print("=" * 80)
 
-    # Run 10 benchmark requests
-    print("[Streaming] Running benchmark requests...")
-    results: list[dict[str, Any]] = []
-    for i in range(10):
-        result = benchmark_request(vllm_server, prompt, max_tokens, stream=True)
-        results.append(result)
-        print(
-            f"  Request {i + 1}: TTFT={result['ttft']:.4f}s, E2E={result['e2e']:.4f}s"
-        )
-
-    # Calculate statistics
-    ttft_values = [r["ttft"] for r in results if r["ttft"] is not None]
-    itl_values = [r["itl_avg"] for r in results if r["itl_avg"] is not None]
-    e2e_values = [r["e2e"] for r in results]
-    tps_values = [r["tps"] for r in results]
-
-    avg_ttft = sum(ttft_values) / len(ttft_values) if ttft_values else 0
-    avg_itl = sum(itl_values) / len(itl_values) if itl_values else 0
-    avg_e2e = sum(e2e_values) / len(e2e_values)
-    avg_tps = sum(tps_values) / len(tps_values)
-
-    print("\n" + "=" * 60)
-    print("LLaDA2.0-mini Benchmark Results (Streaming)")
-    print("=" * 60)
-    print(f"Average TTFT:           {avg_ttft:.4f} seconds")
-    print(f"Average ITL:            {avg_itl:.4f} seconds")
-    print(f"Average E2E:            {avg_e2e:.4f} seconds")
-    print(f"Average TPS:            {avg_tps:.2f} tokens/second")
-    print(f"Requests:               {len(results)}")
-    print(f"Tokens per request:     {max_tokens}")
-    print("=" * 60)
-
-    # Basic sanity checks
-    assert avg_ttft > 0, "TTFT should be positive"
-    assert avg_tps > 0, "TPS should be positive"
-    assert avg_e2e > 0, "E2E should be positive"
-
-
-@pytest.mark.skipif(
-    "not config.getoption('--run-benchmarks', default=False)",
-    reason="Benchmark tests only run with --run-benchmarks flag",
-)
-def test_llada2_benchmark_synchronous(vllm_server: str):
-    """Benchmark LLaDA2.0 synchronous mode.
-
-    Measures:
-    - TPS (Tokens Per Second)
-    - E2E (End-to-End latency)
-
-    Note: TTFT and ITL are not available in synchronous mode.
-    """
-    prompt = "Once upon a time in a land far away, there lived a"
-    max_tokens = 50
-
-    # Run 5 warmup requests
-    print("\n[Synchronous] Running warmup requests...")
-    for _ in range(5):
-        benchmark_request(vllm_server, prompt, max_tokens=10, stream=False)
-
-    # Run 10 benchmark requests
-    print("[Synchronous] Running benchmark requests...")
-    results: list[dict[str, Any]] = []
-    for i in range(10):
-        result = benchmark_request(vllm_server, prompt, max_tokens, stream=False)
-        results.append(result)
-        print(f"  Request {i + 1}: E2E={result['e2e']:.4f}s, TPS={result['tps']:.2f}")
-
-    # Calculate statistics
-    e2e_values = [r["e2e"] for r in results]
-    tps_values = [r["tps"] for r in results]
-
-    avg_e2e = sum(e2e_values) / len(e2e_values)
-    avg_tps = sum(tps_values) / len(tps_values)
-
-    print("\n" + "=" * 60)
-    print("LLaDA2.0-mini Benchmark Results (Synchronous)")
-    print("=" * 60)
-    print(f"Average E2E:            {avg_e2e:.4f} seconds")
-    print(f"Average TPS:            {avg_tps:.2f} tokens/second")
-    print(f"Requests:               {len(results)}")
-    print(f"Tokens per request:     {max_tokens}")
-    print("=" * 60)
-
-    # Basic sanity checks
-    assert avg_tps > 0, "TPS should be positive"
-    assert avg_e2e > 0, "E2E should be positive"
+    # Validate benchmark completed successfully
+    assert result.returncode == 0, f"GuideLLM benchmark failed: {result.stderr}"

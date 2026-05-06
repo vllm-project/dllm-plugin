@@ -76,5 +76,6 @@ spec:
               cd /app
               uv python pin 3.12
               uv sync --group dev --extra vllm
+              uv pip install guidellm
               {{/* One pytest process per file avoids stale CUDA state across GPU tests. */}}
-              {{- range $i, $p := .Values.tests.pytestPaths }}{{ if $i }} && {{ end }}uv run pytest -q {{ $p }}{{ end }}{{- if .Values.tests.runServeHttpSmoke }} && bash tools/e2e/serve_http_smoke.sh{{- end }}
+              {{- range $i, $p := .Values.tests.pytestPaths }}{{ if $i }} && {{ end }}uv run pytest {{ if $.Values.tests.pytestArgs }}{{ $.Values.tests.pytestArgs }} {{ end }}{{ $p }}{{ end }}{{- if .Values.tests.runServeHttpSmoke }} && bash tools/e2e/serve_http_smoke.sh{{- end }}
