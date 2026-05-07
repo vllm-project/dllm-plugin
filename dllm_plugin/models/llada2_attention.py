@@ -160,6 +160,7 @@ class LLaDA2BlockAttention(nn.Module):
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
         kv_scale: float = 1.0,
+        num_prefix_tokens: int | None = None,
     ) -> torch.Tensor:
         """Apply block-style attention with QKV projection.
 
@@ -169,6 +170,8 @@ class LLaDA2BlockAttention(nn.Module):
             kv_cache: KV cache tensor (PagedAttention format).
             attn_metadata: Attention metadata from vLLM.
             kv_scale: Scaling factor for KV cache (default: 1.0).
+            num_prefix_tokens: Number of committed tokens (prefix length)
+                for virtual batch attention.
 
         Returns:
             Attention output, shape (batch_size, seq_len, hidden_size).
@@ -201,7 +204,7 @@ class LLaDA2BlockAttention(nn.Module):
         # Apply attention
         if self._use_dual_chunk:
             attn_output = self._forward_dual_chunk(
-                q, k, v, positions, kv_cache, attn_metadata, kv_scale
+                q, k, v, positions, kv_cache, attn_metadata, kv_scale, num_prefix_tokens
             )
         else:
             attn_output = self._forward_metadata_modification(
@@ -221,6 +224,7 @@ class LLaDA2BlockAttention(nn.Module):
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
         kv_scale: float = 1.0,
+        num_prefix_tokens: int | None = None,
     ) -> torch.Tensor:
         """Strategy 2: Dual-chunk attention via virtual batch decomposition.
 
@@ -231,89 +235,70 @@ class LLaDA2BlockAttention(nn.Module):
         Follows vLLM's chunked_local_attention pattern:
         https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/layers/attention/chunked_local_attention.py
 
-        **Implementation Status:** Skeleton infrastructure in place but not yet
-        functional. Requires:
-        1. Access to vLLM 0.20+ environment (not available on macOS)
-        2. Understanding actual AttentionMetadata structure
-        3. Implementing make_block_attention_virtual_batches()
-        4. Threading num_prefix_tokens from scheduler to this layer
-
-        **Current behavior:** Delegates to single-pass attention (MVP fallback).
-        Assumes scheduler/worker configure metadata for block-style masking.
-
         Returns:
-            Combined output: prefix_output + block_output (when implemented)
-            OR single-pass output (current fallback)
+            Combined output: prefix_output + block_output
         """
-        # TODO(Phase 7 - BLOCKED): Complete virtual batch implementation
-        # Blocker: Need vLLM environment to test metadata transformation
-        # See: dllm_plugin/attention/virtual_batches.py
+        # Fall back to single-pass if num_prefix_tokens not provided
+        if num_prefix_tokens is None:
+            return self.attn(
+                positions=positions,
+                query=query,
+                key=key,
+                value=value,
+                kv_cache=kv_cache,
+                attn_metadata=attn_metadata,
+                kv_scale=kv_scale,
+            )
 
-        # Intended implementation (currently raises NotImplementedError):
-        #
-        # from dllm_plugin.attention.virtual_batches import (
-        #     make_block_attention_virtual_batches,
-        # )
-        #
-        # # Extract prefix length (TODO: thread from scheduler)
-        # num_prefix_tokens = self._extract_prefix_length(attn_metadata)
-        # block_size = query.shape[1]
-        #
-        # # Create virtual batches
-        # prefix_metadata, block_metadata = make_block_attention_virtual_batches(
-        #     attn_metadata=attn_metadata,
-        #     num_prefix_tokens=num_prefix_tokens,
-        #     block_size=block_size,
-        # )
-        #
-        # # Edge case: No prefix (first block)
-        # if prefix_metadata is None:
-        #     return self.attn(
-        #         positions=positions,
-        #         query=query,
-        #         key=key,
-        #         value=value,
-        #         kv_cache=kv_cache,
-        #         attn_metadata=block_metadata,
-        #         kv_scale=kv_scale,
-        #     )
-        #
-        # # Chunk 1: Prefix attention
-        # prefix_output = self.attn(
-        #     positions=positions,
-        #     query=query,
-        #     key=None,  # Use KV cache
-        #     value=None,  # Use KV cache
-        #     kv_cache=kv_cache,
-        #     attn_metadata=prefix_metadata,
-        #     kv_scale=kv_scale,
-        # )
-        #
-        # # Chunk 2: Block self-attention
-        # block_output = self.attn(
-        #     positions=positions,
-        #     query=query,
-        #     key=key,
-        #     value=value,
-        #     kv_cache=kv_cache,
-        #     attn_metadata=block_metadata,
-        #     kv_scale=kv_scale,
-        # )
-        #
-        # # Combine outputs (additive for overlapping queries, disjoint KV)
-        # return prefix_output + block_output
+        from dllm_plugin.attention.virtual_batches import (
+            make_block_attention_virtual_batches,
+        )
 
-        # MVP FALLBACK: Delegate to single-pass attention
-        # This relies on scheduler/worker setting up metadata correctly
-        return self.attn(
+        block_size = query.shape[1]
+
+        # Create virtual batches
+        prefix_metadata, block_metadata = make_block_attention_virtual_batches(
+            attn_metadata=attn_metadata,
+            num_prefix_tokens=num_prefix_tokens,
+            block_size=block_size,
+        )
+
+        # Edge case: No prefix (first block)
+        if prefix_metadata is None:
+            return self.attn(
+                positions=positions,
+                query=query,
+                key=key,
+                value=value,
+                kv_cache=kv_cache,
+                attn_metadata=block_metadata,
+                kv_scale=kv_scale,
+            )
+
+        # Chunk 1: Prefix attention
+        prefix_output = self.attn(
+            positions=positions,
+            query=query,
+            key=None,  # Use KV cache
+            value=None,  # Use KV cache
+            kv_cache=kv_cache,
+            attn_metadata=prefix_metadata,
+            kv_scale=kv_scale,
+        )
+
+        # Chunk 2: Block self-attention
+        block_output = self.attn(
             positions=positions,
             query=query,
             key=key,
             value=value,
             kv_cache=kv_cache,
-            attn_metadata=attn_metadata,
+            attn_metadata=block_metadata,
             kv_scale=kv_scale,
         )
+
+        # Combine outputs (additive for overlapping queries, disjoint KV)
+        return prefix_output + block_output
 
     def _forward_metadata_modification(
         self,
