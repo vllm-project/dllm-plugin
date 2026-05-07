@@ -66,6 +66,7 @@ class DllmGPUModelRunner(HookedGPUModelRunner):
         self._dllm_so_frontier_flat_indices: dict[str, int] | None = None
         self._dllm_so_frontier_block_rows: dict[str, int | None] | None = None
         self._dllm_so_valid_prefix_lens: dict[str, int] | None = None
+        self._dllm_num_prefix_tokens: dict[str, int] | None = None
         self._dllm_pending_draft_ids: Any = None
 
     def shutdown(self) -> None:
@@ -139,6 +140,9 @@ class DllmGPUModelRunner(HookedGPUModelRunner):
         )
         self._dllm_so_valid_prefix_lens = getattr(
             scheduler_output, "dllm_so_valid_prefix_lens", None
+        )
+        self._dllm_num_prefix_tokens = getattr(
+            scheduler_output, "dllm_num_prefix_tokens", None
         )
 
     def sample(

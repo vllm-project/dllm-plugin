@@ -115,6 +115,17 @@ class DllmRuntimeScheduler(VllmScheduler):
         out.dllm_so_frontier_flat_indices = None
         out.dllm_so_frontier_block_rows = None
         out.dllm_so_valid_prefix_lens = None
+
+        # Extract num_prefix_tokens for virtual batch attention (Phase 7)
+        # Maps request_id -> num_computed_tokens for all scheduled requests
+        out.dllm_num_prefix_tokens = {}
+        if out.num_scheduled_tokens:
+            for req_id in out.num_scheduled_tokens:
+                request = self.requests.get(req_id)
+                if request and hasattr(request, "dllm_state"):
+                    out.dllm_num_prefix_tokens[req_id] = (
+                        request.dllm_state.num_computed_tokens
+                    )
         if out.has_structured_output_requests:
             patched = scheduled_spec_decode_tokens_for_grammar_bitmask(
                 scheduled_spec_decode_tokens=out.scheduled_spec_decode_tokens,
