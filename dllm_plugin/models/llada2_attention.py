@@ -102,6 +102,9 @@ class LLaDA2BlockAttention(nn.Module):
         self.num_kv_heads = num_kv_heads if num_kv_heads is not None else num_heads
         self.hidden_size = num_heads * head_size
 
+        # Store cache_config to query KV cache block size
+        self.cache_config = cache_config
+
         # QKV projection (fused)
         # HF checkpoint: attention.query_key_value.weight
         # Fuses Q, K, V projections into single tensor for efficiency
@@ -152,6 +155,25 @@ class LLaDA2BlockAttention(nn.Module):
         # The scheduler/worker sets up attention metadata for block visibility;
         # this layer trusts the backend to handle non-causal patterns correctly.
         self._use_dual_chunk = True
+
+    def _get_kv_cache_block_size(self) -> int:
+        """Query KV cache block size from cache_config.
+
+        Returns:
+            KV cache block size in tokens. Defaults to 16 if not available.
+        """
+        if self.cache_config is None:
+            return 16  # Standard vLLM default
+
+        # Try common attribute names for block size
+        for attr in ("block_size", "num_tokens_per_block", "token_block_size"):
+            if hasattr(self.cache_config, attr):
+                block_size = getattr(self.cache_config, attr)
+                if block_size is not None and block_size > 0:
+                    return int(block_size)
+
+        # Default to 16 (standard vLLM block size in v1 architecture)
+        return 16
 
     def forward(
         self,
@@ -256,14 +278,15 @@ class LLaDA2BlockAttention(nn.Module):
 
         block_size = query.shape[1]
 
-        # TODO(Phase 7.1): Query kv_cache_block_size from cache_config
-        # instead of using default. For now, use 16 (standard vLLM block size)
+        # Query KV cache block size from cache_config
+        kv_cache_block_size = self._get_kv_cache_block_size()
+
         # Create virtual batches
         prefix_metadata, block_metadata = make_block_attention_virtual_batches(
             attn_metadata=attn_metadata,
             num_prefix_tokens=num_prefix_tokens,
             block_size=block_size,
-            kv_cache_block_size=16,  # Default; should query from cache_config
+            kv_cache_block_size=kv_cache_block_size,
         )
 
         # Edge case: No prefix (first block)
