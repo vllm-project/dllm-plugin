@@ -5,20 +5,28 @@ to create virtual batches for prefix and block attention chunks.
 
 Reference: vllm/model_executor/layers/attention/chunked_local_attention.py
 """
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import torch
 
-try:
+if TYPE_CHECKING:
     from vllm.v1.attention.backend import CommonAttentionMetadata
-except ImportError:
-    # Fallback for type checking on non-vLLM environments
-    CommonAttentionMetadata = object
+else:
+    try:
+        from vllm.v1.attention.backend import CommonAttentionMetadata
+    except ImportError:
+        # Fallback for runtime on non-vLLM environments
+        CommonAttentionMetadata = object
 
 
 def make_block_attention_virtual_batches(
-    attn_metadata: "CommonAttentionMetadata",
+    attn_metadata: CommonAttentionMetadata,
     num_prefix_tokens: int,
     block_size: int,
-) -> tuple["CommonAttentionMetadata | None", "CommonAttentionMetadata"]:
+) -> tuple[CommonAttentionMetadata | None, CommonAttentionMetadata]:
     """Transform metadata for block-style dual-chunk attention.
 
     Creates two virtual batches per request:
@@ -49,7 +57,9 @@ def make_block_attention_virtual_batches(
         block_metadata = CommonAttentionMetadata(
             query_start_loc=attn_metadata.query_start_loc,
             query_start_loc_cpu=attn_metadata.query_start_loc_cpu,
-            seq_lens=torch.full((num_reqs,), block_size, dtype=torch.int32, device=device),
+            seq_lens=torch.full(
+                (num_reqs,), block_size, dtype=torch.int32, device=device
+            ),
             num_reqs=num_reqs,
             num_actual_tokens=total_query_tokens,
             max_query_len=block_size,
@@ -64,21 +74,20 @@ def make_block_attention_virtual_batches(
     # Assuming block_table has shape [num_reqs, max_num_blocks_per_seq]
     # We need to slice it to get only the pages for prefix vs block
 
-    # Get block size from vLLM config (typically 16 tokens per block)
-    # We can infer this from the relationship between seq_lens and block_table size
-    num_prefix_tokens + block_size
-    attn_metadata.block_table_tensor.shape[1]
-
     # Calculate blocks needed for prefix
-    # Note: This assumes uniform block size; may need adjustment for variable blocks
+    # Note: This assumes uniform block size (16 tokens/block); may need adjustment
+    # for variable block sizes
     kv_block_size = 16  # Standard vLLM block size
     num_prefix_blocks = (num_prefix_tokens + kv_block_size - 1) // kv_block_size
 
     # Slice block_table for each chunk
     prefix_block_table = attn_metadata.block_table_tensor[:, :num_prefix_blocks]
     block_start_idx = num_prefix_blocks
-    block_end_idx = block_start_idx + ((block_size + kv_block_size - 1) // kv_block_size)
-    block_block_table = attn_metadata.block_table_tensor[:, block_start_idx:block_end_idx]
+    num_block_blocks = (block_size + kv_block_size - 1) // kv_block_size
+    block_end_idx = block_start_idx + num_block_blocks
+    block_block_table = attn_metadata.block_table_tensor[
+        :, block_start_idx:block_end_idx
+    ]
 
     # --- Virtual Batch 1: Prefix chunk ---
     # Query: current block (block_size tokens)
@@ -87,7 +96,9 @@ def make_block_attention_virtual_batches(
     prefix_metadata = CommonAttentionMetadata(
         query_start_loc=attn_metadata.query_start_loc,
         query_start_loc_cpu=attn_metadata.query_start_loc_cpu,
-        seq_lens=torch.full((num_reqs,), num_prefix_tokens, dtype=torch.int32, device=device),
+        seq_lens=torch.full(
+            (num_reqs,), num_prefix_tokens, dtype=torch.int32, device=device
+        ),
         num_reqs=num_reqs,
         num_actual_tokens=total_query_tokens,
         max_query_len=block_size,
