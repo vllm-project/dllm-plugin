@@ -287,6 +287,53 @@ class DllmGPUModelRunner(HookedGPUModelRunner):
         b = block.float().detach().cpu()
         return [row.tolist() for row in b]
 
+    def _model_forward(
+        self,
+        input_ids: torch.Tensor | None = None,
+        positions: torch.Tensor | None = None,
+        intermediate_tensors: Any | None = None,
+        inputs_embeds: torch.Tensor | None = None,
+        **model_kwargs: Any,
+    ) -> Any:
+        """Override to inject num_prefix_tokens for virtual batch attention.
+
+        Extracts num_prefix_tokens from scheduler state and passes to model.forward()
+        for LLaDA2 block-style attention (Phase 7 virtual batch decomposition).
+        """
+        # Only inject for dLLM architectures
+        if not dllm_architecture_match(self.vllm_config):
+            return super()._model_forward(
+                input_ids=input_ids,
+                positions=positions,
+                intermediate_tensors=intermediate_tensors,
+                inputs_embeds=inputs_embeds,
+                **model_kwargs,
+            )
+
+        # Extract num_prefix_tokens for the current batch
+        num_prefix_tokens = None
+        if (
+            self._dllm_num_prefix_tokens is not None
+            and hasattr(self, "input_batch")
+            and self.input_batch is not None
+        ):
+            req_ids = self.input_batch.req_ids
+            if req_ids is not None and len(req_ids) == 1:
+                # MVP: Single-request batches only
+                # Multi-request with different prefix lengths requires
+                # per-request metadata (deferred to post-MVP)
+                req_id = req_ids[0]
+                num_prefix_tokens = self._dllm_num_prefix_tokens.get(req_id)
+
+        return super()._model_forward(
+            input_ids=input_ids,
+            positions=positions,
+            intermediate_tensors=intermediate_tensors,
+            inputs_embeds=inputs_embeds,
+            num_prefix_tokens=num_prefix_tokens,
+            **model_kwargs,
+        )
+
     def take_dllm_draft_token_ids(self) -> Any | None:
         """Pop draft blocks produced by dLLM remasking (phase two).
 
