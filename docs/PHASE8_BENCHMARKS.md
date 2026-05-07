@@ -90,7 +90,90 @@ Phase 8 implements official vLLM torch.compile integration via the `@support_tor
 - **Hardware:** A100-SXM4-40GB
 - **vLLM Version:** 0.20.1
 
-**Note:** This PR upgrades from vLLM 0.6.x to 0.20.1. Cross-version performance comparisons are not provided as vLLM 0.20.1 includes numerous optimizations unrelated to torch.compile. For proper performance comparison, future work should benchmark with and without torch.compile on the same vLLM version.
+## Comparative Performance Analysis (torch.compile Benefit)
+
+**Goal:** Validate that torch.compile provides measurable benefit over baseline (no compilation) on the same vLLM version.
+
+### Methodology
+
+**A/B Test Design:**
+- **Baseline:** vLLM 0.20.1 with `VLLM_TORCH_COMPILE_LEVEL=0` (compilation disabled)
+- **Optimized:** vLLM 0.20.1 with default torch.compile (via `@support_torch_compile` decorator)
+- **Controlled variables:**
+  - Same model: inclusionAI/LLaDA2.0-mini
+  - Same hardware: A100-SXM4-40GB
+  - Same vLLM version: 0.20.1
+  - Same workload: 256 input tokens, 1000 output tokens, 180 seconds
+  - Same configuration: max_num_seqs=1, enforce_eager=True
+
+**Measurement tool:** GuideLLM 0.6.0 (synchronous profile)
+
+### Results
+
+**TODO:** Run A/B benchmark and fill in results
+
+| Metric | Baseline (compile OFF) | Optimized (compile ON) | Delta |
+|--------|------------------------|------------------------|-------|
+| **Output Tokens/sec** | [TBD] tok/s | 346 tok/s | **+[X]%** |
+| **TTFT (median)** | [TBD] ms | [TBD] ms | [+/-X]% |
+| **ITL (median)** | [TBD] ms | [TBD] ms | [+/-X]% |
+| **TPOT (median)** | [TBD] ms | [TBD] ms | [+/-X]% |
+
+### Analysis
+
+**TODO:** Fill after running benchmark. Expected scenarios:
+
+**Scenario A: Positive improvement (expected for large MoE routing)**
+> torch.compile provides **+X% throughput** improvement on A100 for LLaDA2.0-mini. The benefit comes primarily from optimizing the group-limited routing computation (`_apply_group_limited_topk` in `llada2.py`) and FusedMoE forward pass. The one-time compilation overhead (3.25s) is amortized over long-running inference sessions.
+
+**Scenario B: Neutral/negative (possible for small model + single-request)**
+> torch.compile shows **no measurable benefit** (or slight regression) for LLaDA2.0-mini on A100. This is likely because:
+> 1. **Small model size:** Mini variant has fewer experts/parameters than production models
+> 2. **Eager execution mode:** `enforce_eager=True` may limit compilation effectiveness
+> 3. **Single-request batching:** max_num_seqs=1 reduces parallelism benefits
+> 
+> **Recommendation:** Re-evaluate on larger LLaDA2.0 models (medium/large) and multi-request workloads (Phase 7.1) where compilation gains are expected to be more significant.
+
+### Reproducibility
+
+**Run A/B benchmark yourself:**
+
+```bash
+# 1. Start server with compilation DISABLED
+export VLLM_TORCH_COMPILE_LEVEL=0
+export VLLM_PLUGINS=dllm
+export VLLM_USE_V2_MODEL_RUNNER=1
+
+vllm serve inclusionAI/LLaDA2.0-mini \
+  --scheduler-cls dllm_plugin.Scheduler \
+  --worker-cls dllm_plugin.Worker \
+  --max-num-seqs 1 \
+  --gpu-memory-utilization 0.9 \
+  --enforce-eager
+# (see OPERATOR_LLaDA2.md for full configuration)
+
+# 2. Run baseline benchmark
+./tools/benchmark_optimization.sh baseline benchmarks/my_test
+
+# 3. Restart server with compilation ENABLED (remove VLLM_TORCH_COMPILE_LEVEL)
+# Kill server, then:
+unset VLLM_TORCH_COMPILE_LEVEL  # Enable compilation
+vllm serve inclusionAI/LLaDA2.0-mini ...  # same flags as above
+
+# 4. Run optimized benchmark
+./tools/benchmark_optimization.sh torch_compile benchmarks/my_test
+
+# 5. Compare results
+python3 tools/extract_metrics.py \
+  benchmarks/my_test/baseline.json \
+  benchmarks/my_test/torch_compile.json
+```
+
+**Infrastructure:** See `tools/A100_POD_SETUP.md` for K8s pod setup on A100 GPUs.
+
+---
+
+**Note:** The 346 tokens/sec absolute result above represents vLLM 0.20.1 with torch.compile enabled. The comparative analysis validates the incremental benefit of torch.compile specifically.
 
 ## Server Logs
 

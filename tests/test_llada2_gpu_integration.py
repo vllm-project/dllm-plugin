@@ -93,6 +93,39 @@ def llada2_mini_model_dir(tmp_path: Path) -> Path:
         )
 
 
+@pytest.fixture
+def llada2_real_model_dir() -> Path:
+    """Download real LLaDA2.0-mini from HuggingFace (REQUIRED - fails if unavailable).
+
+    Unlike llada2_mini_model_dir, this fixture FAILS (not skips) if download fails.
+    Use this for tests that must validate real model integration (Issue #25 evidence).
+
+    Returns:
+        Path: Directory containing real HuggingFace model weights
+
+    Raises:
+        pytest.fail: If HuggingFace download fails (enforces requirement)
+    """
+    model_id = "inclusionAI/LLaDA2.0-mini"
+
+    try:
+        from huggingface_hub import snapshot_download
+
+        model_path = snapshot_download(
+            repo_id=model_id,
+            local_files_only=False,  # Allow network download
+        )
+        return Path(model_path)
+    except Exception as e:
+        pytest.fail(
+            f"REQUIRED: Could not download {model_id} from HuggingFace: {e}. "
+            f"Phase 7 real-model integration requires network access and valid model. "
+            f"Check: 1) Network connectivity, 2) Model exists at HuggingFace, "
+            f"3) HF_TOKEN if model is gated. "
+            f"This test enforces Issue #25 (real model integration evidence)."
+        )
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA GPU")
 def test_llada2_real_weights_llm_generate(
     monkeypatch: pytest.MonkeyPatch,
@@ -473,3 +506,77 @@ def test_llada2_attention_backend_compatibility(
     token_ids = outputs[0].outputs[0].token_ids
     assert len(token_ids) > 0
     assert all(isinstance(t, int) for t in token_ids)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA GPU")
+@pytest.mark.real_model_required
+def test_load_real_llada2_from_huggingface(
+    monkeypatch: pytest.MonkeyPatch,
+    llada2_real_model_dir: Path,
+):
+    """Validate that real LLaDA2.0-mini weights load from HuggingFace.
+
+    **Phase 7 primary validation (Issue #25 evidence):** This test MUST pass
+    with real model weights to satisfy real-model integration requirements.
+
+    Unlike other tests that skip on download failure, this test FAILS if:
+    - HuggingFace model is unavailable
+    - Network connectivity issues
+    - Model architecture mismatch
+
+    Validates:
+    - Real weights download successfully from HuggingFace
+    - Model initializes without errors
+    - Forward pass executes with real weights
+    - Output shapes are correct
+
+    **Limitations (Phase 7 MVP):**
+    - Structure validation only (not numerical correctness)
+    - Numerical correctness deferred to Phase 9 (lm-eval, reference comparison)
+    """
+    from vllm import LLM, SamplingParams
+    from vllm.inputs import TokensPrompt
+
+    # Setup environment for dLLM plugin
+    monkeypatch.setenv("VLLM_PLUGINS", "dllm")
+    monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", "1")
+    monkeypatch.setenv("VLLM_ENABLE_V1_MULTIPROCESSING", "0")
+    monkeypatch.setenv("VLLM_DLLM_USE_MOCK_MODEL", "0")  # Force real model
+
+    # Load LLM with REAL weights (not mock fixture)
+    llm = LLM(
+        model=str(llada2_real_model_dir),
+        tokenizer=str(llada2_real_model_dir),
+        trust_remote_code=True,
+        model_impl="dllm_plugin.models.llada2:LLaDA2ForCausalLM",
+        enforce_eager=True,
+        tensor_parallel_size=1,
+        max_model_len=256,
+        max_num_seqs=1,  # Phase 7 limitation (single-request only)
+        gpu_memory_utilization=gpu_memory_utilization(),
+        scheduler_cls="dllm_plugin.Scheduler",
+        worker_cls="dllm_plugin.Worker",
+        async_scheduling=False,
+    )
+
+    # Run inference with real weights
+    outputs = llm.generate(
+        [TokensPrompt(prompt_token_ids=[1, 2, 3])],
+        SamplingParams(
+            max_tokens=5,
+            temperature=0.0,
+            detokenize=False,
+        ),
+    )
+
+    # Validate output structure (Phase 7 - structural validation only)
+    assert len(outputs) == 1, "Should return one RequestOutput"
+    assert len(outputs[0].outputs) == 1, "Should have one CompletionOutput"
+
+    token_ids = outputs[0].outputs[0].token_ids
+    assert len(token_ids) > 0, "Should generate at least one token"
+    assert all(isinstance(t, int) for t in token_ids), "Token IDs must be integers"
+    assert all(t >= 0 for t in token_ids), "Token IDs must be non-negative"
+
+    # Phase 7 validation complete: Real model loads and runs
+    # Phase 9 will add numerical correctness validation (lm-eval, reference comparison)

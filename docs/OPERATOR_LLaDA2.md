@@ -427,6 +427,29 @@ pytest -v -m dllm_gpu_integration tests/test_llada2_gpu_integration.py
   - Heterogeneous prefix lengths across multiple requests not yet supported
   - Server will raise `NotImplementedError` if `num_reqs > 1` is attempted
   - Future work: Phase 7.1 will add multi-request support
+  
+  **Production Impact:**
+  
+  Single-request batching means the server processes one request at a time, even if GPU has spare capacity. Concurrency is limited to parallelism within a single request's block generation.
+  
+  **Workarounds for production:**
+  1. **Horizontal scaling:** Deploy multiple vLLM instances behind load balancer
+  2. **Request coalescing:** Buffer incoming requests and route to least-loaded instance
+  3. **Upgrade to Phase 7.1:** Track follow-up issue for multi-request support timeline
+  
+  **When single-request is acceptable:**
+  - Low request rate (< 1 req/sec)
+  - Large single requests (long-context generation)
+  - Dev/test environments
+  
+  **Required server configuration:**
+  ```bash
+  vllm serve inclusionAI/LLaDA2.0-mini \
+    --max-num-seqs 1 \  # REQUIRED for Phase 7 MVP
+    --scheduler-cls dllm_plugin.Scheduler \
+    --worker-cls dllm_plugin.Worker
+  ```
+
 - Custom CUDA kernels for attention - using FlashAttention/FlashInfer
 - Prefix caching under block-style masks
 - Advanced grammar integrations beyond basic support

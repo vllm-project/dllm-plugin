@@ -36,7 +36,7 @@ try:
     _VLLM_AVAILABLE = True
 except ImportError:  # pragma: no cover - exercised only in no-vLLM envs.
     # VllmScheduler is the only import that may fail in test environments
-    VllmScheduler = object  # type: ignore[misc,assignment]
+    VllmScheduler = object
     _VLLM_AVAILABLE = False
 
 
