@@ -27,15 +27,16 @@ from dllm_plugin.scheduler import (
 )
 from dllm_plugin.validation import assert_compatible_stack
 
+# vLLM imports (centralized in vllm_compat for version handling)
+from dllm_plugin.vllm_compat import DraftTokenIds, ModelRunnerOutput
+
 try:
     from vllm.v1.core.sched.scheduler import Scheduler as VllmScheduler
-    from vllm.v1.outputs import DraftTokenIds, ModelRunnerOutput
 
     _VLLM_AVAILABLE = True
 except ImportError:  # pragma: no cover - exercised only in no-vLLM envs.
-    VllmScheduler = object
-    DraftTokenIds = Any
-    ModelRunnerOutput = Any
+    # VllmScheduler is the only import that may fail in test environments
+    VllmScheduler = object  # type: ignore[misc,assignment]
     _VLLM_AVAILABLE = False
 
 
@@ -43,7 +44,7 @@ def validate_scheduler_worker_contract(
     *,
     helper: DllmSchedulerHelper,
     expected_req_ids: tuple[str, ...],
-    model_runner_output: Any,
+    model_runner_output: ModelRunnerOutput,
 ) -> None:
     """Apply helper-level scheduler output validation to runtime outputs."""
 

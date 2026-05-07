@@ -17,29 +17,18 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
-
-try:
-    from vllm.model_executor.layers.attention import Attention
-except ImportError:  # pragma: no cover
-    try:
-        from vllm.model_executor.layers.attention.layer import Attention
-    except ImportError:
-        from vllm.attention.layer import Attention
-
-try:
-    from vllm.attention.backends.abstract import AttentionMetadata
-except ImportError:  # pragma: no cover
-    try:
-        from vllm.attention import AttentionMetadata
-    except ImportError:
-        # Fallback for type checking
-        AttentionMetadata = object
-
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.linear import (
     QKVParallelLinear,
     RowParallelLinear,
 )
+
+# vLLM imports (centralized in vllm_compat for version handling)
+from dllm_plugin.vllm_compat import Attention, CommonAttentionMetadata
+
+# Use CommonAttentionMetadata for both type checking and runtime
+# (vLLM 0.20+ uses v1.attention.backend.CommonAttentionMetadata)
+AttentionMetadata = CommonAttentionMetadata
 
 
 class LLaDA2BlockAttention(nn.Module):

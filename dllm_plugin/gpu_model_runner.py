@@ -34,14 +34,28 @@ from dllm_plugin.grammar_utils import (
     apply_packed_bitmask_inplace_logits_row,
     grammar_extra_transfer_slots,
 )
+from dllm_plugin.vllm_compat import VllmConfig
 from dllm_plugin.vllm_gpu_model_runner_fork import HookedGPUModelRunner
+from dllm_plugin.vllm_types import VllmConfigProtocol
 from dllm_plugin.worker import DllmWorker
 
 
-def dllm_architecture_match(vllm_config: Any) -> bool:
-    hf = getattr(getattr(vllm_config, "model_config", None), "hf_config", None)
-    if hf is None:
+def dllm_architecture_match(vllm_config: VllmConfig | VllmConfigProtocol) -> bool:
+    """Check if vLLM config architecture matches dLLM models.
+
+    Args:
+        vllm_config: vLLM configuration object.
+
+    Returns:
+        True if architecture is LLaDA2 or dLLM mock model.
+    """
+    # Safely extract hf_config with explicit error handling
+    try:
+        hf = vllm_config.model_config.hf_config
+    except AttributeError:
+        # model_config or hf_config missing
         return False
+
     archs = getattr(hf, "architectures", ()) or ()
     if isinstance(archs, str):
         archs = (archs,)

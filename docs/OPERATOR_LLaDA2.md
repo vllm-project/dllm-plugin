@@ -39,6 +39,34 @@ export VLLM_PLUGINS=dllm
 export VLLM_USE_V2_MODEL_RUNNER=1
 ```
 
+## vLLM Version Requirements
+
+**Minimum:** `vllm>=0.20.0,<0.21` (enforced by pyproject.toml)
+
+**Why this range:**
+- **0.20.0:** Introduced stable v2 model runner API required by dllm-plugin
+- **<0.21:** Upper bound for safety; test with 0.21 when released
+
+**Unsupported versions:**
+- vLLM <0.20.0: Missing v2 model runner, incompatible attention backends
+- Pre-0.20 fallback imports removed in Phase 7 typing improvements
+
+**Checking your vLLM version:**
+```bash
+python -c "import vllm; print(vllm.__version__)"
+```
+
+**Type safety notes:**
+- dllm-plugin uses typed protocols for vLLM integration
+- See `dllm_plugin/vllm_types.py` for protocol definitions
+- See `dllm_plugin/vllm_compat.py` for version-aware imports
+- Run `uv run pre-commit run ty-check` to validate types
+
+**Compatibility layer:**
+All vLLM imports are centralized in `dllm_plugin/vllm_compat.py` to avoid scattered
+version-dependent import chains. Plugin code should import from `vllm_compat` rather
+than directly from vLLM modules.
+
 ### v1 vs v2 model runner (mock-stack path)
 
 | Runner | Mock-stack support | Notes |

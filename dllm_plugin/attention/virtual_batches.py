@@ -8,18 +8,10 @@ Reference: vllm/model_executor/layers/attention/chunked_local_attention.py
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import torch
 
-if TYPE_CHECKING:
-    from vllm.v1.attention.backend import CommonAttentionMetadata
-else:
-    try:
-        from vllm.v1.attention.backend import CommonAttentionMetadata
-    except ImportError:
-        # Fallback for runtime on non-vLLM environments
-        CommonAttentionMetadata = object
+# vLLM imports (centralized in vllm_compat for version handling)
+from dllm_plugin.vllm_compat import CommonAttentionMetadata
 
 
 def make_block_attention_virtual_batches(
