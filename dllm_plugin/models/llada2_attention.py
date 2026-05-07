@@ -256,11 +256,14 @@ class LLaDA2BlockAttention(nn.Module):
 
         block_size = query.shape[1]
 
+        # TODO(Phase 7.1): Query kv_cache_block_size from cache_config
+        # instead of using default. For now, use 16 (standard vLLM block size)
         # Create virtual batches
         prefix_metadata, block_metadata = make_block_attention_virtual_batches(
             attn_metadata=attn_metadata,
             num_prefix_tokens=num_prefix_tokens,
             block_size=block_size,
+            kv_cache_block_size=16,  # Default; should query from cache_config
         )
 
         # Edge case: No prefix (first block)

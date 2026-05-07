@@ -121,10 +121,10 @@ def assert_compatible_stack(
             f"missing scheduler_config in vLLM config for dLLM runtime stack{_ctx()}",
         )
     try:
-        # vLLM 0.6.x: get_scheduler_cls() method
+        # vLLM 0.20+: get_scheduler_cls() method (preferred)
         if hasattr(scheduler_config, "get_scheduler_cls"):
             scheduler_cls = scheduler_config.get_scheduler_cls()
-        # vLLM 0.5.x/0.6.6: scheduler_cls attribute
+        # Fallback: scheduler_cls attribute (legacy API)
         elif hasattr(scheduler_config, "scheduler_cls"):
             scheduler_cls = scheduler_config.scheduler_cls
         else:

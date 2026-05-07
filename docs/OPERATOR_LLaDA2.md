@@ -394,13 +394,30 @@ pytest -v -m dllm_gpu_integration tests/test_llada2_gpu_integration.py
 ### Known Limitations (Phase 7 MVP)
 
 **Not implemented:**
-- Pipeline parallelism (PP > 1) - use TP instead
+- **Pipeline parallelism (PP > 1)** - use TP instead
+- **Multi-request batching** - Only `max_num_seqs=1` supported for virtual batch attention
+  - Heterogeneous prefix lengths across multiple requests not yet supported
+  - Server will raise `NotImplementedError` if `num_reqs > 1` is attempted
+  - Future work: Phase 7.1 will add multi-request support
 - Custom CUDA kernels for attention - using FlashAttention/FlashInfer
 - Prefix caching under block-style masks
 - Advanced grammar integrations beyond basic support
 
+**Configuration constraints:**
+- **KV cache block size:** Defaults to 16 tokens/block (standard vLLM)
+  - Currently not queried from `cache_config`, uses default value
+  - May break if vLLM changes default block size in future versions
+  - Future work: Query from vLLM's cache configuration
+
+**Testing limitations:**
+- **Structural validation only** - Integration tests verify API contracts, not output correctness
+- **Phase 9 required** - Numerical correctness validation (lm-eval, reference comparison) deferred
+- See [dllm-plugin issue #40](https://github.com/vllm-project/dllm-plugin/issues/40) for Phase 9 plan
+
 **Future enhancements** (post-MVP):
+- **Phase 7.1:** Multi-request batching with heterogeneous prefix lengths
 - Full PP support if use cases emerge
-- Optimized attention kernels (fused prefix + block)
+- Optimized attention kernels (fused prefix + block in single pass)
 - Sparse/windowed attention for very long contexts
+- **Phase 9:** Output correctness validation and reference comparisons
 

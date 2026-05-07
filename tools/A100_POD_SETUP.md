@@ -17,7 +17,7 @@ Run the automated setup script:
 
 This script will:
 1. Copy dllm-plugin code to the pod
-2. Install vLLM 0.6.6 and compatible dependencies
+2. Install vLLM 0.20+ and compatible dependencies
 3. Install the dllm-plugin package
 4. Start vLLM server with dLLM scheduler
 5. Verify server health
@@ -46,7 +46,7 @@ tar -czf - dllm_plugin pyproject.toml README.md | \
 
 ```bash
 kubectl exec llada2-debug -- bash -c "
-  pip install vllm==0.6.6 --no-cache-dir
+  pip install 'vllm>=0.20.0' --no-cache-dir
   pip install 'transformers<5.0' --no-cache-dir
   cd /workspace/dllm-plugin
   SETUPTOOLS_SCM_PRETEND_VERSION=0.1.0 pip install -e . --no-deps

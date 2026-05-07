@@ -12,7 +12,7 @@ Phase 8 implements official vLLM torch.compile integration via the `@support_tor
 
 - **Model:** inclusionAI/LLaDA2.0-mini
 - **Hardware:** NVIDIA A100-SXM4-40GB (compute capability 8.0)
-- **vLLM Version:** 0.20.1 (upgraded from 0.6.6)
+- **vLLM Version:** 0.20.1
 - **Environment:**
   - `VLLM_PLUGINS=dllm`
   - `VLLM_USE_V2_MODEL_RUNNER=1`
@@ -83,17 +83,14 @@ Phase 8 implements official vLLM torch.compile integration via the `@support_tor
 - [`dllm_plugin/validation.py`](../dllm_plugin/validation.py): vLLM 0.20+ API compatibility
 - [`.gitignore`](../.gitignore): Added benchmark results to ignore list
 
-## Comparison with Previous Results
+## Absolute Performance (vLLM 0.20.1)
 
-### Phase 7 Baseline (No Optimization)
-- **Throughput:** ~178 tokens/sec (from previous testing)
-- **Hardware:** Same A100-40GB
-
-### Phase 8 with torch.compile
+**Phase 8 with vLLM-native torch.compile:**
 - **Throughput:** ~346 tokens/sec (median output tokens/sec)
-- **Improvement:** **~94% increase** over Phase 7 baseline
+- **Hardware:** A100-SXM4-40GB
+- **vLLM Version:** 0.20.1
 
-**Note:** Direct comparison should be taken with caution as different vLLM versions (0.6.6 vs 0.20.1) and test conditions may affect results. A proper A/B test would require running both configurations on the same vLLM version.
+**Note:** This PR upgrades from vLLM 0.6.x to 0.20.1. Cross-version performance comparisons are not provided as vLLM 0.20.1 includes numerous optimizations unrelated to torch.compile. For proper performance comparison, future work should benchmark with and without torch.compile on the same vLLM version.
 
 ## Server Logs
 
