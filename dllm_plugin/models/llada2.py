@@ -95,6 +95,13 @@ class LLaDA2MoE(nn.Module):
                        Used for first_k_dense_replace layers.
     """
 
+    # Type annotations for optional attributes (set conditionally in __init__)
+    gate: ReplicatedLinear | None
+    experts: FusedMoE | None
+    shared_expert_gate: ColumnParallelLinear | None
+    shared_expert_up: ColumnParallelLinear | None
+    shared_expert_down: RowParallelLinear | None
+
     def __init__(
         self,
         config: PretrainedConfig,
@@ -157,6 +164,13 @@ class LLaDA2MoE(nn.Module):
         else:
             self.gate = None
             self.experts = None
+            # Dense-only mode requires shared experts to exist
+            if self.num_shared_experts <= 0:
+                raise ValueError(
+                    "Dense-only MoE layer (is_dense_only=True) requires "
+                    f"num_shared_experts > 0, got {self.num_shared_experts}. "
+                    "Dense layers must have a shared expert to forward through."
+                )
 
         # Shared expert (always active, not routed)
         if self.num_shared_experts > 0:
@@ -202,6 +216,10 @@ class LLaDA2MoE(nn.Module):
 
         # Dense-only mode: skip routing, only use shared expert
         if self.is_dense_only:
+            # Assertions for type checker (enforced by __init__ validation)
+            assert self.shared_expert_gate is not None
+            assert self.shared_expert_up is not None
+            assert self.shared_expert_down is not None
             # Shared expert: SwiGLU activation
             gate_out = self.shared_expert_gate(hidden_states)
             up_out = self.shared_expert_up(hidden_states)
@@ -210,6 +228,8 @@ class LLaDA2MoE(nn.Module):
             return output
 
         # Full MoE mode with routing
+        assert self.gate is not None, "gate should exist in non-dense-only mode"
+        assert self.experts is not None, "experts should exist in non-dense-only mode"
         # 1. Compute gate logits and apply sigmoid (LLaDA2.0 specific)
         gate_logits = self.gate(hidden_states)  # (batch, seq_len, num_experts)
         router_logits = torch.sigmoid(gate_logits)  # Sigmoid, not softmax!
@@ -231,6 +251,9 @@ class LLaDA2MoE(nn.Module):
 
         # 5. Add shared expert output (if present)
         if self.num_shared_experts > 0:
+            assert self.shared_expert_gate is not None
+            assert self.shared_expert_up is not None
+            assert self.shared_expert_down is not None
             # Shared expert: SwiGLU activation
             gate_out = self.shared_expert_gate(hidden_states)
             up_out = self.shared_expert_up(hidden_states)
@@ -818,6 +841,10 @@ class LLaDA2ForCausalLM(nn.Module):
             # FusedMoE's custom weight_loader expects expert_id/shard_id args
             # which don't apply to stacked weights, so use direct assignment
             layer = self.layers[layer_id]
+            # Type narrowing: layer.mlp is LLaDA2MoE
+            assert isinstance(layer.mlp, LLaDA2MoE)
+            # Ensure experts exist (dense-only layers are skipped above)
+            assert layer.mlp.experts is not None
 
             # Verify shapes match
             if stacked_w13.shape != layer.mlp.experts.w13_weight.shape:

@@ -75,15 +75,15 @@ def llada2_mini_model_dir(tmp_path: Path) -> Path:
     model_id = "inclusionAI/LLaDA2.0-mini"
 
     try:
-        from huggingface_hub import snapshot_download  # type: ignore[import-untyped]
+        from huggingface_hub import snapshot_download
 
         # Download to HuggingFace cache (persistent across test runs)
         # This avoids re-downloading on every test execution
         model_path = snapshot_download(
             repo_id=model_id,
             local_files_only=False,  # Allow network download
-            resume_download=True,  # Resume if interrupted
             # Note: No auth token needed for public models
+            # Note: Downloads are resumable by default in huggingface_hub
         )
         return Path(model_path)
     except Exception as e:
@@ -241,7 +241,7 @@ def test_llada2_http_server_integration(
     - Chat completions endpoint accepts requests
     - Response has expected structure (choices field)
     """
-    import requests  # type: ignore[import-untyped]
+    import requests
 
     port = 8766
     monkeypatch.setenv("VLLM_PLUGINS", "dllm")

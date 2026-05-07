@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 import pytest
-import requests  # type: ignore[import-untyped]
+import requests
 
 from tests.gpu_memory import gpu_memory_utilization, kv_cache_memory_bytes
 
@@ -29,7 +29,7 @@ def llada2_mini_model_dir():
     """HuggingFace model directory for LLaDA2.0-mini."""
     model_id = "inclusionAI/LLaDA2.0-mini"
     try:
-        from transformers import AutoConfig  # type: ignore[import-untyped]
+        from transformers import AutoConfig
 
         AutoConfig.from_pretrained(model_id, trust_remote_code=True)
         return model_id
