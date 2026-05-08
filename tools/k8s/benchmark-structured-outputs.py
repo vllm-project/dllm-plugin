@@ -26,7 +26,7 @@ class BenchmarkScenario(TypedDict):
     data: str
     profile: str
     rate: float | None
-    extras: dict[str, dict[str, str]] | None  # type: ignore[misc]
+    extras: dict[str, dict[str, str]] | None
     description: str
 
 
@@ -73,7 +73,7 @@ async def run_benchmark(
         backend_kwargs["extras"] = extras  # type: ignore[assignment]
 
     # Configure benchmark (don't pass rate for synchronous profile)
-    args_dict: dict = {  # type: ignore[type-arg]
+    args_dict: dict = {
         "backend": "openai_http",
         "backend_kwargs": backend_kwargs,
         "data": [data_path],

@@ -113,9 +113,11 @@ def make_block_attention_virtual_batches(
             req_blocks = torch.empty(0, dtype=torch.int32, device=device)
 
         # Pad to max_prefix_blocks for rectangular tensor
+        # Use -1 sentinel (vLLM convention) - 0 is a valid page ID
         if len(req_blocks) < max_prefix_blocks:
-            padding = torch.zeros(
-                max_prefix_blocks - len(req_blocks),
+            padding = torch.full(
+                (max_prefix_blocks - len(req_blocks),),
+                fill_value=-1,
                 dtype=torch.int32,
                 device=device,
             )
@@ -148,15 +150,35 @@ def make_block_attention_virtual_batches(
 
     # --- Virtual Batch 2: Block chunk (uniform block_size) ---
     # Query: current block (block_size tokens)
-    # KV: current block (block_size tokens)
+    # KV: current block (block_size tokens, from CURRENT forward pass, not cache)
+    #
+    # IMPORTANT: Block chunk uses current forward pass K/V tensors (passed explicitly
+    # to attn() via key=key, value=value), NOT cached KV. The block_table here is
+    # used by vLLM to WRITE the current block KV to cache (via slot_mapping),
+    # not to READ from cache. This is bidirectional attention within the current block.
+    #
+    # CRITICAL: Extract block pages per-request based on ACTUAL prefix length,
+    # not max_prefix_blocks. In heterogeneous batches, each request's current
+    # block starts at a different position in its block table.
+    # (vLLM paged cache: block_table maps logical block positions to physical pages)
 
-    # Calculate blocks needed for block chunk
-    block_start_idx = max_prefix_blocks
     num_block_blocks = (block_size + kv_cache_block_size - 1) // kv_cache_block_size
-    block_end_idx = block_start_idx + num_block_blocks
-    block_block_table = attn_metadata.block_table_tensor[
-        :, block_start_idx:block_end_idx
-    ]
+    block_block_table_list = []
+
+    for req_idx in range(num_reqs):
+        # Each request's block chunk pages start after ITS OWN prefix blocks
+        n_prefix_blocks = int(num_prefix_blocks_per_req[req_idx])
+        block_start_idx = n_prefix_blocks
+        block_end_idx = block_start_idx + num_block_blocks
+
+        # Extract physical page IDs for this request's current block
+        req_block_pages = attn_metadata.block_table_tensor[
+            req_idx, block_start_idx:block_end_idx
+        ]
+        block_block_table_list.append(req_block_pages)
+
+    # Stack into unified virtual batch [num_reqs, num_block_blocks]
+    block_block_table = torch.stack(block_block_table_list, dim=0)
 
     block_metadata = CommonAttentionMetadata(
         query_start_loc=attn_metadata.query_start_loc,

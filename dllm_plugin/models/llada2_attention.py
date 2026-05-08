@@ -308,12 +308,15 @@ class LLaDA2BlockAttention(nn.Module):
             kv_scale=kv_scale,
         )
 
-        # Chunk 2: Block self-attention
+        # Chunk 2: Block self-attention (bidirectional within current block)
+        # IMPORTANT: Uses current forward pass K/V (key=key, value=value),
+        # NOT cached KV. This is bidirectional attention within the generation block.
+        # vLLM writes these K/V to cache (via slot_mapping) for future prefixes.
         block_output = self.attn(
             positions=positions,
             query=query,
-            key=key,
-            value=value,
+            key=key,  # Current forward pass, not cache
+            value=value,  # Current forward pass, not cache
             kv_cache=kv_cache,
             attn_metadata=block_metadata,
             kv_scale=kv_scale,
