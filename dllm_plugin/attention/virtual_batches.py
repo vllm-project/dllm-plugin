@@ -64,6 +64,18 @@ def make_block_attention_virtual_batches(
             f"got {len(num_prefix_tokens_per_request)}"
         )
 
+    # P1-1: Multi-request batching limitation (Phase 7 MVP)
+    # Infrastructure is present and tests pass, but conservatively limit to
+    # single-request until Phase 7.1 production validation complete.
+    # TODO(Phase 7.1): Remove this check after multi-request validation (#41)
+    if num_reqs > 1:
+        raise NotImplementedError(
+            "Multi-request batching not yet enabled in Phase 7 MVP. "
+            "Virtual batch infrastructure supports heterogeneous prefix lengths, "
+            "but requires additional production validation (Phase 7.1, issue #41). "
+            "Current limitation: max_num_seqs=1"
+        )
+
     # Convert to numpy for indexing calculations (vLLM pattern)
     num_prefix_tokens_np = np.array(num_prefix_tokens_per_request, dtype=np.int32)
     max_prefix_tokens = int(num_prefix_tokens_np.max())
@@ -170,6 +182,17 @@ def make_block_attention_virtual_batches(
         n_prefix_blocks = int(num_prefix_blocks_per_req[req_idx])
         block_start_idx = n_prefix_blocks
         block_end_idx = block_start_idx + num_block_blocks
+
+        # P1-2: Validate block table bounds before slicing
+        block_table_cols = attn_metadata.block_table_tensor.shape[1]
+        if block_end_idx > block_table_cols:
+            raise ValueError(
+                f"Request {req_idx} block chunk requires pages "
+                f"[{block_start_idx}:{block_end_idx}] but block_table only has "
+                f"{block_table_cols} columns (prefix_blocks={n_prefix_blocks}, "
+                f"block_blocks={num_block_blocks}, block_size={block_size}, "
+                f"kv_cache_block_size={kv_cache_block_size})"
+            )
 
         # Extract physical page IDs for this request's current block
         req_block_pages = attn_metadata.block_table_tensor[

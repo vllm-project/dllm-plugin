@@ -20,6 +20,12 @@ from dllm_plugin.attention.virtual_batches import (  # noqa: E402
 from dllm_plugin.vllm_compat import CommonAttentionMetadata  # noqa: E402
 
 
+@pytest.mark.xfail(
+    reason="Phase 7.1: Multi-request batching conservatively disabled "
+    "pending production validation (issue #41)",
+    raises=NotImplementedError,
+    strict=True,
+)
 def test_virtual_batch_multi_request_succeeds():
     """Validate that num_reqs > 1 works with Phase 7.1 multi-request support.
 
@@ -143,6 +149,12 @@ def test_virtual_batch_zero_prefix_single_request():
     assert block_metadata.max_seq_len == 32
 
 
+@pytest.mark.xfail(
+    reason="Phase 7.1: Multi-request batching conservatively disabled "
+    "pending production validation (issue #41)",
+    raises=NotImplementedError,
+    strict=True,
+)
 def test_virtual_batch_heterogeneous_prefix():
     """Test 2 requests with different prefix lengths (heterogeneous).
 
