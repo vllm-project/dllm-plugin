@@ -58,6 +58,7 @@ vllm serve <model> \
 - [docs/CONTRACTS.md](docs/CONTRACTS.md) — copy-friendly field mapping / invariants for contributors (see DESIGN_MVP section 7).
 - [docs/ROADMAP.md](docs/ROADMAP.md) — phased future work.
 - [docs/OPERATOR_LLaDA2.md](docs/OPERATOR_LLaDA2.md) — Phase 6 operator runbook (`VLLM_PLUGINS`, CLI flags, v2 runner, integration test).
+- [docs/structured-outputs-benchmark-results.md](docs/structured-outputs-benchmark-results.md) — structured outputs performance benchmarks (guidellm, LLaDA2.0-mini, A100).
 - [docs/TOOLING.md](docs/TOOLING.md) — accurate tooling summary (pre-commit uses **`uv run`**, DCO/`sh`, run-from-root note, CI) for contributors and PR descriptions.
 - [docs/MILESTONE_PR_CHECKLIST.md](docs/MILESTONE_PR_CHECKLIST.md) — optional PR description checklist aligned with milestone issue [#19](https://github.com/vllm-project/dllm-plugin/issues/19).
 
