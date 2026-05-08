@@ -400,7 +400,7 @@ class LLaDA2DecoderLayer(nn.Module):
         positions: torch.Tensor,
         kv_cache: torch.Tensor,
         attn_metadata,
-        num_prefix_tokens: int | None = None,
+        num_prefix_tokens_list: list[int] | None = None,
     ) -> torch.Tensor:
         """Transformer layer forward pass.
 
@@ -409,8 +409,8 @@ class LLaDA2DecoderLayer(nn.Module):
             positions: Position indices, shape (batch, seq_len).
             kv_cache: KV cache tensor (PagedAttention format).
             attn_metadata: Attention metadata from vLLM model runner.
-            num_prefix_tokens: Number of committed tokens (prefix length)
-                for virtual batch attention.
+            num_prefix_tokens_list: Per-request prefix lengths for virtual batch
+                attention (Phase 7.1 multi-request support).
 
         Returns:
             Output tensor, shape (batch, seq_len, hidden_size).
@@ -425,7 +425,7 @@ class LLaDA2DecoderLayer(nn.Module):
             positions=positions,
             kv_cache=kv_cache,
             attn_metadata=attn_metadata,
-            num_prefix_tokens=num_prefix_tokens,
+            num_prefix_tokens_list=num_prefix_tokens_list,
         )
 
         hidden_states = residual + hidden_states
@@ -572,7 +572,7 @@ class LLaDA2ForCausalLM(nn.Module):
         attn_metadata=None,
         intermediate_tensors: IntermediateTensors | None = None,
         inputs_embeds: torch.Tensor | None = None,
-        num_prefix_tokens: int | None = None,
+        num_prefix_tokens_list: list[int] | None = None,
     ) -> torch.Tensor:
         """Model forward pass.
 
@@ -583,8 +583,8 @@ class LLaDA2ForCausalLM(nn.Module):
             attn_metadata: Attention metadata from vLLM.
             intermediate_tensors: Intermediate tensors for PP (not used in Phase 7).
             inputs_embeds: Optional pre-computed embeddings.
-            num_prefix_tokens: Number of committed tokens (prefix length)
-                for virtual batch attention.
+            num_prefix_tokens_list: Per-request prefix lengths for virtual batch
+                attention (Phase 7.1 multi-request support).
 
         Returns:
             Hidden states, shape (batch, seq_len, hidden_size).
@@ -626,7 +626,7 @@ class LLaDA2ForCausalLM(nn.Module):
                 positions=positions,
                 kv_cache=kv_caches[layer_idx],
                 attn_metadata=attn_metadata,
-                num_prefix_tokens=num_prefix_tokens,
+                num_prefix_tokens_list=num_prefix_tokens_list,
             )
 
         # Final norm

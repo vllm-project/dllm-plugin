@@ -9,7 +9,6 @@ class is usable as ``--scheduler-cls`` when ``vllm`` is installed.
 
 from __future__ import annotations
 
-import os
 from dataclasses import replace
 from typing import Any
 
@@ -87,8 +86,13 @@ class DllmRuntimeScheduler(VllmScheduler):
         self._dllm_helper = DllmSchedulerHelper()
 
     def schedule(self) -> Any:
-        """Attach precomputed grammar bitmask metadata for dLLM workers."""
+        """Attach grammar bitmask metadata for dLLM workers.
 
+        Following upstream vLLM pattern: scheduler is stateless, just reads
+        request.spec_token_ids if present (populated by prior iteration's
+        update_draft_token_ids call). First iteration has empty spec_token_ids,
+        handled gracefully in model runner.
+        """
         out = super().schedule()
 
         # BUGFIX: Filter out requests that have already completed their max_tokens.
@@ -127,6 +131,16 @@ class DllmRuntimeScheduler(VllmScheduler):
                     out.dllm_num_prefix_tokens[req_id] = (
                         request.dllm_state.num_computed_tokens
                     )
+
+        # FIX B: Workaround for vLLM 0.20.1 not reliably setting
+        # has_structured_output_requests under high concurrency.
+        # Explicitly check all requests for structured output usage.
+        if not out.has_structured_output_requests:
+            for req in self.requests.values():
+                if getattr(req, "use_structured_output", False):
+                    out.has_structured_output_requests = True
+                    break
+
         if out.has_structured_output_requests:
             patched = scheduled_spec_decode_tokens_for_grammar_bitmask(
                 scheduled_spec_decode_tokens=out.scheduled_spec_decode_tokens,
@@ -168,19 +182,13 @@ class DllmRuntimeScheduler(VllmScheduler):
         )
 
     def add_request(self, request: Any) -> None:
-        """Ensure first-step dLLM draft block is initialized for new requests."""
+        """Stateless add - forwards to parent scheduler.
 
+        Following upstream vLLM pattern (v1/core/sched/scheduler.py:1741):
+        Scheduler does NOT initialize spec_token_ids. Draft generation happens
+        in model runner (see gpu_model_runner.before_execute_model).
+        """
         super().add_request(request)
-        # Test-only: skip first-block seed for GPU grammar tests (see OPERATOR doc).
-        if os.environ.get("VLLM_DLLM_SKIP_FIRST_BLOCK_SEED") == "1":
-            return
-        live_req = self.requests.get(request.request_id)
-        if live_req is None or live_req.spec_token_ids:
-            return
-        prompt = live_req.prompt_token_ids or []
-        live_req.spec_token_ids = list(
-            self._dllm_helper.initialize_first_block(prompt_token_ids=prompt),
-        )
 
     def update_draft_token_ids(self, draft_token_ids: DraftTokenIds) -> None:
         """Keep fixed ``DRAFT_SIZE`` blocks; do not grammar-truncate drafts here."""

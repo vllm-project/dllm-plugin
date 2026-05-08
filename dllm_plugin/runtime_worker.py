@@ -219,13 +219,20 @@ def validate_runtime_input_draft(
     input_draft: list[int] | None,
     draft_size: int,
 ) -> list[int]:
-    """Fail-fast validation for scheduler-provided draft blocks."""
+    """Validate scheduler-provided draft blocks.
+
+    Following upstream vLLM pattern: first iteration has empty spec_token_ids
+    (vllm/v1/request.py:139). Allow empty drafts for first iteration.
+    """
 
     if input_draft is None:
-        raise ValueError(
-            "missing scheduled_spec_decode_tokens for request in runtime worker: "
-            f"request_id={request_id!r}",
-        )
+        # First iteration: no drafts yet - return empty list
+        return []
+
+    if len(input_draft) == 0:
+        # First iteration: empty draft is valid
+        return input_draft
+
     if len(input_draft) != draft_size:
         raise ValueError(
             "malformed scheduled_spec_decode_tokens length in runtime worker: "

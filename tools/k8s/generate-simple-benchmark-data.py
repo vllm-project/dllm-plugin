@@ -22,10 +22,11 @@ target_chars = TARGET_PROMPT_TOKENS * CHARS_PER_TOKEN
 base_prompt = "Count from 1 to 100: "
 # Fill the rest with numbers to reach target length
 filler = " ".join(str(i) for i in range(1, 10000))
-prompt_template = base_prompt + filler[:target_chars - len(base_prompt)]
+prompt_template = base_prompt + filler[: target_chars - len(base_prompt)]
 
 print(f"Generating {NUM_REQUESTS} requests...")
-print(f"Prompt length: {len(prompt_template)} characters (~{len(prompt_template)//CHARS_PER_TOKEN} tokens)")
+tokens = len(prompt_template) // CHARS_PER_TOKEN
+print(f"Prompt length: {len(prompt_template)} characters (~{tokens} tokens)")
 print(f"Output tokens: {OUTPUT_TOKENS}")
 
 # Create JSONL data
@@ -33,11 +34,13 @@ data = []
 for i in range(NUM_REQUESTS):
     # Vary the prompt slightly to avoid caching
     prompt = f"Request {i}: {prompt_template}"
-    
-    data.append({
-        "prompt": prompt,
-        "output_tokens_count": OUTPUT_TOKENS,
-    })
+
+    data.append(
+        {
+            "prompt": prompt,
+            "output_tokens_count": OUTPUT_TOKENS,
+        }
+    )
 
 # Write to file (same data used for both freeform and structured)
 output_path = Path("/tmp/structured-output-data.jsonl")

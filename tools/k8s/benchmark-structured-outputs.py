@@ -9,6 +9,7 @@ which contains structured output configuration (guided_regex).
 import asyncio
 import json
 from pathlib import Path
+from typing import TypedDict
 
 from guidellm.benchmark import (
     BenchmarkGenerativeTextArgs,
@@ -18,9 +19,21 @@ from guidellm.benchmark import (
 from guidellm.logger import logger
 
 
+class BenchmarkScenario(TypedDict):
+    """Type definition for benchmark scenario configuration."""
+
+    name: str
+    data: str
+    profile: str
+    rate: float | None
+    extras: dict[str, dict[str, str]] | None  # type: ignore[misc]
+    description: str
+
+
 class PathEncoder(json.JSONEncoder):
     """JSON encoder that handles Path objects."""
-    def default(self, obj):
+
+    def default(self, obj):  # type: ignore[override]
         if isinstance(obj, Path):
             return str(obj)
         return super().default(obj)
@@ -57,10 +70,10 @@ async def run_benchmark(
     }
 
     if extras:
-        backend_kwargs["extras"] = extras
+        backend_kwargs["extras"] = extras  # type: ignore[assignment]
 
     # Configure benchmark (don't pass rate for synchronous profile)
-    args_dict = {
+    args_dict: dict = {  # type: ignore[type-arg]
         "backend": "openai_http",
         "backend_kwargs": backend_kwargs,
         "data": [data_path],
@@ -94,13 +107,13 @@ async def run_benchmark(
         for r in results:
             if isinstance(r, dict):
                 results_data.append(r)
-            elif hasattr(r, 'model_dump'):
+            elif hasattr(r, "model_dump"):
                 results_data.append(r.model_dump())
             else:
                 results_data.append(str(r))
     elif isinstance(results, dict):
         results_data = results
-    elif hasattr(results, 'model_dump'):
+    elif hasattr(results, "model_dump"):
         results_data = results.model_dump()
     else:
         results_data = str(results)
@@ -120,7 +133,7 @@ async def main():
     MODEL = "inclusionAI/LLaDA2.0-mini"
     PATTERN = r"^([a-z]{6}[A-Z]{5}[0-9]{4}[a-z]{3}[A-Z]{2}[0-9]{1})+$"
 
-    scenarios = [
+    scenarios: list[BenchmarkScenario] = [
         {
             "name": "1_synchronous_freeform",
             "data": "/tmp/structured-output-data-freeform.jsonl",
@@ -158,10 +171,10 @@ async def main():
     results = {}
 
     for scenario in scenarios:
-        print(f"\n{'='*70}")
+        print(f"\n{'=' * 70}")
         print(f"SCENARIO: {scenario['name']}")
         print(f"Description: {scenario['description']}")
-        print(f"{'='*70}\n")
+        print(f"{'=' * 70}\n")
 
         try:
             result = await run_benchmark(
@@ -172,7 +185,7 @@ async def main():
                 rate=scenario["rate"],
                 output_path=f"/tmp/benchmark_{scenario['name']}.json",
                 extras=scenario["extras"],
-                max_tokens=500,  # Default if not in data (reduced to fit in 2048 context)
+                max_tokens=500,  # Reduced to fit in 2048 context
             )
 
             results[scenario["name"]] = {
@@ -188,9 +201,9 @@ async def main():
             }
 
     # Summary
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
     print("BENCHMARK SUMMARY")
-    print(f"{'='*70}\n")
+    print(f"{'=' * 70}\n")
 
     for name, result in results.items():
         status = "✓ SUCCESS" if result["success"] else "✗ FAILED"
@@ -200,7 +213,7 @@ async def main():
         else:
             print(f"  Results: {result['output_path']}")
 
-    print(f"\n{'='*70}\n")
+    print(f"\n{'=' * 70}\n")
 
 
 if __name__ == "__main__":

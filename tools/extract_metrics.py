@@ -67,13 +67,15 @@ def format_metrics(metrics: dict[str, float | int]) -> str:
     Returns:
         Formatted string with metrics
     """
-    return "\n".join([
-        f"TTFT (median): {metrics['ttft_ms_median']:.1f}ms",
-        f"ITL (median): {metrics['itl_ms_median']:.2f}ms",
-        f"TPS (generation): {metrics['output_tokens_per_sec']:.1f} tok/s",
-        f"TPS (total): {metrics['total_tokens_per_sec']:.1f} tok/s",
-        f"Requests completed: {metrics['completed_requests']}",
-    ])
+    return "\n".join(
+        [
+            f"TTFT (median): {metrics['ttft_ms_median']:.1f}ms",
+            f"ITL (median): {metrics['itl_ms_median']:.2f}ms",
+            f"TPS (generation): {metrics['output_tokens_per_sec']:.1f} tok/s",
+            f"TPS (total): {metrics['total_tokens_per_sec']:.1f} tok/s",
+            f"Requests completed: {metrics['completed_requests']}",
+        ]
+    )
 
 
 def compare_metrics(
@@ -130,8 +132,13 @@ def compare_metrics(
 def main() -> None:
     """Main CLI entry point."""
     if len(sys.argv) < 2:
-        print("Usage: python3 tools/extract_metrics.py <benchmark.json>", file=sys.stderr)
-        print("   or: python3 tools/extract_metrics.py <baseline.json> <optimized.json>", file=sys.stderr)
+        print(
+            "Usage: python3 tools/extract_metrics.py <benchmark.json>", file=sys.stderr
+        )
+        print(
+            "   or: python3 tools/extract_metrics.py <baseline.json> <optimized.json>",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     json_path = sys.argv[1]

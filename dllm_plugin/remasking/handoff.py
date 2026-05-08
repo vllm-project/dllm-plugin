@@ -112,12 +112,20 @@ def remask_after_block_forward(
         )
         raise ValueError(msg)
     assert_block_logits_shape(logits, draft_size=draft_size)
+
+    # Extract vocab_size for token ID validation
+    if hasattr(logits, "shape"):
+        vocab_size = int(logits.shape[1]) if len(logits.shape) >= 2 else None
+    else:
+        # Nested sequence - get vocab from first row length
+        vocab_size = len(logits[0]) if logits and len(logits) > 0 else None
+
     result = policy.apply(
         input_draft=input_draft,
         logits=logits,
         remasking_config=remasking_config,
     )
-    validate_remask_step_result(result, draft_size=draft_size)
+    validate_remask_step_result(result, draft_size=draft_size, vocab_size=vocab_size)
     return result
 
 

@@ -108,6 +108,16 @@ def _argmax_and_max_softmax_prob(logits_row: Sequence[float]) -> tuple[int, floa
     if not logits_row:
         raise ValueError("logits row must be non-empty")
     m = max(logits_row)
+
+    # Validate logits don't contain NaN/inf
+    if not math.isfinite(m):
+        # Find which positions have non-finite values for debugging
+        non_finite = [j for j, x in enumerate(logits_row) if not math.isfinite(x)]
+        raise ValueError(
+            f"Logits contain non-finite values: max={m}, "
+            f"non_finite_positions={non_finite[:10]}"
+        )
+
     best = min(j for j, x in enumerate(logits_row) if x == m)
     exps = [math.exp(x - m) for x in logits_row]
     total = sum(exps)
@@ -177,6 +187,7 @@ class Llada2DefaultRemaskingPolicy:
         denoise_step_index = int(cfg.get("denoise_step_index", 0))
 
         rows = _logits_to_rows(logits)
+        vocab_size = len(rows[0]) if rows else 0  # Extract vocab size for validation
         masked = [input_draft[i] == mask_token_id for i in range(DRAFT_SIZE)]
 
         if not any(masked):
@@ -185,7 +196,7 @@ class Llada2DefaultRemaskingPolicy:
                 committed_token_ids=tuple(next_tokens),
                 next_input_block=(mask_token_id,) * DRAFT_SIZE,
             )
-            validate_remask_step_result(result)
+            validate_remask_step_result(result, vocab_size=vocab_size)
             return result
 
         token_ids: list[int] = []
@@ -242,5 +253,5 @@ class Llada2DefaultRemaskingPolicy:
                 committed_token_ids=(),
                 next_input_block=tuple(next_tokens),
             )
-        validate_remask_step_result(result)
+        validate_remask_step_result(result, vocab_size=vocab_size)
         return result

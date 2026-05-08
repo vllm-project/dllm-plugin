@@ -171,7 +171,7 @@ class LLaDA2BlockAttention(nn.Module):
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
         kv_scale: float = 1.0,
-        num_prefix_tokens: int | None = None,
+        num_prefix_tokens_list: list[int] | None = None,
     ) -> torch.Tensor:
         """Apply block-style attention with QKV projection.
 
@@ -181,8 +181,8 @@ class LLaDA2BlockAttention(nn.Module):
             kv_cache: KV cache tensor (PagedAttention format).
             attn_metadata: Attention metadata from vLLM.
             kv_scale: Scaling factor for KV cache (default: 1.0).
-            num_prefix_tokens: Number of committed tokens (prefix length)
-                for virtual batch attention.
+            num_prefix_tokens_list: Per-request prefix lengths for virtual batch
+                attention (Phase 7.1 multi-request support).
 
         Returns:
             Attention output, shape (batch_size, seq_len, hidden_size).
@@ -215,7 +215,14 @@ class LLaDA2BlockAttention(nn.Module):
         # Apply attention
         if self._use_dual_chunk:
             attn_output = self._forward_dual_chunk(
-                q, k, v, positions, kv_cache, attn_metadata, kv_scale, num_prefix_tokens
+                q,
+                k,
+                v,
+                positions,
+                kv_cache,
+                attn_metadata,
+                kv_scale,
+                num_prefix_tokens_list,
             )
         else:
             attn_output = self._forward_metadata_modification(
@@ -235,22 +242,22 @@ class LLaDA2BlockAttention(nn.Module):
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
         kv_scale: float = 1.0,
-        num_prefix_tokens: int | None = None,
+        num_prefix_tokens_list: list[int] | None = None,
     ) -> torch.Tensor:
         """Strategy 2: Dual-chunk attention via virtual batch decomposition.
 
         **Design:** Transform AttentionMetadata to create two virtual batches:
-        1. Prefix chunk: Q=current_block, KV=committed_prefix (non-causal)
-        2. Block chunk: Q=current_block, KV=current_block (non-causal)
+        1. Prefix chunk: Q=current_block, KV=committed_prefix (heterogeneous lengths)
+        2. Block chunk: Q=current_block, KV=current_block (uniform lengths)
 
-        Follows vLLM's chunked_local_attention pattern:
-        https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/layers/attention/chunked_local_attention.py
+        Follows vLLM's chunked_local_attention pattern and supports multi-request
+        batching with heterogeneous prefix lengths (Phase 7.1).
 
         Returns:
             Combined output: prefix_output + block_output
         """
-        # Fall back to single-pass if num_prefix_tokens not provided
-        if num_prefix_tokens is None:
+        # Fall back to single-pass if num_prefix_tokens_list not provided
+        if num_prefix_tokens_list is None:
             return self.attn(
                 positions=positions,
                 query=query,
@@ -270,10 +277,10 @@ class LLaDA2BlockAttention(nn.Module):
         # Query KV cache block size from cache_config
         kv_cache_block_size = self._get_kv_cache_block_size()
 
-        # Create virtual batches
+        # Create unified virtual batches with heterogeneous support
         prefix_metadata, block_metadata = make_block_attention_virtual_batches(
             attn_metadata=attn_metadata,
-            num_prefix_tokens=num_prefix_tokens,
+            num_prefix_tokens_per_request=num_prefix_tokens_list,
             block_size=block_size,
             kv_cache_block_size=kv_cache_block_size,
         )

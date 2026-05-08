@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Simple throughput benchmark for vLLM server."""
+
 import time
+
 import requests
-import json
+
 
 def benchmark(
     url="http://localhost:8000/v1/completions",
@@ -49,10 +51,12 @@ def benchmark(
             successful_requests += 1
 
             tps = completion_tokens / elapsed if elapsed > 0 else 0
-            print(f"Request {i+1}/{num_requests}: {completion_tokens} tokens in {elapsed:.2f}s ({tps:.1f} tok/s)")
+            print(
+                f"Request {i + 1}/{num_requests}: {completion_tokens} tokens in {elapsed:.2f}s ({tps:.1f} tok/s)"
+            )
 
         except Exception as e:
-            print(f"Request {i+1}/{num_requests}: FAILED - {e}")
+            print(f"Request {i + 1}/{num_requests}: FAILED - {e}")
 
     print("-" * 60)
     if successful_requests > 0:
@@ -67,6 +71,8 @@ def benchmark(
 
     return 0
 
+
 if __name__ == "__main__":
     import sys
+
     sys.exit(benchmark())

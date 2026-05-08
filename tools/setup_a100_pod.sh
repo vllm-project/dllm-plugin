@@ -3,7 +3,7 @@
 #
 # This script:
 # 1. Copies dllm-plugin code to the pod
-# 2. Installs dependencies (vLLM 0.6.6, compatible transformers)
+# 2. Installs dependencies (vLLM 0.20.1, compatible transformers)
 # 3. Installs the dllm-plugin
 # 4. Starts vLLM server with dLLM scheduler
 #
@@ -31,9 +31,9 @@ tar -czf - dllm_plugin pyproject.toml README.md 2>/dev/null | \
   kubectl exec -i $POD_NAME -- tar -xzf - -C /workspace/dllm-plugin
 
 # Step 3: Install dependencies
-echo "[3/5] Installing dependencies (vLLM 0.6.6, transformers<5.0)..."
+echo "[3/5] Installing dependencies (vLLM 0.20.1, transformers<5.0)..."
 kubectl exec $POD_NAME -- bash -c "
-  pip install vllm==0.6.6 --no-cache-dir -q 2>&1 | tail -5 && \
+  pip install vllm==0.20.1 --no-cache-dir -q 2>&1 | tail -5 && \
   pip install 'transformers<5.0' --no-cache-dir -q 2>&1 | tail -5
 "
 
