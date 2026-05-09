@@ -9,24 +9,33 @@ This document tracks known limitations, unvalidated assumptions, and deferred wo
 
 ## P0 - Critical Limitations (User-Facing Impact)
 
-### 1. MoE Router Numerical Precision (Unvalidated)
+### 1. MoE Router Numerical Precision (FP32 Default, BF16 Opt-In)
 
-**Status:** Phase 7 MVP uses BF16 router computations without FP32 upcast.
+**Status:** Phase 7 defaults to FP32 router (safe) with BF16 experimental opt-in via `VLLM_LLADA2_BF16_ROUTER=1`.
 
-**Risk:** LLaDA2.0's group-limited sigmoid routing may degrade in BF16:
-- Expert selection bias if sigmoid saturates in low precision
-- Routing entropy loss if scores collapse or lose precision
-- Silent correctness degradation (no NaN/inf failure mode)
+**Default Behavior (FP32 Router):**
+- Router computation uses FP32 precision following DeepSeek V3 and Qwen2-MoE patterns
+- Sigmoid activation computed in FP32 then cast back to input dtype
+- Validated pattern from other vLLM MoE models
 
-**Why unvalidated:**
-- No comparison against FP32 router baseline
+**Experimental BF16 Mode:**
+Set `VLLM_LLADA2_BF16_ROUTER=1` to use BF16 router (faster but unvalidated):
+- Router computation uses same dtype as hidden_states (typically BF16)
+- Potential risks:
+  - Expert selection bias if sigmoid saturates in low precision
+  - Routing entropy loss if scores collapse or lose precision  
+  - Silent correctness degradation (no NaN/inf failure mode)
+- Logs warning at first use
+
+**Why BF16 is unvalidated:**
+- No comparison against FP32 router baseline in production workloads
 - No validation against HuggingFace reference implementation
-- Assumption that sigmoid (vs softmax) is stable in BF16 is untested
+- Sigmoid (vs softmax) stability in BF16 is untested for group-limited routing
 
 **Comparison to other models:**
-- DeepSeek V3 requires FP32 router (vllm PR #14027) due to softmax precision issues
-- Qwen2-MoE uses FP32 gating (vllm/models/qwen2_moe.py:167)
-- LLaDA2's sigmoid may behave differently, but **this is unproven**
+- DeepSeek V3: FP32 router required (vllm PR #14027) due to softmax precision issues
+- Qwen2-MoE: FP32 gating (vllm/models/qwen2_moe.py:167)
+- LLaDA2.0: FP32 default (this implementation), BF16 experimental
 
 **Validation Plan (Phase 9, issue #39):**
 1. Compare BF16 vs FP32 router expert selection distributions
@@ -34,15 +43,13 @@ This document tracks known limitations, unvalidated assumptions, and deferred wo
 3. Validate against SGlang or HuggingFace reference (if available)
 4. Run lm-eval benchmarks to detect quality degradation
 
-**Workaround (if Phase 9 reveals precision issues):**
-```python
-# Force FP32 router computation
-gate_logits = self.gate(hidden_states.float()).to(hidden_states.dtype)
-```
+**Impact:** 
+- FP32 default: Safe, validated pattern, slight compute overhead
+- BF16 experimental: Faster but may produce subtly incorrect outputs due to expert mis-routing
 
-**Impact:** Model may produce subtly incorrect outputs due to expert mis-routing. Severity unknown until Phase 9 validation.
+**Recommendation:** Use default FP32 for production. Only enable BF16 for experimentation with careful validation.
 
-**Tracking:** Issue #39 (Phase 9 numerical validation)
+**Tracking:** Issue #39 (Phase 9 numerical validation will determine if BF16 is safe)
 
 ---
 

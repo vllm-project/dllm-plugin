@@ -21,6 +21,7 @@ References:
 from __future__ import annotations
 
 import logging
+import os
 import re
 from collections import defaultdict
 from collections.abc import Iterable
@@ -244,15 +245,30 @@ class LLaDA2MoE(nn.Module):
         # Full MoE mode with routing
         assert self.gate is not None, "gate should exist in non-dense-only mode"
         assert self.experts is not None, "experts should exist in non-dense-only mode"
+
         # 1. Compute gate logits and apply sigmoid (LLaDA2.0 specific)
-        # ⚠️ KNOWN LIMITATION: Router precision unvalidated (see KNOWN_LIMITATIONS.md)
-        # This uses same dtype as hidden_states (typically BF16). Unlike DeepSeek V3
-        # which requires FP32 for softmax, LLaDA2's sigmoid *may* be numerically
-        # stable in BF16, but this is UNVALIDATED. Phase 9 (issue #39) will compare
-        # BF16 vs FP32 routing decisions and measure quality impact.
-        # If Phase 9 reveals precision issues, upcast to FP32:
-        #   gate_logits = self.gate(hidden_states.float()).to(hidden_states.dtype)
-        gate_logits = self.gate(hidden_states)  # (batch, seq_len, num_experts)
+        # Router precision: Default to FP32 (safe) with BF16 opt-in for experimentation
+        # Following DeepSeek V3 and Qwen2-MoE patterns which use FP32 router for
+        # numerical stability. Unlike softmax (proven to need FP32), sigmoid stability
+        # in BF16 is unvalidated for LLaDA2's group-limited routing.
+        # Set VLLM_LLADA2_BF16_ROUTER=1 to opt-in to BF16 (faster but unvalidated).
+        use_bf16_router = os.getenv("VLLM_LLADA2_BF16_ROUTER", "0") == "1"
+
+        if use_bf16_router:
+            # BF16 router (experimental, unvalidated - see KNOWN_LIMITATIONS.md #1)
+            gate_logits = self.gate(hidden_states)  # BF16
+            if not hasattr(self, "_bf16_router_warning_logged"):
+                logger.warning(
+                    "LLaDA2 router using BF16 precision (EXPERIMENTAL). "
+                    "Numerical correctness unvalidated - may cause expert mis-routing. "
+                    "Phase 9 validation (issue #39) will compare BF16 vs FP32 routing. "
+                    "Unset VLLM_LLADA2_BF16_ROUTER to use safe FP32 default."
+                )
+                self._bf16_router_warning_logged = True
+        else:
+            # FP32 router (safe default, validated pattern from DeepSeek V3 / Qwen2-MoE)
+            gate_logits = self.gate(hidden_states.float()).to(hidden_states.dtype)
+
         router_logits = torch.sigmoid(gate_logits)  # Sigmoid, not softmax!
 
         # 2. Apply group-limited top-k routing
@@ -861,9 +877,9 @@ class LLaDA2ForCausalLM(nn.Module):
             stacked_w13 = torch.stack(w13_list, dim=0)
             stacked_w2 = torch.stack(w2_list, dim=0)
 
-            # Load stacked weights directly into Parameter.data
-            # FusedMoE's custom weight_loader expects expert_id/shard_id args
-            # which don't apply to stacked weights, so use direct assignment
+            # Load stacked weights using vLLM's weight_loader pattern
+            # This delegates to the proper loader which will handle TP sharding
+            # when TP > 1 support is added in Phase 8.2
             layer = self.layers[layer_id]
             # Type narrowing: layer.mlp is LLaDA2MoE
             assert isinstance(layer.mlp, LLaDA2MoE)
@@ -884,8 +900,16 @@ class LLaDA2ForCausalLM(nn.Module):
                     f"model={layer.mlp.experts.w2_weight.shape}"
                 )
 
-            layer.mlp.experts.w13_weight.data.copy_(stacked_w13)
-            layer.mlp.experts.w2_weight.data.copy_(stacked_w2)
+            # Use weight_loader pattern (supports future TP sharding)
+            param_w13 = layer.mlp.experts.w13_weight
+            weight_loader_w13 = getattr(
+                param_w13, "weight_loader", default_weight_loader
+            )
+            weight_loader_w13(param_w13, stacked_w13)
+
+            param_w2 = layer.mlp.experts.w2_weight
+            weight_loader_w2 = getattr(param_w2, "weight_loader", default_weight_loader)
+            weight_loader_w2(param_w2, stacked_w2)
 
             # Track stacked weights as loaded
             loaded_params.add(f"layers.{layer_id}.mlp.experts.w13_weight")

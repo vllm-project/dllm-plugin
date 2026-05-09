@@ -138,7 +138,7 @@ Our implementation works transparently with both backends.
 
 ## 5. Implementation Approach
 
-### 5.1 Strategy 1: Attention Metadata Modification (Preferred)
+### 5.1 Strategy 1: Attention Metadata Modification (Deferred to Post-MVP)
 
 **Concept:** Modify `AttentionMetadata` to represent block-style mask visibility using vLLM's existing slot mapping mechanism.
 
@@ -214,7 +214,14 @@ class LLaDA2BlockAttention(nn.Module):
 - Two attention calls per forward (2x overhead)
 - Need to carefully manage KV cache slicing
 
-**Decision:** Start with Strategy 1 (metadata modification). If vLLM's metadata system doesn't support our use case cleanly, fall back to Strategy 2.
+**Phase 7 Decision:** Use Strategy 2 (dual-chunk) for MVP. Strategy 1 was deferred because:
+
+1. **vLLM v1 CommonAttentionMetadata is read-only** - No clean APIs to modify slot_mapping or attention masks dynamically
+2. **Dual-chunk approach proved simpler to validate** - Two separate attention calls with clear semantics
+3. **Performance overhead is acceptable** - 2x attention calls, but each call is smaller (prefix vs block)
+4. **Heterogeneous prefix support** - Dual-chunk naturally handles per-request prefix lengths
+
+Strategy 1 may be revisited in Phase 8.4+ if profiling shows dual-chunk overhead is significant (e.g., >10% of forward pass time). For now, correctness and validation speed take priority over micro-optimization.
 
 ---
 
