@@ -29,6 +29,7 @@ def test_scheduler_stateless_add_request():
 
     # Mock required scheduler parameters
     mock_kv_cache_config = Mock()
+    mock_kv_cache_config.sample_rate = 1.0  # For KVCacheMetrics initialization
     mock_structured_output_manager = Mock()
 
     scheduler = DllmRuntimeScheduler(
@@ -72,6 +73,7 @@ def test_scheduler_stateless_schedule_first_iteration():
 
     # Mock required scheduler parameters
     mock_kv_cache_config = Mock()
+    mock_kv_cache_config.sample_rate = 1.0  # For KVCacheMetrics initialization
     mock_structured_output_manager = Mock()
 
     scheduler = DllmRuntimeScheduler(
@@ -118,6 +120,7 @@ def test_scheduler_stateless_no_cache_infrastructure():
 
     # Mock required scheduler parameters
     mock_kv_cache_config = Mock()
+    mock_kv_cache_config.sample_rate = 1.0  # For KVCacheMetrics initialization
     mock_structured_output_manager = Mock()
 
     scheduler = DllmRuntimeScheduler(
