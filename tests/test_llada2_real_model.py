@@ -33,6 +33,7 @@ def mock_tp_group():
     mock_group = MagicMock()
     mock_group.world_size = 1
     mock_group.rank = 0
+    mock_group.rank_in_group = 0  # Used by VocabParallelEmbedding
 
     with (
         patch(
