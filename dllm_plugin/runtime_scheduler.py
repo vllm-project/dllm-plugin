@@ -9,7 +9,6 @@ class is usable as ``--scheduler-cls`` when ``vllm`` is installed.
 
 from __future__ import annotations
 
-import os
 from dataclasses import replace
 from typing import Any
 
@@ -27,15 +26,16 @@ from dllm_plugin.scheduler import (
 )
 from dllm_plugin.validation import assert_compatible_stack
 
+# vLLM imports (centralized in vllm_compat for version handling)
+from dllm_plugin.vllm_compat import DraftTokenIds, ModelRunnerOutput
+
 try:
     from vllm.v1.core.sched.scheduler import Scheduler as VllmScheduler
-    from vllm.v1.outputs import DraftTokenIds, ModelRunnerOutput
 
     _VLLM_AVAILABLE = True
 except ImportError:  # pragma: no cover - exercised only in no-vLLM envs.
+    # VllmScheduler is the only import that may fail in test environments
     VllmScheduler = object
-    DraftTokenIds = Any
-    ModelRunnerOutput = Any
     _VLLM_AVAILABLE = False
 
 
@@ -43,7 +43,7 @@ def validate_scheduler_worker_contract(
     *,
     helper: DllmSchedulerHelper,
     expected_req_ids: tuple[str, ...],
-    model_runner_output: Any,
+    model_runner_output: ModelRunnerOutput,
 ) -> None:
     """Apply helper-level scheduler output validation to runtime outputs."""
 
@@ -86,9 +86,32 @@ class DllmRuntimeScheduler(VllmScheduler):
         self._dllm_helper = DllmSchedulerHelper()
 
     def schedule(self) -> Any:
-        """Attach precomputed grammar bitmask metadata for dLLM workers."""
+        """Attach grammar bitmask metadata for dLLM workers.
 
+        Following upstream vLLM pattern: scheduler is stateless, just reads
+        request.spec_token_ids if present (populated by prior iteration's
+        update_draft_token_ids call). First iteration has empty spec_token_ids,
+        handled gracefully in model runner.
+        """
         out = super().schedule()
+
+        # BUGFIX: Filter out requests that have already completed their max_tokens.
+        # This happens when max_tokens < DRAFT_SIZE (32) and a draft block has already
+        # satisfied the output requirement. The parent scheduler computes negative
+        # remaining tokens, which we must filter before they reach the model runner.
+        if out.num_scheduled_tokens:
+            req_ids_to_remove = []
+            for req_id, num_tokens in out.num_scheduled_tokens.items():
+                if num_tokens <= 0:
+                    req_ids_to_remove.append(req_id)
+
+            for req_id in req_ids_to_remove:
+                del out.num_scheduled_tokens[req_id]
+                if hasattr(out, "total_num_scheduled_tokens"):
+                    out.total_num_scheduled_tokens = sum(
+                        out.num_scheduled_tokens.values()
+                    )
+
         # Frontier repair metadata for dLLM structured outputs. Consumed in phase two
         # by :class:`~dllm_plugin.gpu_model_runner.DllmGPUModelRunner` (stashed from
         # ``SchedulerOutput`` in ``execute_model``). ``GrammarOutput`` still arrives via
@@ -97,6 +120,27 @@ class DllmRuntimeScheduler(VllmScheduler):
         out.dllm_so_frontier_flat_indices = None
         out.dllm_so_frontier_block_rows = None
         out.dllm_so_valid_prefix_lens = None
+
+        # Extract num_prefix_tokens for virtual batch attention (Phase 7)
+        # Maps request_id -> num_computed_tokens for all scheduled requests
+        out.dllm_num_prefix_tokens = {}
+        if out.num_scheduled_tokens:
+            for req_id in out.num_scheduled_tokens:
+                request = self.requests.get(req_id)
+                if request and hasattr(request, "dllm_state"):
+                    out.dllm_num_prefix_tokens[req_id] = (
+                        request.dllm_state.num_computed_tokens
+                    )
+
+        # FIX B: Workaround for vLLM 0.20.1 not reliably setting
+        # has_structured_output_requests under high concurrency.
+        # Explicitly check all requests for structured output usage.
+        if not out.has_structured_output_requests:
+            for req in self.requests.values():
+                if getattr(req, "use_structured_output", False):
+                    out.has_structured_output_requests = True
+                    break
+
         if out.has_structured_output_requests:
             patched = scheduled_spec_decode_tokens_for_grammar_bitmask(
                 scheduled_spec_decode_tokens=out.scheduled_spec_decode_tokens,
@@ -138,19 +182,13 @@ class DllmRuntimeScheduler(VllmScheduler):
         )
 
     def add_request(self, request: Any) -> None:
-        """Ensure first-step dLLM draft block is initialized for new requests."""
+        """Stateless add - forwards to parent scheduler.
 
+        Following upstream vLLM pattern (v1/core/sched/scheduler.py:1741):
+        Scheduler does NOT initialize spec_token_ids. Draft generation happens
+        in model runner (see gpu_model_runner.before_execute_model).
+        """
         super().add_request(request)
-        # Test-only: skip first-block seed for GPU grammar tests (see OPERATOR doc).
-        if os.environ.get("VLLM_DLLM_SKIP_FIRST_BLOCK_SEED") == "1":
-            return
-        live_req = self.requests.get(request.request_id)
-        if live_req is None or live_req.spec_token_ids:
-            return
-        prompt = live_req.prompt_token_ids or []
-        live_req.spec_token_ids = list(
-            self._dllm_helper.initialize_first_block(prompt_token_ids=prompt),
-        )
 
     def update_draft_token_ids(self, draft_token_ids: DraftTokenIds) -> None:
         """Keep fixed ``DRAFT_SIZE`` blocks; do not grammar-truncate drafts here."""
@@ -206,6 +244,17 @@ class DllmRuntimeScheduler(VllmScheduler):
             sched_spec_tokens[req_id] = row
 
         scheduler_output.num_invalid_spec_tokens = num_invalid_spec_tokens
+
+    def make_spec_decoding_stats(self, *args, **kwargs) -> Any:
+        """Skip spec decode metrics for dLLM to avoid assertion failures.
+
+        The parent vLLM spec decode metrics assume traditional spec decode
+        where drafted tokens <= accepted tokens per step. dLLM uses fixed
+        32-token draft blocks that may exceed max_tokens, which violates
+        the parent metrics' assertions. We skip metrics collection for now.
+        """
+        # Return None to skip metrics (metrics are optional)
+        return None
 
     def update_from_output(
         self,

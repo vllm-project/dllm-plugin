@@ -8,11 +8,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from dllm_plugin.config import (
+pytest.importorskip("vllm")  # Skip if vLLM not available (standard CI)
+
+from dllm_plugin.config import (  # noqa: E402
     DLLM_STRICT_STACK_VALIDATION_ENV_VAR,
     LLADA2_ARCHITECTURE_NAME,
 )
-from dllm_plugin.validation import (
+from dllm_plugin.validation import (  # noqa: E402
     assert_compatible_stack,
     assert_runtime_worker_v2_model_runner,
 )

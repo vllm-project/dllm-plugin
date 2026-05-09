@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: Apache-2.0
+# Phase 7 GPU integration test configuration for A100-40GB deployment
+# Tests real LLaDA2.0-mini model weight loading and generation
+#
+# Usage:
+#   helm install phase7-gpu-test tools/helm/dllm-plugin-gpu-test \
+#     -f tools/helm/dllm-plugin-gpu-test/values-phase7-a100.yaml
+
+job:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 0
+
+image:
+  repository: pytorch/pytorch
+  tag: 2.6.0-cuda12.4-cudnn9-devel
+  pullPolicy: IfNotPresent
+
+git:
+  repoUrl: https://github.com/vllm-project/dllm-plugin.git
+  branch: feat/phase7-llada2-real-model  # Use feature branch
+
+gpu:
+  count: 1
+
+# Phase 7 GPU integration tests
+tests:
+  # Skip HTTP smoke for now (focus on model loading)
+  runServeHttpSmoke: false
+  pytestPaths:
+    # Phase 7 primary test: real weight loading and generation
+    - tests/test_llada2_gpu_integration.py::test_llada2_real_weights_llm_generate
+
+# A100-40GB node pool configuration
+# Note: Adjust nodeSelector and tolerations based on your cluster's A100 pool labels
+scheduling:
+  nodeSelector:
+    cloud.google.com/gke-accelerator: nvidia-tesla-a100
+  extraTolerations:
+    - key: jounce.io/nodetype
+      operator: Equal
+      value: A100-40
+      effect: NoSchedule
+
+resources:
+  cpu: "8"
+  memory: 64Gi  # A100 nodes typically have more memory
+  ephemeralStorage: 80Gi  # Extra space for HuggingFace model download
+
+# A100-40GB has more memory than L4, use higher utilization
+testEnv:
+  DLLM_TEST_GPU_MEMORY_UTILIZATION: "0.9"
+  DLLM_TEST_KV_CACHE_MEMORY_BYTES: "268435456"  # 256MB
+  CUDA_LAUNCH_BLOCKING: "1"  # Synchronous CUDA for accurate error location

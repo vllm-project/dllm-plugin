@@ -4,14 +4,18 @@
 
 from __future__ import annotations
 
-import importlib
-from types import SimpleNamespace
-
 import pytest
 
-from dllm_plugin.config import DRAFT_SIZE
-from dllm_plugin.scheduler import DllmScheduler
-from dllm_plugin.worker import DllmWorker
+# Skip entire module if vLLM not available (standard CI)
+# Runtime adapters require vLLM to be importable
+pytest.importorskip("vllm")
+
+import importlib  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+from dllm_plugin.config import DRAFT_SIZE  # noqa: E402
+from dllm_plugin.scheduler import DllmScheduler  # noqa: E402
+from dllm_plugin.worker import DllmWorker  # noqa: E402
 
 
 def test_runtime_adapter_fqcn_targets_resolve() -> None:
@@ -104,12 +108,13 @@ def test_runtime_scheduler_contract_rejects_missing_output_coverage() -> None:
 def test_runtime_worker_contract_rejects_missing_input_draft() -> None:
     from dllm_plugin.runtime_worker import validate_runtime_input_draft
 
-    with pytest.raises(ValueError, match="missing scheduled_spec_decode_tokens"):
-        validate_runtime_input_draft(
-            request_id="r1",
-            input_draft=None,
-            draft_size=DRAFT_SIZE,
-        )
+    # First iteration: None input_draft is valid (returns empty list)
+    result = validate_runtime_input_draft(
+        request_id="r1",
+        input_draft=None,
+        draft_size=DRAFT_SIZE,
+    )
+    assert result == [], "First iteration with None input should return empty list"
 
 
 def test_runtime_worker_contract_rejects_malformed_input_draft_length() -> None:

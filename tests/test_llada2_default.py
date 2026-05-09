@@ -113,7 +113,8 @@ def test_terminal_input_already_unmasked() -> None:
     policy = Llada2DefaultRemaskingPolicy()
     # Avoid token id ``LLADA2_DEFAULT_MASK_TOKEN_ID`` in the draft (e.g. ``1``).
     draft = tuple(i * 2 for i in range(DRAFT_SIZE))
-    logits = _mock_logits(vocab_size=16)
+    # vocab_size must be > max(draft) = 2 * (DRAFT_SIZE - 1) = 62
+    logits = _mock_logits(vocab_size=64)
     out = policy.apply(input_draft=draft, logits=logits)
     validate_remask_step_result(out)
     assert out.committed_token_ids == draft
@@ -204,7 +205,8 @@ def test_threshold_above_mock_softmax_no_terminal() -> None:
 
 def test_custom_mask_token_id() -> None:
     policy = Llada2DefaultRemaskingPolicy()
-    row = [0.0] * 8
+    # vocab_size must be > 99 since we use token 99 as custom mask
+    row = [0.0] * 100
     logits = [list(row) for _ in range(DRAFT_SIZE)]
     out = policy.apply(
         input_draft=(99,) * DRAFT_SIZE,

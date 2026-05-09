@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: llada2-debug
+  labels:
+    app: llada2-debug
+spec:
+  activeDeadlineSeconds: 7200  # 2 hour TTL
+  restartPolicy: Never
+  nodeSelector:
+    cloud.google.com/gke-accelerator: nvidia-tesla-a100
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+    - key: jounce.io/nodetype
+      operator: Equal
+      value: A100-40
+      effect: NoSchedule
+  containers:
+    - name: debug
+      image: pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel
+      command: ["/bin/bash", "-c", "sleep 7200"]
+      resources:
+        limits:
+          nvidia.com/gpu: 1
+        requests:
+          cpu: "8"
+          memory: 64Gi
+          ephemeral-storage: 80Gi
+          nvidia.com/gpu: 1
+      env:
+        - name: VLLM_PLUGINS
+          value: dllm
+        - name: VLLM_USE_V2_MODEL_RUNNER
+          value: "1"
+        - name: VLLM_ENABLE_V1_MULTIPROCESSING
+          value: "0"
+        - name: VLLM_DLLM_USE_MOCK_MODEL
+          value: "0"
+        - name: DLLM_TEST_GPU_MEMORY_UTILIZATION
+          value: "0.9"
+        - name: DLLM_TEST_KV_CACHE_MEMORY_BYTES
+          value: "268435456"

@@ -13,6 +13,8 @@ from dllm_plugin.validation import (
     assert_compatible_stack,
     assert_runtime_worker_v2_model_runner,
 )
+from dllm_plugin.vllm_compat import VllmConfig
+from dllm_plugin.vllm_types import VllmConfigProtocol
 from dllm_plugin.worker import DllmWorker, DllmWorkerStep, is_v2_model_runner_enabled
 
 _MISSING = object()
@@ -128,10 +130,22 @@ def _resolve_output_logits_by_req_id(
         ) from exc
 
 
-def _is_mock_stack_architecture(vllm_config: Any) -> bool:
-    hf_config = getattr(getattr(vllm_config, "model_config", None), "hf_config", None)
-    if hf_config is None:
+def _is_mock_stack_architecture(vllm_config: VllmConfig | VllmConfigProtocol) -> bool:
+    """Check if vLLM config uses mock stack architecture.
+
+    Args:
+        vllm_config: vLLM configuration object.
+
+    Returns:
+        True if architecture is the dLLM mock model.
+    """
+    # Safely extract hf_config with explicit error handling
+    try:
+        hf_config = vllm_config.model_config.hf_config
+    except AttributeError:
+        # model_config or hf_config missing
         return False
+
     archs = getattr(hf_config, "architectures", ()) or ()
     if isinstance(archs, str):
         archs = (archs,)
@@ -145,7 +159,7 @@ def resolve_runtime_block_logits(
     request_id: str,
     request_index: int,
     draft_size: int = DRAFT_SIZE,
-    vllm_config: Any,
+    vllm_config: VllmConfig | VllmConfigProtocol,
 ) -> list[list[float]]:
     """Resolve block logits/scores for runtime remask handoff."""
 
@@ -205,13 +219,20 @@ def validate_runtime_input_draft(
     input_draft: list[int] | None,
     draft_size: int,
 ) -> list[int]:
-    """Fail-fast validation for scheduler-provided draft blocks."""
+    """Validate scheduler-provided draft blocks.
+
+    Following upstream vLLM pattern: first iteration has empty spec_token_ids
+    (vllm/v1/request.py:139). Allow empty drafts for first iteration.
+    """
 
     if input_draft is None:
-        raise ValueError(
-            "missing scheduled_spec_decode_tokens for request in runtime worker: "
-            f"request_id={request_id!r}",
-        )
+        # First iteration: no drafts yet - return empty list
+        return []
+
+    if len(input_draft) == 0:
+        # First iteration: empty draft is valid
+        return input_draft
+
     if len(input_draft) != draft_size:
         raise ValueError(
             "malformed scheduled_spec_decode_tokens length in runtime worker: "

@@ -116,9 +116,10 @@ def test_mock_shaped_logits_terminal_matches_direct_policy_apply(
 
 def test_stub_policy_passed_through() -> None:
     stub = _StubRemaskingPolicy()
+    # vocab_size must be > 456 since stub returns committed_token_ids=(123, 456)
     out = remask_after_block_forward(
         input_draft=_draft_all_mask(),
-        logits=_mock_logits(),
+        logits=_mock_logits(vocab_size=512),
         policy=stub,
     )
     assert out.committed_token_ids == (123, 456)

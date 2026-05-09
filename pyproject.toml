@@ -66,6 +66,8 @@ addopts = "-q"
 markers = [
     "dllm_engine_patch: CPU tests for EngineCore PR #36391 shim (requires vLLM extra).",
     "dllm_gpu_integration: GPU behavioral tests for dLLM stack (issue #35).",
+    "dllm_gpu_benchmark: GPU benchmark tests for LLaDA2.0 performance (requires --run-benchmarks).",
+    "real_model_required: Tests requiring real HuggingFace model download (Phase 7 evidence).",
 ]
 
 [tool.ruff]
@@ -96,5 +98,6 @@ docstring-code-format = true
 # ``dllm_plugin/models/mock_llada2.py`` is checked with allowed-unresolved-imports below.
 
 [tool.ty.analysis]
-# Dev/CI default sync omits ``torch``/``vllm``; imports are runtime-gated or skipped in tests.
-allowed-unresolved-imports = ["numpy.**", "torch.**", "vllm.**"]
+# Dev/CI default sync omits ``torch``/``vllm``/``transformers``; imports are runtime-gated or skipped in tests.
+# ``guidellm`` is optional for benchmarking (tools/k8s/).
+allowed-unresolved-imports = ["numpy.**", "torch.**", "vllm.**", "huggingface_hub.**", "transformers.**", "requests.**", "guidellm.**"]

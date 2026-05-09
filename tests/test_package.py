@@ -48,10 +48,21 @@ def test_register_dllm_does_not_raise() -> None:
     ),
 )
 def test_public_api(attr: str) -> None:
+    # Runtime classes and assert_compatible_stack require vLLM
+    if attr in {
+        "DllmRuntimeScheduler",
+        "DllmRuntimeWorker",
+        "Scheduler",
+        "Worker",
+        "assert_compatible_stack",
+    }:
+        pytest.importorskip("vllm")
+
     assert hasattr(dllm_plugin, attr)
 
 
 def test_scheduler_worker_aliases_are_runtime_classes() -> None:
+    pytest.importorskip("vllm")  # Runtime classes require vLLM
     assert dllm_plugin.Scheduler is dllm_plugin.DllmRuntimeScheduler
     assert dllm_plugin.Worker is dllm_plugin.DllmRuntimeWorker
 

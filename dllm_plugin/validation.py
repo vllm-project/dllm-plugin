@@ -12,8 +12,11 @@ from typing import Any
 from dllm_plugin.config import (
     DLLM_MOCK_STACK_MODEL_ID,
     LLADA2_ARCHITECTURE_NAME,
+    LLADA2_HF_ARCHITECTURE_NAME,
     resolve_strict_stack_validation,
 )
+from dllm_plugin.vllm_compat import VllmConfig
+from dllm_plugin.vllm_types import VllmConfigProtocol
 
 _SCHEDULER_FQCN_DOT = "dllm_plugin.runtime_scheduler.DllmRuntimeScheduler"
 _SCHEDULER_FQCN_COLON = "dllm_plugin.runtime_scheduler:DllmRuntimeScheduler"
@@ -47,10 +50,25 @@ def _resolve_class_from_qualname(qualname: str, *, role: str) -> type[Any]:
     return obj
 
 
-def _get_model_architectures(vllm_config: Any) -> tuple[str, ...]:
-    hf_config = getattr(getattr(vllm_config, "model_config", None), "hf_config", None)
-    if hf_config is None:
+def _get_model_architectures(
+    vllm_config: VllmConfig | VllmConfigProtocol,
+) -> tuple[str, ...]:
+    """Extract model architectures from vLLM config.
+
+    Args:
+        vllm_config: vLLM configuration object.
+
+    Returns:
+        Tuple of architecture strings (e.g., ('LLaDA2ForCausalLM',)).
+        Returns empty tuple if architectures not found.
+    """
+    # Safely extract hf_config with explicit error handling
+    try:
+        hf_config = vllm_config.model_config.hf_config
+    except AttributeError:
+        # model_config or hf_config missing
         return ()
+
     archs = getattr(hf_config, "architectures", None)
     if archs is None:
         return ()
@@ -61,15 +79,29 @@ def _get_model_architectures(vllm_config: Any) -> tuple[str, ...]:
     return ()
 
 
-def _is_dllm_model_architecture(vllm_config: Any) -> bool:
+def _is_dllm_model_architecture(vllm_config: VllmConfig | VllmConfigProtocol) -> bool:
+    """Check if vLLM config uses a dLLM-compatible architecture.
+
+    Args:
+        vllm_config: vLLM configuration object.
+
+    Returns:
+        True if architecture is LLaDA2 or dLLM mock model.
+    """
     archs = set(_get_model_architectures(vllm_config))
     return bool(
-        archs.intersection({LLADA2_ARCHITECTURE_NAME, DLLM_MOCK_STACK_MODEL_ID}),
+        archs.intersection(
+            {
+                LLADA2_ARCHITECTURE_NAME,
+                LLADA2_HF_ARCHITECTURE_NAME,
+                DLLM_MOCK_STACK_MODEL_ID,
+            }
+        ),
     )
 
 
 def assert_compatible_stack(
-    vllm_config: Any,
+    vllm_config: VllmConfig | VllmConfigProtocol,
     *,
     caller: str,
     strict: bool | None = None,
@@ -87,6 +119,14 @@ def assert_compatible_stack(
     Scheduler and worker must resolve to the concrete adapter classes
     (``DllmRuntimeScheduler``, ``DllmRuntimeWorker``); subclasses are not
     accepted unless this check is extended.
+
+    Args:
+        vllm_config: vLLM configuration (VllmConfig or compatible protocol).
+        caller: Context string for error messages.
+        strict: Override strict validation setting (None=use environment).
+
+    Raises:
+        ValueError: If stack configuration is incompatible with dLLM.
     """
 
     def _ctx() -> str:
@@ -97,10 +137,14 @@ def assert_compatible_stack(
 
     archs = _get_model_architectures(vllm_config)
     if not _is_dllm_model_architecture(vllm_config):
+        expected = (
+            LLADA2_ARCHITECTURE_NAME,
+            LLADA2_HF_ARCHITECTURE_NAME,
+            DLLM_MOCK_STACK_MODEL_ID,
+        )
         raise ValueError(
             "dLLM runtime adapters require a dLLM-compatible model architecture "
-            f"(got architectures={archs!r}); expected one of "
-            f"{(LLADA2_ARCHITECTURE_NAME, DLLM_MOCK_STACK_MODEL_ID)!r}"
+            f"(got architectures={archs!r}); expected one of {expected!r}"
             f"{_ctx()}",
         )
 
@@ -110,7 +154,14 @@ def assert_compatible_stack(
             f"missing scheduler_config in vLLM config for dLLM runtime stack{_ctx()}",
         )
     try:
-        scheduler_cls = scheduler_config.get_scheduler_cls()
+        # vLLM 0.20+: get_scheduler_cls() method (preferred)
+        if hasattr(scheduler_config, "get_scheduler_cls"):
+            scheduler_cls = scheduler_config.get_scheduler_cls()
+        # Fallback: scheduler_cls attribute (legacy API)
+        elif hasattr(scheduler_config, "scheduler_cls"):
+            scheduler_cls = scheduler_config.scheduler_cls
+        else:
+            raise AttributeError("No scheduler_cls found in scheduler_config")
     except Exception as exc:
         raise ValueError(
             "failed to resolve scheduler class for dLLM runtime stack; use "

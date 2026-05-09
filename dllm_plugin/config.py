@@ -42,6 +42,10 @@ DRAFT_SIZE: Final[int] = _read_draft_size()
 #: Exact registry string may be refined when ``register()`` lands (issue #5).
 LLADA2_ARCHITECTURE_NAME: Final[str] = "LLaDA2ForCausalLM"
 
+#: HuggingFace architecture name used by inclusionAI/LLaDA2.0-mini model config.
+#: Registered alongside LLADA2_ARCHITECTURE_NAME to support both naming conventions.
+LLADA2_HF_ARCHITECTURE_NAME: Final[str] = "LLaDA2MoeModelLM"
+
 #: Registered model id for the **mock / stub** forward used in Phases 2-6 stack
 #: testing (deterministic outputs; see milestone issue #24).
 DLLM_MOCK_STACK_MODEL_ID: Final[str] = "DllmMockLlada2StackTest"
@@ -107,3 +111,34 @@ LLADA2_DEFAULT_DENOISE_STEPS: Final[int] = DRAFT_SIZE
 #: (zeros + ``1.0`` at index ``0``, ``docs/MOCK_STACK_MODEL.md``) commit under
 #: default settings for stack tests.
 LLADA2_DEFAULT_COMMIT_CONFIDENCE_THRESHOLD: Final[float] = 0.01
+
+# Phase 7: Real LLaDA2.0 model configuration (issue #12)
+
+#: Lazy import target for real LLaDA2.0 vLLM model (``<module>:<Class>``).
+#: Phase 7 adds production-ready model with MoE weight loading and
+#: block-style attention.
+LLADA2_REAL_MODEL_CLASS_FQCN: Final[str] = "dllm_plugin.models.llada2:LLaDA2ForCausalLM"
+
+#: Default number of experts per MoE layer (from HuggingFace LLaDA2.0 config).
+LLADA2_DEFAULT_NUM_EXPERTS: Final[int] = 256
+
+#: Default number of experts activated per token (top-k routing).
+LLADA2_DEFAULT_NUM_EXPERTS_PER_TOK: Final[int] = 8
+
+#: Default number of shared experts (always active, not routed).
+LLADA2_DEFAULT_NUM_SHARED_EXPERTS: Final[int] = 1
+
+#: Default MoE intermediate size (FFN hidden dimension per expert).
+LLADA2_DEFAULT_MOE_INTERMEDIATE_SIZE: Final[int] = 512
+
+#: Default number of expert groups for group-limited routing.
+#: LLaDA2.0 uses 8 groups for two-stage expert selection.
+LLADA2_DEFAULT_N_GROUP: Final[int] = 8
+
+#: Default number of groups to select in group-limited routing.
+#: First selects top-4 groups from 8, then top-k experts from selected groups.
+LLADA2_DEFAULT_TOPK_GROUP: Final[int] = 4
+
+#: Default scaling factor applied to routed expert output.
+#: LLaDA2.0 uses 2.5x scaling on routed experts before adding shared expert output.
+LLADA2_DEFAULT_ROUTED_SCALING_FACTOR: Final[float] = 2.5

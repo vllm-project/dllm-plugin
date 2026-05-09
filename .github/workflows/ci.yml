@@ -39,7 +39,7 @@ jobs:
       - name: Pre-commit (lint, format, types, lockfile)
         run: uv run pre-commit run --all-files
       - name: Tests
-        run: uv run pytest -q
+        run: uv run pytest -q -m "not dllm_gpu_benchmark"
 
   # Exercise plugin code paths that require an installable vLLM (see docs/MOCK_STACK_MODEL.md).
   vllm-extra:
@@ -62,4 +62,4 @@ jobs:
       # coverage without CUDA.
       # ``-rs``: show skip reasons for GPU-only tests on CPU runners.
       - name: Tests (vLLM extra)
-        run: uv run pytest -q -rs
+        run: uv run pytest -q -rs -m "not dllm_gpu_benchmark"

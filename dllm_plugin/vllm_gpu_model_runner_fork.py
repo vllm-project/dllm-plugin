@@ -159,6 +159,33 @@ class HookedGPUModelRunner(GPUModelRunner):
                 idx_mapping, total_num_logits, cu_num_logits, max_expand_len
             )
 
+            # Load draft tokens from scheduler output into req_states
+            # This is needed for combine_sampled_and_draft_tokens kernel
+            max_draft_len = int(np.max(num_draft_tokens))
+            if max_draft_len > self.req_states.draft_tokens.shape[1]:
+                # Resize draft_tokens tensor if needed
+                new_draft_tokens = torch.zeros(
+                    (self.req_states.draft_tokens.shape[0], max_draft_len),
+                    dtype=torch.int64,
+                    device=self.device,
+                )
+                new_draft_tokens[:, : self.req_states.draft_tokens.shape[1]] = (
+                    self.req_states.draft_tokens
+                )
+                self.req_states.draft_tokens = new_draft_tokens
+
+            # Populate draft tokens for each request
+            for batch_idx, req_id in enumerate(req_ids):
+                req_draft_tokens = draft_tokens.get(req_id, ())
+                idx = idx_mapping_np[batch_idx]
+                if req_draft_tokens:
+                    draft_token_ids = torch.tensor(
+                        req_draft_tokens, dtype=torch.int64, device=self.device
+                    )
+                    self.req_states.draft_tokens[idx, : len(req_draft_tokens)] = (
+                        draft_token_ids
+                    )
+
         # Get query_start_loc.
         # num_reqs_padded is None for PIECEWISE graphs (no request padding needed)
         num_reqs_padded = batch_desc.num_reqs or num_reqs

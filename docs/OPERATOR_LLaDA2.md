@@ -1,7 +1,10 @@
-# Operator guide (mock stack, Phases 5-6)
+# Operator guide (LLaDA2.0 real model, Phase 7)
 
-This guide describes the MVP **mock-stack** operator path for `vllm-dllm-plugin`
-with strict stack validation and the Phase 6 integration test.
+This guide describes the **LLaDA2.0 real model** operator path for `vllm-dllm-plugin`
+with production-ready inference (Phase 7) and mock-stack testing (Phases 5-6).
+
+**Phase 7 update:** Real LLaDA2.0 model with MoE architecture now available.
+See [Phase 7: Real Model](#phase-7-real-llada20-model) section below.
 
 ## Prerequisites
 
@@ -35,6 +38,34 @@ uv sync --group dev --extra vllm
 export VLLM_PLUGINS=dllm
 export VLLM_USE_V2_MODEL_RUNNER=1
 ```
+
+## vLLM Version Requirements
+
+**Minimum:** `vllm>=0.20.0,<0.21` (enforced by pyproject.toml)
+
+**Why this range:**
+- **0.20.0:** Introduced stable v2 model runner API required by dllm-plugin
+- **<0.21:** Upper bound for safety; test with 0.21 when released
+
+**Unsupported versions:**
+- vLLM <0.20.0: Missing v2 model runner, incompatible attention backends
+- Pre-0.20 fallback imports removed in Phase 7 typing improvements
+
+**Checking your vLLM version:**
+```bash
+python -c "import vllm; print(vllm.__version__)"
+```
+
+**Type safety notes:**
+- dllm-plugin uses typed protocols for vLLM integration
+- See `dllm_plugin/vllm_types.py` for protocol definitions
+- See `dllm_plugin/vllm_compat.py` for version-aware imports
+- Run `uv run pre-commit run ty-check` to validate types
+
+**Compatibility layer:**
+All vLLM imports are centralized in `dllm_plugin/vllm_compat.py` to avoid scattered
+version-dependent import chains. Plugin code should import from `vllm_compat` rather
+than directly from vLLM modules.
 
 ### v1 vs v2 model runner (mock-stack path)
 
@@ -218,3 +249,221 @@ contract tests—override `tests.pytestPaths` if you need a narrower run. When
   bitmask row allocation vs draft scheduling until upstream alignment improves (issue **#2**).
 - **Async + SO:** Same stance as the v2 runner section above—**not** MVP-validated; keep
   ``async_scheduling=False`` for assurance unless you own the risk.
+
+---
+
+## Phase 7: Real LLaDA2.0 Model
+
+**Issue:** [#12](https://github.com/vllm-project/dllm-plugin/issues/12), [#11](https://github.com/vllm-project/dllm-plugin/issues/11), [#25](https://github.com/vllm-project/dllm-plugin/issues/25)  
+**Milestone:** [Phase 7 - Real Model Integration](https://github.com/vllm-project/dllm-plugin/issues/19)
+
+Phase 7 adds production-ready LLaDA2.0 inference with:
+- **256-expert MoE** architecture with group-limited routing
+- **Block-style non-causal attention** for diffusion-based generation
+- **Shared expert** (always active) + routed experts (top-k selected)
+- **Tensor parallelism (TP)** support for multi-GPU inference
+
+### Model Selection
+
+By default, `LLADA2_ARCHITECTURE_NAME` now points to the real model:
+
+```bash
+export VLLM_PLUGINS=dllm
+export VLLM_USE_V2_MODEL_RUNNER=1
+
+# Use real LLaDA2.0 model (default in Phase 7)
+vllm serve inclusionAI/LLaDA2.0-mini \
+  --scheduler-cls dllm_plugin.Scheduler \
+  --worker-cls dllm_plugin.Worker
+```
+
+To use mock model for testing (Phases 2-6 behavior):
+
+```bash
+export VLLM_DLLM_USE_MOCK_MODEL=1  # Override to mock
+```
+
+### Supported Models
+
+**Phase 7 tested models:**
+- `inclusionAI/LLaDA2.0-mini` (smallest, recommended for testing)
+- Other LLaDA2.0 family models from [HuggingFace collection](https://huggingface.co/collections/inclusionAI/llada-20)
+
+**Model requirements:**
+- HuggingFace config with `architectures` containing `"LLaDA2ForCausalLM"`
+- MoE parameters: `num_experts`, `num_experts_per_tok`, `moe_intermediate_size`
+- Optional: `num_shared_experts`, `n_group`, `topk_group`, `routed_scaling_factor`
+
+### Multi-GPU Inference
+
+#### Tensor Parallelism (Supported)
+
+LLaDA2.0 supports tensor parallelism for multi-GPU scaling:
+
+```bash
+vllm serve inclusionAI/LLaDA2.0-mini \
+  --tensor-parallel-size 2 \
+  --scheduler-cls dllm_plugin.Scheduler \
+  --worker-cls dllm_plugin.Worker
+```
+
+**Validation:**
+- TP size must not exceed `num_experts` (256 for LLaDA2.0)
+- Expert weights are sharded across TP ranks
+- Router/gate weights are replicated (not sharded)
+
+#### Pipeline Parallelism (Not Supported - Phase 7)
+
+Pipeline parallelism (PP > 1) is **not supported** in Phase 7 MVP:
+
+```bash
+# This will FAIL:
+vllm serve inclusionAI/LLaDA2.0-mini \
+  --pipeline-parallel-size 2  # ValueError: PP > 1 not supported
+```
+
+**Reason:** Simpler implementation, TP covers most use cases, can be added in future phase.
+
+Use `--tensor-parallel-size` for multi-GPU inference instead.
+
+### Attention Backends
+
+LLaDA2.0 block-style attention works with both:
+
+**FlashAttention** (default):
+```bash
+export VLLM_ATTENTION_BACKEND=FLASH_ATTN
+```
+
+**FlashInfer** (alternative):
+```bash
+export VLLM_ATTENTION_BACKEND=FLASHINFER
+```
+
+Both backends support `is_causal=False` / `causal=False` required for non-causal block attention.
+
+### GPU Requirements
+
+**Minimum:** L4 16GB (for LLaDA2.0-mini)  
+**Recommended:** A100-40GB (preferred for testing)  
+**Large models:** H100-80GB (spot instances for models >40GB)
+
+Example with explicit memory configuration:
+
+```bash
+vllm serve inclusionAI/LLaDA2.0-mini \
+  --gpu-memory-utilization 0.9 \
+  --max-model-len 256 \
+  --enforce-eager \
+  --scheduler-cls dllm_plugin.Scheduler \
+  --worker-cls dllm_plugin.Worker
+```
+
+### Configuration Parameters
+
+**Block size** (DRAFT_SIZE):
+```bash
+export VLLM_DLLM_DRAFT_SIZE=32  # Default: 32 tokens per block
+```
+
+**MoE architecture defaults** (from HF config, can override):
+- `num_experts`: 256
+- `num_experts_per_tok`: 8
+- `num_shared_experts`: 1
+- `moe_intermediate_size`: 512
+- `n_group`: 8 (expert groups)
+- `topk_group`: 4 (groups to select)
+- `routed_scaling_factor`: 2.5
+
+### Testing
+
+**Unit tests** (no GPU):
+```bash
+pytest tests/test_llada2_attention.py
+pytest tests/test_llada2_real_model.py
+```
+
+**GPU integration tests**:
+```bash
+# Requires CUDA GPU (A100/L4/H100)
+pytest -v -m dllm_gpu_integration tests/test_llada2_gpu_integration.py
+```
+
+**HTTP smoke test**:
+```bash
+./tools/e2e/serve_http_real_model_smoke.sh
+```
+
+### Troubleshooting
+
+**Problem:** `ValueError: Pipeline parallelism (PP > 1) not supported`  
+**Solution:** Use `--tensor-parallel-size` instead of `--pipeline-parallel-size`
+
+**Problem:** `ValueError: Tensor parallelism size cannot exceed number of experts`  
+**Solution:** Reduce `--tensor-parallel-size` to ≤ 256 (num_experts)
+
+**Problem:** Out of memory (OOM) errors  
+**Solution:** 
+- Use smaller model (LLaDA2.0-mini)
+- Reduce `--max-model-len` (e.g., 256 instead of 2048)
+- Increase `--gpu-memory-utilization` (e.g., 0.9)
+
+**Problem:** Want to use mock model for testing  
+**Solution:** Set `export VLLM_DLLM_USE_MOCK_MODEL=1`
+
+### Design Documentation
+
+- **Attention design:** [docs/ATTENTION_DESIGN.md](ATTENTION_DESIGN.md)
+- **MoE architecture:** See vLLM reference implementations:
+  - [Mixtral](https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/models/mixtral.py)
+  - [Qwen2 MoE](https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/models/qwen2_moe.py)
+  - [DeepSeek V2](https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/models/deepseek_v2.py)
+
+### Known Limitations
+
+**Not implemented:**
+- **Pipeline parallelism (PP > 1)** - use TP instead
+  
+  **Production Impact:**
+  
+  Tensor parallelism (TP) is supported and recommended for multi-GPU inference.
+  
+  **Recommended configuration:**
+  1. **Tensor parallelism:** Use `--tensor-parallel-size N` (max N=256 experts)
+  2. **Request coalescing:** Buffer incoming requests and route to least-loaded instance
+  3. **Upgrade to Phase 7.1:** Track follow-up issue for multi-request support timeline
+  
+  **When single-request is acceptable:**
+  - Low request rate (< 1 req/sec)
+  - Large single requests (long-context generation)
+  - Dev/test environments
+  
+  **Required server configuration:**
+  ```bash
+  vllm serve inclusionAI/LLaDA2.0-mini \
+    --max-num-seqs 1 \  # REQUIRED for Phase 7 MVP
+    --scheduler-cls dllm_plugin.Scheduler \
+    --worker-cls dllm_plugin.Worker
+  ```
+
+- Custom CUDA kernels for attention - using FlashAttention/FlashInfer
+- Prefix caching under block-style masks
+- Advanced grammar integrations beyond basic support
+
+**Configuration constraints:**
+- **KV cache block size:** Defaults to 16 tokens/block (standard vLLM)
+  - Currently not queried from `cache_config`, uses default value
+  - May break if vLLM changes default block size in future versions
+  - Future work: Query from vLLM's cache configuration
+
+**Testing limitations:**
+- **Structural validation only** - Integration tests verify API contracts, not output correctness
+- **Phase 9 required** - Numerical correctness validation (lm-eval, reference comparison) deferred
+- See [dllm-plugin issue #40](https://github.com/vllm-project/dllm-plugin/issues/40) for Phase 9 plan
+
+**Future enhancements** (post-MVP):
+- Full PP support if use cases emerge
+- Optimized attention kernels (fused prefix + block in single pass)
+- Sparse/windowed attention for very long contexts
+- **Phase 9:** Output correctness validation and reference comparisons
+

@@ -94,13 +94,20 @@ def validate_remask_step_result(
     result: RemaskStepResult,
     *,
     draft_size: int = DRAFT_SIZE,
+    vocab_size: int | None = None,
 ) -> None:
-    """Assert MVP shape constraints against ``draft_size``.
+    """Assert MVP shape constraints against ``draft_size`` and validate token IDs.
 
     Compare :data:`~dllm_plugin.config.DRAFT_SIZE`. For per-model or
     per-request block sizes, this helper would need an explicit length argument or
     a different entry point; calling it when the live block size differs from
     ``config.DRAFT_SIZE`` would be incorrect (MVP assumes one global draft size).
+
+    Args:
+        result: The RemaskStepResult to validate
+        draft_size: Expected length of next_input_block
+        vocab_size: If provided, validates that all token IDs are within [0, vocab_size)
+                   and are integers. Pass None to skip token ID validation (default).
     """
 
     if draft_size <= 0:
@@ -117,3 +124,34 @@ def validate_remask_step_result(
             f"0..draft_size (inclusive), got {len(result.committed_token_ids)}"
         )
         raise ValueError(msg)
+
+    # Optional: Validate token ID values if vocab_size provided
+    if vocab_size is not None:
+        if vocab_size <= 0:
+            raise ValueError(f"vocab_size must be positive, got {vocab_size}")
+
+        # Validate committed_token_ids
+        for i, token_id in enumerate(result.committed_token_ids):
+            if not isinstance(token_id, int):
+                raise ValueError(
+                    f"committed_token_ids[{i}] is not int: "
+                    f"type={type(token_id).__name__}, value={token_id}"
+                )
+            if not (0 <= token_id < vocab_size):
+                raise ValueError(
+                    f"committed_token_ids[{i}] out of vocab range: "
+                    f"{token_id} (vocab_size={vocab_size})"
+                )
+
+        # Validate next_input_block
+        for i, token_id in enumerate(result.next_input_block):
+            if not isinstance(token_id, int):
+                raise ValueError(
+                    f"next_input_block[{i}] is not int: "
+                    f"type={type(token_id).__name__}, value={token_id}"
+                )
+            if not (0 <= token_id < vocab_size):
+                raise ValueError(
+                    f"next_input_block[{i}] out of vocab range: "
+                    f"{token_id} (vocab_size={vocab_size})"
+                )

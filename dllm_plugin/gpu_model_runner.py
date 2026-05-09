@@ -16,6 +16,8 @@ See ``docs/DESIGN_MVP.md`` for the two-phase contract.
 
 from __future__ import annotations
 
+import logging
+import os
 from typing import Any
 
 import torch
@@ -28,24 +30,45 @@ from dllm_plugin.config import (
     DLLM_MOCK_STACK_MODEL_ID,
     DRAFT_SIZE,
     LLADA2_ARCHITECTURE_NAME,
+    LLADA2_HF_ARCHITECTURE_NAME,
 )
 from dllm_plugin.grammar_utils import (
     apply_packed_bitmask_inplace_logits_row,
     grammar_extra_transfer_slots,
 )
+from dllm_plugin.vllm_compat import VllmConfig
 from dllm_plugin.vllm_gpu_model_runner_fork import HookedGPUModelRunner
+from dllm_plugin.vllm_types import VllmConfigProtocol
 from dllm_plugin.worker import DllmWorker
 
+logger = logging.getLogger(__name__)
 
-def dllm_architecture_match(vllm_config: Any) -> bool:
-    hf = getattr(getattr(vllm_config, "model_config", None), "hf_config", None)
-    if hf is None:
+
+def dllm_architecture_match(vllm_config: VllmConfig | VllmConfigProtocol) -> bool:
+    """Check if vLLM config architecture matches dLLM models.
+
+    Args:
+        vllm_config: vLLM configuration object.
+
+    Returns:
+        True if architecture is LLaDA2 or dLLM mock model.
+    """
+    # Safely extract hf_config with explicit error handling
+    try:
+        hf = vllm_config.model_config.hf_config
+    except AttributeError:
+        # model_config or hf_config missing
         return False
+
     archs = getattr(hf, "architectures", ()) or ()
     if isinstance(archs, str):
         archs = (archs,)
     names = {str(a) for a in archs}
-    dllm_names = {DLLM_MOCK_STACK_MODEL_ID, LLADA2_ARCHITECTURE_NAME}
+    dllm_names = {
+        DLLM_MOCK_STACK_MODEL_ID,
+        LLADA2_ARCHITECTURE_NAME,
+        LLADA2_HF_ARCHITECTURE_NAME,
+    }
     return bool(names.intersection(dllm_names))
 
 
@@ -61,6 +84,7 @@ class DllmGPUModelRunner(HookedGPUModelRunner):
         self._dllm_so_frontier_flat_indices: dict[str, int] | None = None
         self._dllm_so_frontier_block_rows: dict[str, int | None] | None = None
         self._dllm_so_valid_prefix_lens: dict[str, int] | None = None
+        self._dllm_num_prefix_tokens: dict[str, int] | None = None
         self._dllm_pending_draft_ids: Any = None
 
     def shutdown(self) -> None:
@@ -124,8 +148,41 @@ class DllmGPUModelRunner(HookedGPUModelRunner):
             return
         if not dllm_architecture_match(self.vllm_config):
             return
+
+        # Store scheduled drafts (may be empty for first iteration)
         raw = getattr(scheduler_output, "scheduled_spec_decode_tokens", None) or {}
         self._dllm_scheduled_spec_decode_tokens = {k: tuple(v) for k, v in raw.items()}
+
+        # NEW: Detect first-block requests (empty drafts) and generate first blocks
+        # Following upstream pattern (vllm/v1/worker/gpu/model_runner.py:1252):
+        # Generate drafts in model runner, not scheduler. For dLLM, first block is
+        # deterministic from prompt hash, so we can generate it before forward pass.
+        self._dllm_first_block_requests: dict[str, list[int]] = {}
+
+        # Test-only: skip first-block seed for GPU grammar tests
+        if os.environ.get("VLLM_DLLM_SKIP_FIRST_BLOCK_SEED") != "1":
+            for req_id, draft in self._dllm_scheduled_spec_decode_tokens.items():
+                if len(draft) == 0:  # First iteration - no prior drafts!
+                    # Generate first block NOW (synchronous, in worker thread)
+                    # Access request via req_states.requests (upstream pattern)
+                    request = self.req_states.requests.get(req_id)
+                    if request is not None:
+                        prompt = getattr(request, "prompt_token_ids", [])
+                        first_block = list(
+                            self._dllm_helper.initialize_first_block(
+                                prompt_token_ids=prompt
+                            )
+                        )
+                        self._dllm_first_block_requests[req_id] = first_block
+                        logger.info(
+                            "[dLLM] Generated first block for %s in model runner "
+                            "(prompt_len=%d, block_len=%d)",
+                            req_id,
+                            len(prompt),
+                            len(first_block),
+                        )
+
+        # Continue with existing metadata extraction
         self._dllm_so_frontier_flat_indices = getattr(
             scheduler_output, "dllm_so_frontier_flat_indices", None
         )
@@ -134,6 +191,9 @@ class DllmGPUModelRunner(HookedGPUModelRunner):
         )
         self._dllm_so_valid_prefix_lens = getattr(
             scheduler_output, "dllm_so_valid_prefix_lens", None
+        )
+        self._dllm_num_prefix_tokens = getattr(
+            scheduler_output, "dllm_num_prefix_tokens", None
         )
 
     def sample(
@@ -188,16 +248,51 @@ class DllmGPUModelRunner(HookedGPUModelRunner):
 
         for i, req_id in enumerate(req_ids):
             lo, hi = int(cu[i]), int(cu[i + 1])
-            block_logits_tensor = logits[lo:hi]
+            # Extract logits for this request
+            # cu_num_logits includes primary token + draft tokens (e.g., 1 + 32 = 33)
+            # dLLM remasking only processes draft tokens (32), so skip first row
+            all_logits = logits[lo:hi]
+            if all_logits.shape[0] > self._dllm_helper.draft_size:
+                # Skip primary token logits (first row), keep only draft token logits
+                block_logits_tensor = all_logits[1:]
+            else:
+                # Fallback for edge cases (shouldn't happen with spec decode)
+                block_logits_tensor = all_logits
+
+            # Validate logits before remasking (debug mode only - CPU-GPU sync overhead)
+            if os.getenv("VLLM_DEBUG", "0") == "1":
+                if torch.isnan(block_logits_tensor).any():
+                    nan_count = torch.isnan(block_logits_tensor).sum().item()
+                    raise ValueError(
+                        f"Logits contain {nan_count} NaN value(s) for "
+                        f"request {req_id}. Shape: {block_logits_tensor.shape}"
+                    )
+                if torch.isinf(block_logits_tensor).any():
+                    inf_count = torch.isinf(block_logits_tensor).sum().item()
+                    raise ValueError(
+                        f"Logits contain {inf_count} inf value(s) for "
+                        f"request {req_id}. Shape: {block_logits_tensor.shape}"
+                    )
+
             block_logits = self._tensor_block_to_rows(block_logits_tensor)
 
-            input_draft = validate_runtime_input_draft(
-                request_id=req_id,
-                input_draft=list(
-                    self._dllm_scheduled_spec_decode_tokens.get(req_id, ()),
-                ),
-                draft_size=self._dllm_helper.draft_size,
-            )
+            # Use first block if pre-generated in before_execute_model(), otherwise
+            # use scheduled draft from prior iteration. Following upstream pattern
+            # (vllm/v1/worker/gpu/model_runner.py:1252): drafts in model runner.
+            if req_id in self._dllm_first_block_requests:
+                # First iteration - use pre-generated first block
+                input_draft = self._dllm_first_block_requests[req_id]
+                logger.debug("[dLLM] Using pre-generated first block for %s", req_id)
+            else:
+                # Subsequent iterations - use scheduled draft from prior iteration
+                scheduled_draft = self._dllm_scheduled_spec_decode_tokens.get(
+                    req_id, ()
+                )
+                input_draft = validate_runtime_input_draft(
+                    request_id=req_id,
+                    input_draft=list(scheduled_draft),
+                    draft_size=self._dllm_helper.draft_size,
+                )
 
             so_reqs = getattr(go, "structured_output_request_ids", None) if go else None
             if (
@@ -243,6 +338,7 @@ class DllmGPUModelRunner(HookedGPUModelRunner):
             sampled_token_ids=sampled[:, :width],
             logprobs_tensors=None,
             num_nans=None,
+            num_sampled=num_sampled,
         )
 
         num_sampled, num_rejected = get_num_sampled_and_rejected(
@@ -267,6 +363,52 @@ class DllmGPUModelRunner(HookedGPUModelRunner):
 
         b = block.float().detach().cpu()
         return [row.tolist() for row in b]
+
+    def _model_forward(
+        self,
+        input_ids: torch.Tensor | None = None,
+        positions: torch.Tensor | None = None,
+        intermediate_tensors: Any | None = None,
+        inputs_embeds: torch.Tensor | None = None,
+        **model_kwargs: Any,
+    ) -> Any:
+        """Override to inject num_prefix_tokens for virtual batch attention.
+
+        Extracts num_prefix_tokens from scheduler state and passes to model.forward()
+        for LLaDA2 block-style attention (Phase 7 virtual batch decomposition).
+        """
+        # Only inject for dLLM architectures
+        if not dllm_architecture_match(self.vllm_config):
+            return super()._model_forward(
+                input_ids=input_ids,
+                positions=positions,
+                intermediate_tensors=intermediate_tensors,
+                inputs_embeds=inputs_embeds,
+                **model_kwargs,
+            )
+
+        # Extract num_prefix_tokens_list for the current batch (Phase 7.1 multi-request)
+        num_prefix_tokens_list = None
+        if (
+            self._dllm_num_prefix_tokens is not None
+            and hasattr(self, "input_batch")
+            and self.input_batch is not None
+        ):
+            req_ids = self.input_batch.req_ids
+            if req_ids is not None:
+                # Build list preserving order of req_ids in batch
+                num_prefix_tokens_list = [
+                    self._dllm_num_prefix_tokens.get(req_id, 0) for req_id in req_ids
+                ]
+
+        return super()._model_forward(
+            input_ids=input_ids,
+            positions=positions,
+            intermediate_tensors=intermediate_tensors,
+            inputs_embeds=inputs_embeds,
+            num_prefix_tokens_list=num_prefix_tokens_list,
+            **model_kwargs,
+        )
 
     def take_dllm_draft_token_ids(self) -> Any | None:
         """Pop draft blocks produced by dLLM remasking (phase two).

@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: Apache-2.0
+# LLaDA2.0-mini benchmark configuration for A100-40GB deployment
+# Runs performance benchmarks with streaming and synchronous modes
+#
+# Usage:
+#   helm install llada2-benchmark tools/helm/dllm-plugin-gpu-test \
+#     -f tools/helm/dllm-plugin-gpu-test/values-benchmark-a100.yaml
+
+job:
+  ttlSecondsAfterFinished: 3600  # Keep results for 1 hour
+  backoffLimit: 0
+
+image:
+  repository: pytorch/pytorch
+  tag: 2.6.0-cuda12.4-cudnn9-devel
+  pullPolicy: IfNotPresent
+
+git:
+  repoUrl: https://github.com/vllm-project/dllm-plugin.git
+  branch: feat/phase7-llada2-real-model  # Use feature branch
+
+gpu:
+  count: 1
+
+# Benchmark tests
+tests:
+  runServeHttpSmoke: false
+  pytestPaths:
+    # GuideLLM benchmark (covers both streaming and synchronous)
+    - tests/test_llada2_benchmark.py::test_llada2_guidellm_benchmark
+  pytestArgs: "-v -s"  # Verbose, no capture
+
+# A100-40GB node pool configuration
+scheduling:
+  nodeSelector:
+    cloud.google.com/gke-accelerator: nvidia-tesla-a100
+  extraTolerations:
+    - key: jounce.io/nodetype
+      operator: Equal
+      value: A100-40
+      effect: NoSchedule
+
+resources:
+  cpu: "8"
+  memory: 64Gi
+  ephemeralStorage: 80Gi
+
+# Benchmark-optimized settings
+testEnv:
+  DLLM_TEST_GPU_MEMORY_UTILIZATION: "0.9"
+  DLLM_TEST_KV_CACHE_MEMORY_BYTES: "268435456"  # 256MB
+  # No CUDA_LAUNCH_BLOCKING for benchmarks (measure real performance)
