@@ -8,12 +8,12 @@ group-limited routing, and weight loading.
 
 from __future__ import annotations
 
-from unittest.mock import Mock, patch
-
 import pytest
 
 pytest.importorskip("vllm")
 torch = pytest.importorskip("torch")
+
+from unittest.mock import MagicMock, Mock, patch  # noqa: E402
 
 from dllm_plugin.config import (  # noqa: E402
     LLADA2_DEFAULT_MOE_INTERMEDIATE_SIZE,
@@ -24,6 +24,31 @@ from dllm_plugin.config import (  # noqa: E402
     LLADA2_DEFAULT_ROUTED_SCALING_FACTOR,
     LLADA2_DEFAULT_TOPK_GROUP,
 )
+
+
+# Mock TP group for tests that create vLLM layers
+@pytest.fixture(autouse=True)
+def mock_tp_group():
+    """Mock tensor parallel group for real model tests."""
+    mock_group = MagicMock()
+    mock_group.world_size = 1
+    mock_group.rank = 0
+
+    with (
+        patch(
+            "vllm.distributed.parallel_state.get_tp_group",
+            return_value=mock_group,
+        ),
+        patch(
+            "vllm.distributed.parallel_state.get_tensor_model_parallel_world_size",
+            return_value=1,
+        ),
+        patch(
+            "vllm.distributed.parallel_state.get_tensor_model_parallel_rank",
+            return_value=0,
+        ),
+    ):
+        yield
 
 
 class TestLLaDA2MoE:
@@ -47,8 +72,7 @@ class TestLLaDA2MoE:
         """Test MoE layer initializes with correct parameters."""
         from dllm_plugin.models.llada2 import LLaDA2MoE
 
-        with patch("dllm_plugin.models.llada2.get_tp_group"):
-            moe = LLaDA2MoE(config=mock_config, tp_size=1, prefix="test")
+        moe = LLaDA2MoE(config=mock_config, tp_size=1, prefix="test")
 
         assert moe.num_experts == LLADA2_DEFAULT_NUM_EXPERTS
         assert moe.num_experts_per_tok == LLADA2_DEFAULT_NUM_EXPERTS_PER_TOK
@@ -61,18 +85,14 @@ class TestLLaDA2MoE:
         from dllm_plugin.models.llada2 import LLaDA2MoE
 
         # Should fail if TP > num_experts
-        with (
-            pytest.raises(ValueError, match="Tensor parallelism size.*cannot exceed"),
-            patch("dllm_plugin.models.llada2.get_tp_group"),
-        ):
+        with pytest.raises(ValueError, match="Tensor parallelism size.*cannot exceed"):
             LLaDA2MoE(config=mock_config, tp_size=300, prefix="test")
 
     def test_group_limited_routing(self, mock_config):
         """Test group-limited top-k routing logic."""
         from dllm_plugin.models.llada2 import LLaDA2MoE
 
-        with patch("dllm_plugin.models.llada2.get_tp_group"):
-            moe = LLaDA2MoE(config=mock_config, tp_size=1, prefix="test")
+        moe = LLaDA2MoE(config=mock_config, tp_size=1, prefix="test")
 
         # Create dummy router logits
         batch_size, seq_len = 2, 4
@@ -94,8 +114,7 @@ class TestLLaDA2MoE:
         """Test shared expert is initialized when configured."""
         from dllm_plugin.models.llada2 import LLaDA2MoE
 
-        with patch("dllm_plugin.models.llada2.get_tp_group"):
-            moe = LLaDA2MoE(config=mock_config, tp_size=1, prefix="test")
+        moe = LLaDA2MoE(config=mock_config, tp_size=1, prefix="test")
 
         # With num_shared_experts=1, shared expert layers should exist
         assert moe.shared_expert_gate is not None
@@ -128,13 +147,12 @@ class TestLLaDA2DecoderLayer:
         """Test decoder layer initializes correctly."""
         from dllm_plugin.models.llada2 import LLaDA2DecoderLayer
 
-        with patch("dllm_plugin.models.llada2.get_tp_group"):
-            layer = LLaDA2DecoderLayer(
-                config=mock_vllm_config.model_config.hf_config,
-                layer_idx=0,
-                vllm_config=mock_vllm_config,
-                prefix="model.layers.0",
-            )
+        layer = LLaDA2DecoderLayer(
+            config=mock_vllm_config.model_config.hf_config,
+            layer_idx=0,
+            vllm_config=mock_vllm_config,
+            prefix="model.layers.0",
+        )
 
         assert layer.layer_idx == 0
         assert layer.hidden_size == 512
