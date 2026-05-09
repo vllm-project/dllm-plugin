@@ -17,7 +17,10 @@ import time
 from pathlib import Path
 
 import pytest
-import requests
+
+pytest.importorskip("requests")  # Skip if requests not available (standard CI)
+
+import requests  # noqa: E402
 
 from tests.gpu_memory import gpu_memory_utilization, kv_cache_memory_bytes
 
