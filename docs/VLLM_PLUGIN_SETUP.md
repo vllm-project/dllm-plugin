@@ -23,6 +23,30 @@ vllm serve inclusionAI/LLaDA2.0-mini \
 
 That's it! No Python wrappers, no manual registration needed.
 
+### Tensor Parallelism (TP > 1)
+
+For multi-GPU deployments with TP=2 or higher:
+
+```bash
+export VLLM_PLUGINS=dllm
+export VLLM_USE_V2_MODEL_RUNNER=1
+export VLLM_ENABLE_V1_MULTIPROCESSING=0
+
+vllm serve inclusionAI/LLaDA2.0-mini \
+  --max-model-len 2048 \
+  --max-num-seqs 32 \
+  --port 8000 \
+  --trust-remote-code \
+  --gpu-memory-utilization 0.85 \
+  --tensor-parallel-size 2 \
+  --scheduler-cls dllm_plugin.runtime_scheduler.DllmRuntimeScheduler \
+  --worker-cls dllm_plugin.runtime_worker.DllmRuntimeWorker
+```
+
+**Validated configurations:** TP=1, TP=2, TP=4
+
+**For complete TP=2 setup, benchmarking, and validation instructions, see [TP2_VALIDATION_GUIDE.md](TP2_VALIDATION_GUIDE.md).**
+
 ---
 
 ## How It Works

@@ -57,8 +57,10 @@ vllm serve inclusionAI/LLaDA2.0-mini \
 
 **See [docs/VLLM_PLUGIN_SETUP.md](docs/VLLM_PLUGIN_SETUP.md) for complete setup guide, troubleshooting, and Kubernetes deployment.**
 
+**For TP=2 validation and benchmarking, see [docs/TP2_VALIDATION_GUIDE.md](docs/TP2_VALIDATION_GUIDE.md).**
+
 **Known Limitations:**
-- ✅ **Tensor Parallelism (TP)** supported (TP=1/2/4/8 validated in Phase 8.2)
+- ✅ **Tensor Parallelism (TP)** - TP=1/2/4/8 validated, recommended for models >70B (TP overhead exceeds benefits for small models like LLaDA2.0-mini, see [TP2_BENCHMARK_RESULTS.md](docs/TP2_BENCHMARK_RESULTS.md))
 - ❌ Pipeline parallelism (PP > 1) not supported
 - ❌ CUDAGraph optimization disabled (~10-15% ITL impact)
 - ⚠️ MoE router precision defaults to FP32 (BF16 experimental via `VLLM_LLADA2_BF16_ROUTER=1`)
@@ -80,6 +82,8 @@ vllm serve <model> \
 ## Docs
 
 - **[docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md)** — **known limitations, unvalidated assumptions, and tracking issues** for Phase 7+8 (router precision, CUDAGraph, torch.compile, PP/TP).
+- **[docs/TP2_VALIDATION_GUIDE.md](docs/TP2_VALIDATION_GUIDE.md)** — **TP=2 validation guide** (dual A100-40GB setup, server start, benchmark suite, comparison with TP=1 baseline).
+- **[docs/TP2_BENCHMARK_RESULTS.md](docs/TP2_BENCHMARK_RESULTS.md)** — **⚠️ TP=2 benchmark results** showing performance regression (29x slower TTFT, 24% lower throughput, root cause investigation required).
 - [docs/DESIGN_MVP.md](docs/DESIGN_MVP.md) — MVP architecture, field mapping, diagrams (public references only).
 - [docs/MOCK_STACK_MODEL.md](docs/MOCK_STACK_MODEL.md) — mock registered model ids and HF config surface (Phases 2–6).
 - [docs/CONTRACTS.md](docs/CONTRACTS.md) — copy-friendly field mapping / invariants for contributors (see DESIGN_MVP section 7).

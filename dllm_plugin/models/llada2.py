@@ -865,22 +865,44 @@ class LLaDA2ForCausalLM(nn.Module):
                         f"down={down_weight is not None}"
                     )
 
-                # Stack gate+up for this expert (FusedMoE expects w13 as gate+up)
-                w13_weight = torch.cat([gate_weight, up_weight], dim=0)
-
-                # Load this expert's weights with expert_id parameter
-                # vLLM's TP hooks use expert_id to distribute across ranks
+                # Load expert weights using FusedMoE weight_loader (correct shard_ids)
+                # shard_id must be one of ['w1', 'w2', 'w3']
+                # w1=gate_proj, w2=down_proj, w3=up_proj
                 param_w13 = layer.mlp.experts.w13_weight
-                weight_loader_w13 = getattr(
+                weight_loader = getattr(
                     param_w13, "weight_loader", default_weight_loader
                 )
-                weight_loader_w13(param_w13, w13_weight, expert_id=expert_id)
 
+                # Load gate projection (w1)
+                weight_loader(
+                    param_w13,
+                    gate_weight,
+                    "gate_proj.weight",
+                    shard_id="w1",
+                    expert_id=expert_id,
+                )
+
+                # Load up projection (w3)
+                weight_loader(
+                    param_w13,
+                    up_weight,
+                    "up_proj.weight",
+                    shard_id="w3",
+                    expert_id=expert_id,
+                )
+
+                # Load down projection (w2)
                 param_w2 = layer.mlp.experts.w2_weight
                 weight_loader_w2 = getattr(
                     param_w2, "weight_loader", default_weight_loader
                 )
-                weight_loader_w2(param_w2, down_weight, expert_id=expert_id)
+                weight_loader_w2(
+                    param_w2,
+                    down_weight,
+                    "down_proj.weight",
+                    shard_id="w2",
+                    expert_id=expert_id,
+                )
 
             # Track expert weights as loaded
             loaded_params.add(f"layers.{layer_id}.mlp.experts.w13_weight")
