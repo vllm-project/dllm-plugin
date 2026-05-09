@@ -34,3 +34,4 @@ benchmarks.json
 # Temporary values files
 *-values.yaml
 values.yaml
+PR38_REVIEW.md
