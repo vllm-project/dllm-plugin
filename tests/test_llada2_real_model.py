@@ -291,8 +291,10 @@ class TestLLaDA2ForCausalLM:
 class TestGroupLimitedRouting:
     """Tests for group-limited routing algorithm."""
 
-    def test_routing_output_shape(self):
+    def test_routing_output_shape(self, default_vllm_config):
         """Test that routing produces correct output shapes."""
+        from vllm.config.vllm import set_current_vllm_config
+
         from dllm_plugin.models.llada2 import LLaDA2MoE
 
         config = Mock()
@@ -302,7 +304,10 @@ class TestGroupLimitedRouting:
         config.n_group = 8
         config.topk_group = 4
 
-        with patch("dllm_plugin.models.llada2.get_tp_group"):
+        with (
+            patch("dllm_plugin.models.llada2.get_tp_group"),
+            set_current_vllm_config(default_vllm_config),
+        ):
             moe = LLaDA2MoE(config=config, tp_size=1, prefix="test")
 
         # Test routing
@@ -316,8 +321,10 @@ class TestGroupLimitedRouting:
         assert weights.shape == (num_tokens, 8)
         assert indices.shape == (num_tokens, 8)
 
-    def test_routing_selects_from_groups(self):
+    def test_routing_selects_from_groups(self, default_vllm_config):
         """Test that routing respects group boundaries."""
+        from vllm.config.vllm import set_current_vllm_config
+
         from dllm_plugin.models.llada2 import LLaDA2MoE
 
         config = Mock()
@@ -327,7 +334,10 @@ class TestGroupLimitedRouting:
         config.n_group = 8
         config.topk_group = 4
 
-        with patch("dllm_plugin.models.llada2.get_tp_group"):
+        with (
+            patch("dllm_plugin.models.llada2.get_tp_group"),
+            set_current_vllm_config(default_vllm_config),
+        ):
             moe = LLaDA2MoE(config=config, tp_size=1, prefix="test")
 
         # Create controlled router logits
