@@ -169,9 +169,12 @@ padding = torch.full(..., fill_value=-1)  # Sentinel value
 2. CUDAGraph requires static metadata
 3. Upstream `chunked_local_attention` also disables CUDAGraph for similar reasons
 
-**Performance impact**: Minor for LLaDA2 (MoE compute dominates over graph launch overhead).
+**Performance impact**: Potentially significant (10-20% latency improvement for decoding in other vLLM models). However, for Phase 7 MVP, this trade-off is acceptable given:
+- Simplicity of forward-time metadata approach
+- Natural support for multi-request heterogeneous batching
+- MoE compute still dominates over graph launch overhead
 
-**Future work**: Could enable CUDAGraph if we move to build-time metadata (trade-off in Section 1).
+**Future work**: Could enable CUDAGraph if we move to build-time metadata (trade-off in Section 1). This optimization is tracked for Phase 8.4+.
 
 ---
 

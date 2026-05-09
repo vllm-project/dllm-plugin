@@ -76,6 +76,7 @@ vllm serve <model> \
 - [docs/ROADMAP.md](docs/ROADMAP.md) — phased future work.
 - [docs/OPERATOR_LLaDA2.md](docs/OPERATOR_LLaDA2.md) — Phase 6 operator runbook (`VLLM_PLUGINS`, CLI flags, v2 runner, integration test).
 - [docs/BENCHMARK_RESULTS_MULTI_REQUEST.md](docs/BENCHMARK_RESULTS_MULTI_REQUEST.md) — **comprehensive multi-request batching benchmarks** (guidellm, concurrency spectrum 1→100, A100-40GB).
+- [docs/PHASE8_BENCHMARKS.md](docs/PHASE8_BENCHMARKS.md) — torch.compile integration benchmarks (infrastructure work; no performance benefit observed for mini model + single-request configuration).
 - [docs/structured-outputs-benchmark-results.md](docs/structured-outputs-benchmark-results.md) — initial structured outputs benchmarks (superseded by BENCHMARK_RESULTS_MULTI_REQUEST.md).
 - [docs/TOOLING.md](docs/TOOLING.md) — accurate tooling summary (pre-commit uses **`uv run`**, DCO/`sh`, run-from-root note, CI) for contributors and PR descriptions.
 - [docs/MILESTONE_PR_CHECKLIST.md](docs/MILESTONE_PR_CHECKLIST.md) — optional PR description checklist aligned with milestone issue [#19](https://github.com/vllm-project/dllm-plugin/issues/19).

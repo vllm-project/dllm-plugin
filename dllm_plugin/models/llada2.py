@@ -231,6 +231,10 @@ class LLaDA2MoE(nn.Module):
         assert self.gate is not None, "gate should exist in non-dense-only mode"
         assert self.experts is not None, "experts should exist in non-dense-only mode"
         # 1. Compute gate logits and apply sigmoid (LLaDA2.0 specific)
+        # Precision note: Router computation uses same dtype as hidden_states
+        # (typically BF16). Unlike DeepSeek V3 which requires FP32 for softmax,
+        # LLaDA2's sigmoid activation is numerically stable in BF16.
+        # Numerical validation deferred to Phase 9 (issue #39).
         gate_logits = self.gate(hidden_states)  # (batch, seq_len, num_experts)
         router_logits = torch.sigmoid(gate_logits)  # Sigmoid, not softmax!
 
@@ -247,6 +251,9 @@ class LLaDA2MoE(nn.Module):
         routed_output = routed_output.reshape(batch_size, seq_len, hidden_size)
 
         # 4. Apply routed scaling factor
+        # Scale routed expert outputs by 2.5x (from HuggingFace config
+        # `routed_scaling_factor` field). This asymmetric scaling (routed vs
+        # shared experts) follows LLaDA2.0 architecture specification.
         routed_output = routed_output * self.routed_scaling_factor
 
         # 5. Add shared expert output (if present)

@@ -4,9 +4,15 @@
 **Branch:** feat/phase7-llada2-real-model  
 **Commit:** [6bdb2c1](https://github.com/vllm-project/dllm-plugin/commit/6bdb2c1)
 
+> **⚠️ IMPORTANT:** A/B benchmarks show torch.compile provides **NO measurable performance benefit** for current configuration (mini model, single-request, eager mode). See [Comparative Analysis](#comparative-analysis-ab-benchmark) for details.
+>
+> **Phase 8 Scope:** This phase establishes torch.compile **infrastructure** via `@support_torch_compile` decorator following vLLM best practices. Performance optimization on larger models and multi-request workloads is future work.
+
 ## Overview
 
 Phase 8 implements official vLLM torch.compile integration via the `@support_torch_compile` decorator. This replaces the manual `torch.compile()` approach with vLLM's native compilation system for better integration and automatic graph optimization.
+
+**Current status:** Infrastructure complete, but **no performance benefit observed** for LLaDA2.0-mini with single-request batching. Future optimization expected on larger models and multi-request workloads (Phase 7.1+).
 
 ## Test Configuration
 
@@ -109,8 +115,6 @@ Phase 8 implements official vLLM torch.compile integration via the `@support_tor
 **Measurement tool:** GuideLLM 0.6.0 (synchronous profile)
 
 ### Results
-
-**TODO:** Run A/B benchmark and fill in results
 
 | Metric | Baseline (compile OFF) | Optimized (compile ON) | Delta |
 |--------|------------------------|------------------------|-------|
