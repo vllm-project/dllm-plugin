@@ -27,8 +27,15 @@ def test_scheduler_stateless_add_request():
     mock_config.scheduler_config.max_num_seqs = 256
     mock_config.scheduler_config.max_num_batched_tokens = 8192
 
+    # Mock required scheduler parameters
+    mock_kv_cache_config = Mock()
+    mock_structured_output_manager = Mock()
+
     scheduler = DllmRuntimeScheduler(
         vllm_config=mock_config,
+        kv_cache_config=mock_kv_cache_config,
+        structured_output_manager=mock_structured_output_manager,
+        block_size=16,
     )
 
     # Create mock request with empty spec_token_ids (upstream default)
@@ -63,8 +70,15 @@ def test_scheduler_stateless_schedule_first_iteration():
     mock_config.scheduler_config.max_num_seqs = 256
     mock_config.scheduler_config.max_num_batched_tokens = 8192
 
+    # Mock required scheduler parameters
+    mock_kv_cache_config = Mock()
+    mock_structured_output_manager = Mock()
+
     scheduler = DllmRuntimeScheduler(
         vllm_config=mock_config,
+        kv_cache_config=mock_kv_cache_config,
+        structured_output_manager=mock_structured_output_manager,
+        block_size=16,
     )
 
     # Create mock request with empty spec_token_ids
@@ -102,8 +116,15 @@ def test_scheduler_stateless_no_cache_infrastructure():
     mock_config.scheduler_config.max_num_seqs = 256
     mock_config.scheduler_config.max_num_batched_tokens = 8192
 
+    # Mock required scheduler parameters
+    mock_kv_cache_config = Mock()
+    mock_structured_output_manager = Mock()
+
     scheduler = DllmRuntimeScheduler(
         vllm_config=mock_config,
+        kv_cache_config=mock_kv_cache_config,
+        structured_output_manager=mock_structured_output_manager,
+        block_size=16,
     )
 
     # Verify no cache attributes exist
