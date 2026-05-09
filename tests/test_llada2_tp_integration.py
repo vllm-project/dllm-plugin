@@ -7,6 +7,31 @@ import pytest
 import torch
 
 
+# Mock TP group for tests that create vLLM layers
+@pytest.fixture(autouse=True)
+def mock_tp_group():
+    """Mock tensor parallel group for TP integration tests."""
+    mock_group = MagicMock()
+    mock_group.world_size = 1
+    mock_group.rank = 0
+
+    with (
+        patch(
+            "vllm.distributed.parallel_state.get_tp_group",
+            return_value=mock_group,
+        ),
+        patch(
+            "vllm.distributed.parallel_state.get_tensor_model_parallel_world_size",
+            return_value=1,
+        ),
+        patch(
+            "vllm.distributed.parallel_state.get_tensor_model_parallel_rank",
+            return_value=0,
+        ),
+    ):
+        yield
+
+
 @pytest.mark.gpu
 @pytest.mark.parametrize("tp_size", [1, 2, 4])
 def test_llada2_tp_weight_loading(tp_size):
@@ -15,6 +40,7 @@ def test_llada2_tp_weight_loading(tp_size):
 
     # Mock vLLM config with TP
     config = MagicMock()
+    config.model_config.hf_config.architectures = ["LLaDA2ForCausalLM"]
     config.model_config.hf_config.num_hidden_layers = 2
     config.model_config.hf_config.num_attention_heads = 8
     config.model_config.hf_config.hidden_size = 512

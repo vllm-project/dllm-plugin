@@ -11,7 +11,6 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from dllm_plugin.scheduler import DllmScheduler
-from dllm_plugin.validation import assert_compatible_stack
 from dllm_plugin.worker import DllmWorker
 
 # Do **not** import ``runtime_scheduler`` / ``runtime_worker`` at package import time.
@@ -29,6 +28,10 @@ def __getattr__(name: str):
         from dllm_plugin.runtime_worker import DllmRuntimeWorker
 
         return DllmRuntimeWorker
+    if name == "assert_compatible_stack":
+        from dllm_plugin.validation import assert_compatible_stack
+
+        return assert_compatible_stack
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
