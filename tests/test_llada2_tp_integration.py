@@ -1,10 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """TP integration tests for LLaDA2.0 per-expert weight loading."""
 
-from unittest.mock import MagicMock, patch
-
 import pytest
-import torch
+
+pytest.importorskip("torch")  # Skip if torch not available (standard CI)
+
+from unittest.mock import MagicMock, patch  # noqa: E402
+
+import torch  # noqa: E402
 
 
 # Mock TP group for tests that create vLLM layers
