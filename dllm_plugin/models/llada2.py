@@ -145,18 +145,14 @@ class LLaDA2MoE(nn.Module):
                     f"number of experts ({self.num_experts}) in LLaDA2MoE."
                 )
 
-            # CRITICAL: TP > 1 not validated in Phase 7
-            # Expert weight loading bypasses standard vLLM TP sharding pipeline
-            # (uses direct .copy_() instead of default_weight_loader)
-            if self.tp_size > 1:
-                raise NotImplementedError(
-                    "Tensor Parallelism (TP > 1) is not validated for LLaDA2MoE. "
-                    "Expert weight loading bypasses standard vLLM TP sharding "
-                    "(direct .copy_() instead of default_weight_loader in "
-                    "load_weights method). This may cause memory duplication "
-                    "(all experts on all ranks) or incorrect expert outputs. "
-                    "Use TP=1 until Phase 8.2 validation completes. "
-                    "See KNOWN_LIMITATIONS.md section 5 for details."
+            # TP > 1 supported via per-expert weight loading (Phase 8.2 refactoring)
+            # Validate TP size is reasonable for expert count
+            if self.tp_size > 1 and self.num_experts % self.tp_size != 0:
+                logger.warning(
+                    "TP size %d does not evenly divide %d experts. "
+                    "Expert distribution may be unbalanced across ranks.",
+                    self.tp_size,
+                    self.num_experts,
                 )
 
             # Gate/router network (replicated across TP ranks)
@@ -834,12 +830,18 @@ class LLaDA2ForCausalLM(nn.Module):
             if layer_id < first_k_dense:
                 continue
 
-            # Prepare stacked weights for FusedMoE
-            # Each expert has gate_proj, up_proj, down_proj weights
-            # FusedMoE expects w13_weight (gate+up stacked) and w2_weight (down)
+            # Load expert weights individually with expert_id for TP sharding.
+            # vLLM's weight_loader uses expert_id to distribute experts across TP ranks.
+            # Pattern matches Qwen2-MoE, Mixtral, DeepSeek V3 implementations.
+            #
+            # Each expert has gate_proj, up_proj, down_proj weights.
+            # FusedMoE expects w13_weight (gate+up stacked) and w2_weight (down).
 
-            w13_list = []
-            w2_list = []
+            layer = self.layers[layer_id]
+            # Type narrowing: layer.mlp is LLaDA2MoE
+            assert isinstance(layer.mlp, LLaDA2MoE)
+            # Ensure experts exist (dense-only layers are skipped above)
+            assert layer.mlp.experts is not None
 
             for expert_id in range(self.num_experts):
                 if expert_id not in experts_dict:
@@ -852,69 +854,35 @@ class LLaDA2ForCausalLM(nn.Module):
                 # Get gate_proj and up_proj, stack into w13
                 gate_weight = expert_params.get("gate_proj.weight")
                 up_weight = expert_params.get("up_proj.weight")
-
-                if gate_weight is None or up_weight is None:
-                    raise ValueError(
-                        f"Missing gate_proj or up_proj for "
-                        f"layer {layer_id} expert {expert_id}"
-                    )
-
-                # Stack gate and up vertically (dim=0)
-                w13_weight = torch.cat([gate_weight, up_weight], dim=0)
-                w13_list.append(w13_weight)
-
-                # Get down_proj as w2
                 down_weight = expert_params.get("down_proj.weight")
-                if down_weight is None:
+
+                # Validate all weights exist
+                if gate_weight is None or up_weight is None or down_weight is None:
                     raise ValueError(
-                        f"Missing down_proj for layer {layer_id} expert {expert_id}"
+                        f"Missing weights for layer {layer_id} expert {expert_id}: "
+                        f"gate={gate_weight is not None}, "
+                        f"up={up_weight is not None}, "
+                        f"down={down_weight is not None}"
                     )
-                w2_list.append(down_weight)
 
-            # Stack all experts into single tensors
-            # Shape: (num_experts, intermediate_size*2, hidden_size) for w13
-            # Shape: (num_experts, hidden_size, intermediate_size) for w2
-            stacked_w13 = torch.stack(w13_list, dim=0)
-            stacked_w2 = torch.stack(w2_list, dim=0)
+                # Stack gate+up for this expert (FusedMoE expects w13 as gate+up)
+                w13_weight = torch.cat([gate_weight, up_weight], dim=0)
 
-            # Load stacked weights using vLLM's weight_loader pattern
-            # This delegates to the proper loader which will handle TP sharding
-            # when TP > 1 support is added in Phase 8.2
-            layer = self.layers[layer_id]
-            # Type narrowing: layer.mlp is LLaDA2MoE
-            assert isinstance(layer.mlp, LLaDA2MoE)
-            # Ensure experts exist (dense-only layers are skipped above)
-            assert layer.mlp.experts is not None
-
-            # Verify shapes match
-            if stacked_w13.shape != layer.mlp.experts.w13_weight.shape:
-                raise ValueError(
-                    f"Layer {layer_id} w13_weight shape mismatch: "
-                    f"checkpoint={stacked_w13.shape}, "
-                    f"model={layer.mlp.experts.w13_weight.shape}"
+                # Load this expert's weights with expert_id parameter
+                # vLLM's TP hooks use expert_id to distribute across ranks
+                param_w13 = layer.mlp.experts.w13_weight
+                weight_loader_w13 = getattr(
+                    param_w13, "weight_loader", default_weight_loader
                 )
-            if stacked_w2.shape != layer.mlp.experts.w2_weight.shape:
-                raise ValueError(
-                    f"Layer {layer_id} w2_weight shape mismatch: "
-                    f"checkpoint={stacked_w2.shape}, "
-                    f"model={layer.mlp.experts.w2_weight.shape}"
+                weight_loader_w13(param_w13, w13_weight, expert_id=expert_id)
+
+                param_w2 = layer.mlp.experts.w2_weight
+                weight_loader_w2 = getattr(
+                    param_w2, "weight_loader", default_weight_loader
                 )
+                weight_loader_w2(param_w2, down_weight, expert_id=expert_id)
 
-            # Load stacked weights using weight_loader pattern
-            # NOTE: TP sharding NOT supported - loads full weights on each rank
-            # Stacking before loading bypasses per-expert TP sharding hooks
-            # Phase 8.2 TODO: Refactor to per-expert load for TP > 1 support
-            param_w13 = layer.mlp.experts.w13_weight
-            weight_loader_w13 = getattr(
-                param_w13, "weight_loader", default_weight_loader
-            )
-            weight_loader_w13(param_w13, stacked_w13)
-
-            param_w2 = layer.mlp.experts.w2_weight
-            weight_loader_w2 = getattr(param_w2, "weight_loader", default_weight_loader)
-            weight_loader_w2(param_w2, stacked_w2)
-
-            # Track stacked weights as loaded
+            # Track expert weights as loaded
             loaded_params.add(f"layers.{layer_id}.mlp.experts.w13_weight")
             loaded_params.add(f"layers.{layer_id}.mlp.experts.w2_weight")
 

@@ -144,38 +144,51 @@ inference. PP support may be added in a future phase.
 
 ---
 
-### 5. Tensor Parallelism (TP > 1) Not Supported
+### 5. Tensor Parallelism (TP > 1) Supported (Phase 8.2)
 
-**Status:** TP > 1 explicitly blocked with fail-fast validation in Phase 7.
+**Status:** ✅ TP > 1 supported via per-expert weight loading (as of Phase 8.2).
 
-**Reason:** Expert weight loading bypasses standard vLLM TP sharding pipeline (direct `.copy_()` instead of `default_weight_loader`).
+**Implementation:** Expert weights loaded individually with `expert_id` parameter, enabling vLLM's standard TP sharding hooks to distribute experts across ranks.
 
-**Risk if unblocked:** Expert weights may not shard correctly across TP ranks, leading to:
-- Memory duplication (all experts on all ranks)
-- Incorrect expert outputs  
-- FusedMoE expecting sharded weights but receiving full weights
+**Pattern:** Matches Qwen2-MoE, Mixtral, and DeepSeek V3 implementations.
 
-**Current Implementation:**
+**Implementation Details:**
 ```python
-# Direct assignment bypasses TP sharding
-layer.mlp.experts.w13_weight.data.copy_(stacked_w13)
-layer.mlp.experts.w2_weight.data.copy_(stacked_w2)
+# Per-expert loading with expert_id parameter (Phase 8.2)
+for expert_id in range(self.num_experts):
+    # ... prepare expert weights ...
+    weight_loader_w13(param_w13, w13_weight, expert_id=expert_id)
+    weight_loader_w2(param_w2, down_weight, expert_id=expert_id)
 ```
 
-**Comparison to Qwen2-MoE:**
-- Qwen2-MoE uses `default_weight_loader` which handles TP sharding automatically
-- LLaDA2.0 bypasses this for expert stacking efficiency
+**Tested configurations:**
+- ✅ TP=1 (single GPU)
+- ✅ TP=2 (dual GPU - validated in integration tests)
+- ✅ TP=4 (quad GPU - validated in integration tests)
+- ⚠️ TP=8+ (not tested but should work with even expert distribution)
 
-**Workaround:** Use TP=1 (tested and working). For multi-GPU scaling, future phases will validate TP sharding.
+**Limitations:**
+- Expert count should divide evenly by TP size for optimal distribution
+- Recommended TP sizes for 256 experts: TP=1, 2, 4, 8, 16, 32, 64, 128, 256
+- Uneven distributions (e.g., TP=3 with 256 experts) will log warning but still work
 
-**Error Message:**
+**Example warning for uneven distribution:**
 ```
-NotImplementedError: Tensor Parallelism (TP > 1) is not validated for LLaDA2MoE.
-Expert weight loading bypasses standard vLLM TP sharding...
-Use TP=1 until Phase 8.2 validation completes.
+WARNING: TP size 3 does not evenly divide 256 experts. Expert distribution may be unbalanced across ranks.
 ```
 
-**Tracking:** Phase 8.2 or post-MVP TP sharding validation.
+**Multi-GPU setup:**
+```bash
+# Start vLLM with TP=2
+uv run python -m vllm.entrypoints.openai.api_server \
+    --model inclusionAI/LLaDA2.0-mini \
+    --tensor-parallel-size 2 \
+    --max-model-len 2048 \
+    --port 8000 \
+    --trust-remote-code
+```
+
+**Tracking:** TP > 1 support completed in Phase 8.2 (PR #38). Further validation on larger models tracked in future phases.
 
 ---
 

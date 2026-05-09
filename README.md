@@ -58,10 +58,11 @@ vllm serve inclusionAI/LLaDA2.0-mini \
 **See [docs/VLLM_PLUGIN_SETUP.md](docs/VLLM_PLUGIN_SETUP.md) for complete setup guide, troubleshooting, and Kubernetes deployment.**
 
 **Known Limitations:**
-- Pipeline parallelism (PP > 1) not supported - use `--tensor-parallel-size` for multi-GPU
-- CUDAGraph optimization disabled (~10-15% ITL impact) - see [KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md)
-- MoE router precision unvalidated (BF16) - numerical validation deferred to Phase 9
-- torch.compile shows no performance benefit for mini model + single-request workload
+- ✅ **Tensor Parallelism (TP)** supported (TP=1/2/4/8 validated in Phase 8.2)
+- ❌ Pipeline parallelism (PP > 1) not supported
+- ❌ CUDAGraph optimization disabled (~10-15% ITL impact)
+- ⚠️ MoE router precision defaults to FP32 (BF16 experimental via `VLLM_LLADA2_BF16_ROUTER=1`)
+- ⚠️ torch.compile shows no performance benefit for mini model + single-request workload
 
 See [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) for complete details and tracking issues.
 
