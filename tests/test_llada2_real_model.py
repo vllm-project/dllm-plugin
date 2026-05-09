@@ -202,14 +202,17 @@ class TestLLaDA2ForCausalLM:
 
         return config
 
-    def test_model_initialization(self, mock_vllm_config):
+    def test_model_initialization(self, mock_vllm_config, default_vllm_config):
         """Test model initializes with correct configuration."""
+        from vllm.config.vllm import set_current_vllm_config
+
         from dllm_plugin.models.llada2 import LLaDA2ForCausalLM
 
         with (
             patch("dllm_plugin.models.llada2.assert_compatible_stack"),
             patch("dllm_plugin.models.llada2.get_pp_group"),
             patch("dllm_plugin.models.llada2.get_tp_group"),
+            set_current_vllm_config(default_vllm_config),
         ):
             model = LLaDA2ForCausalLM(vllm_config=mock_vllm_config)
 
@@ -231,14 +234,17 @@ class TestLLaDA2ForCausalLM:
         ):
             LLaDA2ForCausalLM(vllm_config=mock_vllm_config)
 
-    def test_load_weights_regular_params(self, mock_vllm_config):
+    def test_load_weights_regular_params(self, mock_vllm_config, default_vllm_config):
         """Test weight loading for regular (non-expert) parameters."""
+        from vllm.config.vllm import set_current_vllm_config
+
         from dllm_plugin.models.llada2 import LLaDA2ForCausalLM
 
         with (
             patch("dllm_plugin.models.llada2.assert_compatible_stack"),
             patch("dllm_plugin.models.llada2.get_pp_group"),
             patch("dllm_plugin.models.llada2.get_tp_group"),
+            set_current_vllm_config(default_vllm_config),
         ):
             model = LLaDA2ForCausalLM(vllm_config=mock_vllm_config)
 
@@ -253,14 +259,17 @@ class TestLLaDA2ForCausalLM:
         # embed_tokens.weight should be loaded (not in unloaded set)
         assert "embed_tokens.weight" not in unloaded
 
-    def test_load_weights_expert_params(self, mock_vllm_config):
+    def test_load_weights_expert_params(self, mock_vllm_config, default_vllm_config):
         """Test weight loading for expert parameters."""
+        from vllm.config.vllm import set_current_vllm_config
+
         from dllm_plugin.models.llada2 import LLaDA2ForCausalLM
 
         with (
             patch("dllm_plugin.models.llada2.assert_compatible_stack"),
             patch("dllm_plugin.models.llada2.get_pp_group"),
             patch("dllm_plugin.models.llada2.get_tp_group"),
+            set_current_vllm_config(default_vllm_config),
         ):
             model = LLaDA2ForCausalLM(vllm_config=mock_vllm_config)
 
