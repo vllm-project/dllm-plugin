@@ -8,6 +8,8 @@ attention patterns with block-style masks.
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 # Skip all tests if vllm or torch not available
@@ -15,7 +17,31 @@ pytest.importorskip("vllm")
 torch = pytest.importorskip("torch")
 
 from dllm_plugin.config import DRAFT_SIZE  # noqa: E402
-from dllm_plugin.models.llada2_attention import LLaDA2BlockAttention  # noqa: E402
+
+
+# Mock TP group for unit tests that don't need actual parallel execution
+@pytest.fixture(autouse=True)
+def mock_tp_group():
+    """Mock tensor parallel group for tests that create vLLM layers."""
+    mock_group = MagicMock()
+    mock_group.world_size = 1
+    mock_group.rank = 0
+
+    with (
+        patch(
+            "vllm.distributed.parallel_state.get_tp_group",
+            return_value=mock_group,
+        ),
+        patch(
+            "vllm.distributed.parallel_state.get_tensor_model_parallel_world_size",
+            return_value=1,
+        ),
+        patch(
+            "vllm.distributed.parallel_state.get_tensor_model_parallel_rank",
+            return_value=0,
+        ),
+    ):
+        yield
 
 
 class TestLLaDA2BlockAttention:
@@ -24,6 +50,10 @@ class TestLLaDA2BlockAttention:
     @pytest.fixture
     def attention_layer(self):
         """Create a basic attention layer for testing."""
+        from dllm_plugin.models.llada2_attention import (
+            LLaDA2BlockAttention,  # noqa: E402
+        )
+
         return LLaDA2BlockAttention(
             num_heads=8,
             head_size=64,
@@ -156,6 +186,8 @@ class TestAttentionBackendCompatibility:
 
     def test_backend_environment_variables(self, monkeypatch):
         """Test that backend selection via env vars works."""
+        from dllm_plugin.models.llada2_attention import LLaDA2BlockAttention
+
         # FlashAttention
         monkeypatch.setenv("VLLM_ATTENTION_BACKEND", "FLASH_ATTN")
         attn_fa = LLaDA2BlockAttention(num_heads=8, head_size=64)
@@ -169,6 +201,8 @@ class TestAttentionBackendCompatibility:
     @pytest.mark.parametrize("backend", ["FLASH_ATTN", "FLASHINFER"])
     def test_backend_initialization(self, backend, monkeypatch):
         """Test that both backends initialize correctly."""
+        from dllm_plugin.models.llada2_attention import LLaDA2BlockAttention
+
         monkeypatch.setenv("VLLM_ATTENTION_BACKEND", backend)
         attn = LLaDA2BlockAttention(
             num_heads=16,
@@ -184,6 +218,8 @@ class TestEdgeCases:
 
     def test_single_token_block(self):
         """Test attention with block size of 1."""
+        from dllm_plugin.models.llada2_attention import LLaDA2BlockAttention
+
         # While DRAFT_SIZE=32 in practice, test the edge case
         attn = LLaDA2BlockAttention(num_heads=4, head_size=32)
         # Should still initialize correctly
@@ -191,6 +227,8 @@ class TestEdgeCases:
 
     def test_gqa_configuration(self):
         """Test grouped-query attention (GQA) configuration."""
+        from dllm_plugin.models.llada2_attention import LLaDA2BlockAttention
+
         # LLaDA2.0 may use GQA (num_kv_heads < num_heads)
         attn = LLaDA2BlockAttention(
             num_heads=32,
@@ -202,6 +240,8 @@ class TestEdgeCases:
 
     def test_custom_scale_factor(self):
         """Test custom attention scale factor."""
+        from dllm_plugin.models.llada2_attention import LLaDA2BlockAttention
+
         custom_scale = 0.1
         attn = LLaDA2BlockAttention(
             num_heads=8,
