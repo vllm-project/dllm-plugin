@@ -144,6 +144,20 @@ class LLaDA2MoE(nn.Module):
                     f"number of experts ({self.num_experts}) in LLaDA2MoE."
                 )
 
+            # CRITICAL: TP > 1 not validated in Phase 7
+            # Expert weight loading bypasses standard vLLM TP sharding pipeline
+            # (uses direct .copy_() instead of default_weight_loader)
+            if self.tp_size > 1:
+                raise NotImplementedError(
+                    "Tensor Parallelism (TP > 1) is not validated for LLaDA2MoE. "
+                    "Expert weight loading bypasses standard vLLM TP sharding "
+                    "(direct .copy_() instead of default_weight_loader in "
+                    "load_weights method). This may cause memory duplication "
+                    "(all experts on all ranks) or incorrect expert outputs. "
+                    "Use TP=1 until Phase 8.2 validation completes. "
+                    "See KNOWN_LIMITATIONS.md section 5 for details."
+                )
+
             # Gate/router network (replicated across TP ranks)
             self.gate = ReplicatedLinear(
                 self.hidden_size,

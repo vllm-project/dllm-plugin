@@ -137,13 +137,15 @@ inference. PP support may be added in a future phase.
 
 ---
 
-### 5. Tensor Parallelism (TP > 1) Weight Loading Needs Validation
+### 5. Tensor Parallelism (TP > 1) Not Supported
 
-**Status:** TP validation exists (`assert tp_size <= num_experts`) but expert weight loading bypasses standard vLLM TP sharding pipeline.
+**Status:** TP > 1 explicitly blocked with fail-fast validation in Phase 7.
 
-**Risk:** Expert weights may not shard correctly across TP ranks, leading to:
+**Reason:** Expert weight loading bypasses standard vLLM TP sharding pipeline (direct `.copy_()` instead of `default_weight_loader`).
+
+**Risk if unblocked:** Expert weights may not shard correctly across TP ranks, leading to:
 - Memory duplication (all experts on all ranks)
-- Incorrect expert outputs
+- Incorrect expert outputs  
 - FusedMoE expecting sharded weights but receiving full weights
 
 **Current Implementation:**
@@ -154,14 +156,19 @@ layer.mlp.experts.w2_weight.data.copy_(stacked_w2)
 ```
 
 **Comparison to Qwen2-MoE:**
-- Qwen2-MoE uses `default_weight_loader` which handles TP sharding
+- Qwen2-MoE uses `default_weight_loader` which handles TP sharding automatically
 - LLaDA2.0 bypasses this for expert stacking efficiency
 
-**Validation Status:** TP=1 tested and working. TP > 1 untested in Phase 7.
+**Workaround:** Use TP=1 (tested and working). For multi-GPU scaling, future phases will validate TP sharding.
 
-**Recommendation:** Use TP=1 for Phase 7. TP > 1 requires validation or fail-fast check.
+**Error Message:**
+```
+NotImplementedError: Tensor Parallelism (TP > 1) is not validated for LLaDA2MoE.
+Expert weight loading bypasses standard vLLM TP sharding...
+Use TP=1 until Phase 8.2 validation completes.
+```
 
-**Tracking:** Phase 8.2 or post-MVP validation.
+**Tracking:** Phase 8.2 or post-MVP TP sharding validation.
 
 ---
 
