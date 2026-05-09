@@ -180,7 +180,7 @@ def test_llada2_tp_weight_loading(tp_size):
 
 
 @pytest.mark.gpu
-def test_llada2_tp_uneven_distribution_warning(caplog):
+def test_llada2_tp_uneven_distribution_warning(caplog, default_vllm_config):
     """Test warning for TP size that doesn't evenly divide experts."""
     from dllm_plugin.models.llada2 import LLaDA2MoE
 
@@ -197,7 +197,12 @@ def test_llada2_tp_uneven_distribution_warning(caplog):
     # Create MoE layer (triggers warning in __init__)
     import logging
 
-    with caplog.at_level(logging.WARNING):
+    from vllm.config.vllm import set_current_vllm_config
+
+    with (
+        caplog.at_level(logging.WARNING),
+        set_current_vllm_config(default_vllm_config),
+    ):
         moe = LLaDA2MoE(
             config=config,
             tp_size=tp_size,
@@ -217,8 +222,10 @@ def test_llada2_tp_uneven_distribution_warning(caplog):
 
 
 @pytest.mark.gpu
-def test_llada2_no_tp_error_with_tp1():
+def test_llada2_no_tp_error_with_tp1(default_vllm_config):
     """Verify TP=1 doesn't trigger any warnings or errors."""
+    from vllm.config.vllm import set_current_vllm_config
+
     from dllm_plugin.models.llada2 import LLaDA2MoE
 
     # Mock config with TP=1
@@ -232,11 +239,12 @@ def test_llada2_no_tp_error_with_tp1():
     tp_size = 1
 
     # Create MoE layer (should not trigger any warnings)
-    moe = LLaDA2MoE(
-        config=config,
-        tp_size=tp_size,
-        prefix="test",
-    )
+    with set_current_vllm_config(default_vllm_config):
+        moe = LLaDA2MoE(
+            config=config,
+            tp_size=tp_size,
+            prefix="test",
+        )
 
     # Verify model was created successfully
     assert moe.num_experts == 256
@@ -244,7 +252,7 @@ def test_llada2_no_tp_error_with_tp1():
 
 
 @pytest.mark.gpu
-def test_llada2_tp_even_distribution_no_warning(caplog):
+def test_llada2_tp_even_distribution_no_warning(caplog, default_vllm_config):
     """Verify TP size that evenly divides experts doesn't warn."""
     from dllm_plugin.models.llada2 import LLaDA2MoE
 
@@ -261,7 +269,12 @@ def test_llada2_tp_even_distribution_no_warning(caplog):
     # Create MoE layer (should not warn)
     import logging
 
-    with caplog.at_level(logging.WARNING):
+    from vllm.config.vllm import set_current_vllm_config
+
+    with (
+        caplog.at_level(logging.WARNING),
+        set_current_vllm_config(default_vllm_config),
+    ):
         moe = LLaDA2MoE(
             config=config,
             tp_size=tp_size,
