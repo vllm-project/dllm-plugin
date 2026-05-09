@@ -57,6 +57,14 @@ vllm serve inclusionAI/LLaDA2.0-mini \
 
 **See [docs/VLLM_PLUGIN_SETUP.md](docs/VLLM_PLUGIN_SETUP.md) for complete setup guide, troubleshooting, and Kubernetes deployment.**
 
+**Known Limitations:**
+- Pipeline parallelism (PP > 1) not supported - use `--tensor-parallel-size` for multi-GPU
+- CUDAGraph optimization disabled (~10-15% ITL impact) - see [KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md)
+- MoE router precision unvalidated (BF16) - numerical validation deferred to Phase 9
+- torch.compile shows no performance benefit for mini model + single-request workload
+
+See [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) for complete details and tracking issues.
+
 **Short form aliases:**
 
 ```bash
@@ -70,6 +78,7 @@ vllm serve <model> \
 
 ## Docs
 
+- **[docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md)** — **known limitations, unvalidated assumptions, and tracking issues** for Phase 7+8 (router precision, CUDAGraph, torch.compile, PP/TP).
 - [docs/DESIGN_MVP.md](docs/DESIGN_MVP.md) — MVP architecture, field mapping, diagrams (public references only).
 - [docs/MOCK_STACK_MODEL.md](docs/MOCK_STACK_MODEL.md) — mock registered model ids and HF config surface (Phases 2–6).
 - [docs/CONTRACTS.md](docs/CONTRACTS.md) — copy-friendly field mapping / invariants for contributors (see DESIGN_MVP section 7).

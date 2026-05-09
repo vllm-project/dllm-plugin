@@ -231,10 +231,13 @@ class LLaDA2MoE(nn.Module):
         assert self.gate is not None, "gate should exist in non-dense-only mode"
         assert self.experts is not None, "experts should exist in non-dense-only mode"
         # 1. Compute gate logits and apply sigmoid (LLaDA2.0 specific)
-        # Precision note: Router computation uses same dtype as hidden_states
-        # (typically BF16). Unlike DeepSeek V3 which requires FP32 for softmax,
-        # LLaDA2's sigmoid activation is numerically stable in BF16.
-        # Numerical validation deferred to Phase 9 (issue #39).
+        # ⚠️ KNOWN LIMITATION: Router precision unvalidated (see KNOWN_LIMITATIONS.md)
+        # This uses same dtype as hidden_states (typically BF16). Unlike DeepSeek V3
+        # which requires FP32 for softmax, LLaDA2's sigmoid *may* be numerically
+        # stable in BF16, but this is UNVALIDATED. Phase 9 (issue #39) will compare
+        # BF16 vs FP32 routing decisions and measure quality impact.
+        # If Phase 9 reveals precision issues, upcast to FP32:
+        #   gate_logits = self.gate(hidden_states.float()).to(hidden_states.dtype)
         gate_logits = self.gate(hidden_states)  # (batch, seq_len, num_experts)
         router_logits = torch.sigmoid(gate_logits)  # Sigmoid, not softmax!
 
