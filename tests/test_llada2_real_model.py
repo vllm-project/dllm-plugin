@@ -68,11 +68,14 @@ class TestLLaDA2MoE:
         config.routed_scaling_factor = LLADA2_DEFAULT_ROUTED_SCALING_FACTOR
         return config
 
-    def test_moe_initialization(self, mock_config):
+    def test_moe_initialization(self, mock_config, default_vllm_config):
         """Test MoE layer initializes with correct parameters."""
+        from vllm.config.vllm import set_current_vllm_config
+
         from dllm_plugin.models.llada2 import LLaDA2MoE
 
-        moe = LLaDA2MoE(config=mock_config, tp_size=1, prefix="test")
+        with set_current_vllm_config(default_vllm_config):
+            moe = LLaDA2MoE(config=mock_config, tp_size=1, prefix="test")
 
         assert moe.num_experts == LLADA2_DEFAULT_NUM_EXPERTS
         assert moe.num_experts_per_tok == LLADA2_DEFAULT_NUM_EXPERTS_PER_TOK
@@ -80,19 +83,27 @@ class TestLLaDA2MoE:
         assert moe.topk_group == LLADA2_DEFAULT_TOPK_GROUP
         assert moe.routed_scaling_factor == LLADA2_DEFAULT_ROUTED_SCALING_FACTOR
 
-    def test_moe_tp_validation(self, mock_config):
+    def test_moe_tp_validation(self, mock_config, default_vllm_config):
         """Test that TP size validation works."""
+        from vllm.config.vllm import set_current_vllm_config
+
         from dllm_plugin.models.llada2 import LLaDA2MoE
 
         # Should fail if TP > num_experts
-        with pytest.raises(ValueError, match="Tensor parallelism size.*cannot exceed"):
+        with (
+            pytest.raises(ValueError, match="Tensor parallelism size.*cannot exceed"),
+            set_current_vllm_config(default_vllm_config),
+        ):
             LLaDA2MoE(config=mock_config, tp_size=300, prefix="test")
 
-    def test_group_limited_routing(self, mock_config):
+    def test_group_limited_routing(self, mock_config, default_vllm_config):
         """Test group-limited top-k routing logic."""
+        from vllm.config.vllm import set_current_vllm_config
+
         from dllm_plugin.models.llada2 import LLaDA2MoE
 
-        moe = LLaDA2MoE(config=mock_config, tp_size=1, prefix="test")
+        with set_current_vllm_config(default_vllm_config):
+            moe = LLaDA2MoE(config=mock_config, tp_size=1, prefix="test")
 
         # Create dummy router logits
         batch_size, seq_len = 2, 4
@@ -110,11 +121,14 @@ class TestLLaDA2MoE:
         weight_sums = weights.sum(dim=1)
         assert torch.allclose(weight_sums, torch.ones_like(weight_sums), atol=1e-5)
 
-    def test_shared_expert_initialization(self, mock_config):
+    def test_shared_expert_initialization(self, mock_config, default_vllm_config):
         """Test shared expert is initialized when configured."""
+        from vllm.config.vllm import set_current_vllm_config
+
         from dllm_plugin.models.llada2 import LLaDA2MoE
 
-        moe = LLaDA2MoE(config=mock_config, tp_size=1, prefix="test")
+        with set_current_vllm_config(default_vllm_config):
+            moe = LLaDA2MoE(config=mock_config, tp_size=1, prefix="test")
 
         # With num_shared_experts=1, shared expert layers should exist
         assert moe.shared_expert_gate is not None
@@ -143,16 +157,19 @@ class TestLLaDA2DecoderLayer:
 
         return config
 
-    def test_decoder_layer_initialization(self, mock_vllm_config):
+    def test_decoder_layer_initialization(self, mock_vllm_config, default_vllm_config):
         """Test decoder layer initializes correctly."""
+        from vllm.config.vllm import set_current_vllm_config
+
         from dllm_plugin.models.llada2 import LLaDA2DecoderLayer
 
-        layer = LLaDA2DecoderLayer(
-            config=mock_vllm_config.model_config.hf_config,
-            layer_idx=0,
-            vllm_config=mock_vllm_config,
-            prefix="model.layers.0",
-        )
+        with set_current_vllm_config(default_vllm_config):
+            layer = LLaDA2DecoderLayer(
+                config=mock_vllm_config.model_config.hf_config,
+                layer_idx=0,
+                vllm_config=mock_vllm_config,
+                prefix="model.layers.0",
+            )
 
         assert layer.layer_idx == 0
         assert layer.hidden_size == 512
