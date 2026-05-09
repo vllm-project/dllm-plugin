@@ -50,7 +50,6 @@ def default_vllm_config():
         cache_config = CacheConfig(
             block_size=16,
             gpu_memory_utilization=0.9,
-            swap_space_bytes=0,
             cache_dtype="auto",
         )
 
