@@ -4,14 +4,18 @@
 
 from __future__ import annotations
 
-import importlib
-from types import SimpleNamespace
-
 import pytest
 
-from dllm_plugin.config import DRAFT_SIZE
-from dllm_plugin.scheduler import DllmScheduler
-from dllm_plugin.worker import DllmWorker
+# Skip entire module if vLLM not available (standard CI)
+# Runtime adapters require vLLM to be importable
+pytest.importorskip("vllm")
+
+import importlib  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+from dllm_plugin.config import DRAFT_SIZE  # noqa: E402
+from dllm_plugin.scheduler import DllmScheduler  # noqa: E402
+from dllm_plugin.worker import DllmWorker  # noqa: E402
 
 
 def test_runtime_adapter_fqcn_targets_resolve() -> None:

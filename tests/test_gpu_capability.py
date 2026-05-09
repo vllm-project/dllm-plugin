@@ -8,11 +8,15 @@ Uses real CUDA queries when available, falls back to mocking for CI/test environ
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
-
 import pytest
 
-from dllm_plugin.gpu_capability import (
+# Skip entire module if torch not available (standard CI)
+# Required before @patch decorators which reference torch.cuda at collection time
+pytest.importorskip("torch")
+
+from unittest.mock import MagicMock, patch  # noqa: E402
+
+from dllm_plugin.gpu_capability import (  # noqa: E402
     GPUCapabilities,
     clear_capability_cache,
     detect_gpu_capabilities,
