@@ -28,6 +28,7 @@ def test_scheduler_stateless_add_request():
     mock_config.scheduler_config.max_num_batched_tokens = 8192
     mock_config.observability_config.kv_cache_metrics_sample = 1.0
     mock_config.kv_transfer_config = None
+    mock_config.kv_events_config = None
 
     # Mock required scheduler parameters
     mock_kv_cache_config = Mock()
@@ -73,6 +74,7 @@ def test_scheduler_stateless_schedule_first_iteration():
     mock_config.scheduler_config.max_num_batched_tokens = 8192
     mock_config.observability_config.kv_cache_metrics_sample = 1.0
     mock_config.kv_transfer_config = None
+    mock_config.kv_events_config = None
 
     # Mock required scheduler parameters
     mock_kv_cache_config = Mock()
@@ -121,6 +123,7 @@ def test_scheduler_stateless_no_cache_infrastructure():
     mock_config.scheduler_config.max_num_batched_tokens = 8192
     mock_config.observability_config.kv_cache_metrics_sample = 1.0
     mock_config.kv_transfer_config = None
+    mock_config.kv_events_config = None
 
     # Mock required scheduler parameters
     mock_kv_cache_config = Mock()
