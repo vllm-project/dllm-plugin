@@ -419,21 +419,17 @@ pytest -v -m dllm_gpu_integration tests/test_llada2_gpu_integration.py
   - [Qwen2 MoE](https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/models/qwen2_moe.py)
   - [DeepSeek V2](https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/models/deepseek_v2.py)
 
-### Known Limitations (Phase 7 MVP)
+### Known Limitations
 
 **Not implemented:**
 - **Pipeline parallelism (PP > 1)** - use TP instead
-- **Multi-request batching** - Only `max_num_seqs=1` supported for virtual batch attention
-  - Heterogeneous prefix lengths across multiple requests not yet supported
-  - Server will raise `NotImplementedError` if `num_reqs > 1` is attempted
-  - Future work: Phase 7.1 will add multi-request support
   
   **Production Impact:**
   
-  Single-request batching means the server processes one request at a time, even if GPU has spare capacity. Concurrency is limited to parallelism within a single request's block generation.
+  Tensor parallelism (TP) is supported and recommended for multi-GPU inference.
   
-  **Workarounds for production:**
-  1. **Horizontal scaling:** Deploy multiple vLLM instances behind load balancer
+  **Recommended configuration:**
+  1. **Tensor parallelism:** Use `--tensor-parallel-size N` (max N=256 experts)
   2. **Request coalescing:** Buffer incoming requests and route to least-loaded instance
   3. **Upgrade to Phase 7.1:** Track follow-up issue for multi-request support timeline
   
@@ -466,7 +462,6 @@ pytest -v -m dllm_gpu_integration tests/test_llada2_gpu_integration.py
 - See [dllm-plugin issue #40](https://github.com/vllm-project/dllm-plugin/issues/40) for Phase 9 plan
 
 **Future enhancements** (post-MVP):
-- **Phase 7.1:** Multi-request batching with heterogeneous prefix lengths
 - Full PP support if use cases emerge
 - Optimized attention kernels (fused prefix + block in single pass)
 - Sparse/windowed attention for very long contexts

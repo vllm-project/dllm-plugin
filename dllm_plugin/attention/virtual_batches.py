@@ -64,18 +64,6 @@ def make_block_attention_virtual_batches(
             f"got {len(num_prefix_tokens_per_request)}"
         )
 
-    # P1-1: Multi-request batching limitation (Phase 7 MVP)
-    # Infrastructure is present and tests pass, but conservatively limit to
-    # single-request until Phase 7.1 production validation complete.
-    # TODO(Phase 7.1): Remove this check after multi-request validation (#41)
-    if num_reqs > 1:
-        raise NotImplementedError(
-            "Multi-request batching not yet enabled in Phase 7 MVP. "
-            "Virtual batch infrastructure supports heterogeneous prefix lengths, "
-            "but requires additional production validation (Phase 7.1, issue #41). "
-            "Current limitation: max_num_seqs=1"
-        )
-
     # Convert to numpy for indexing calculations (vLLM pattern)
     num_prefix_tokens_np = np.array(num_prefix_tokens_per_request, dtype=np.int32)
     max_prefix_tokens = int(num_prefix_tokens_np.max())

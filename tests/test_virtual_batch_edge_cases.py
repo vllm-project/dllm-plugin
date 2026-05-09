@@ -17,21 +17,14 @@ from dllm_plugin.attention.virtual_batches import (
 from dllm_plugin.vllm_compat import CommonAttentionMetadata
 
 
-@pytest.mark.xfail(
-    reason="Phase 7.1: Multi-request batching infrastructure present but "
-    "conservatively disabled pending production validation (issue #41)",
-    raises=NotImplementedError,
-    strict=True,
-)
 def test_heterogeneous_prefix_lengths():
     """Test virtual batches with heterogeneous prefix lengths [0, 16, 32, 48].
 
     Validates that each request's block chunk pages are extracted from the
     correct position in the block table (based on actual prefix length, not max).
 
-    NOTE: This test validates Phase 7.1 infrastructure. The implementation is
-    complete and correct, but multi-request support is conservatively disabled
-    in Phase 7 MVP pending additional production validation.
+    This validates Phase 7.1 multi-request batching with heterogeneous prefix
+    lengths - a key requirement for efficient concurrent request handling.
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     num_reqs = 4
