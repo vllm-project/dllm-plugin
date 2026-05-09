@@ -149,10 +149,17 @@ class LLaDA2BlockAttention(nn.Module):
         """Query KV cache block size from cache_config.
 
         Returns:
-            KV cache block size in tokens. Defaults to 16 if not available.
+            KV cache block size in tokens.
+
+        Raises:
+            ValueError: If cache_config is None (required for block attention).
         """
         if self.cache_config is None:
-            return 16  # Standard vLLM default
+            raise ValueError(
+                "cache_config required for LLaDA2 block attention. "
+                "KV cache block size must match actual vLLM configuration "
+                "for correct virtual batch slicing."
+            )
 
         # Try common attribute names for block size
         for attr in ("block_size", "num_tokens_per_block", "token_block_size"):
