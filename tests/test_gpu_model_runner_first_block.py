@@ -9,16 +9,15 @@ import os
 import pytest
 
 pytest.importorskip("vllm")
-pytest.importorskip("torch")
+torch = pytest.importorskip("torch")  # Keep reference for skip check
 
-from unittest.mock import Mock
+from unittest.mock import Mock  # noqa: E402
 
-import torch
-
-from dllm_plugin.config import DRAFT_SIZE
-from dllm_plugin.gpu_model_runner import DllmGPUModelRunner
+from dllm_plugin.config import DRAFT_SIZE  # noqa: E402
+from dllm_plugin.gpu_model_runner import DllmGPUModelRunner  # noqa: E402
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA GPU")
 def test_model_runner_detects_empty_drafts():
     """Validate model runner detects empty drafts and generates first block.
 
@@ -66,6 +65,7 @@ def test_model_runner_detects_empty_drafts():
     )
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA GPU")
 def test_model_runner_skips_generation_for_existing_drafts():
     """Validate model runner doesn't generate first block when draft exists.
 
@@ -98,6 +98,7 @@ def test_model_runner_skips_generation_for_existing_drafts():
     )
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA GPU")
 def test_model_runner_first_block_deterministic():
     """Validate that first blocks are deterministic from prompt hash.
 
