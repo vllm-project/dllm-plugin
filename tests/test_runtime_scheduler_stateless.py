@@ -8,7 +8,7 @@ import pytest
 
 pytest.importorskip("vllm")
 
-from unittest.mock import MagicMock, Mock
+from unittest.mock import Mock
 
 from dllm_plugin.runtime_scheduler import DllmRuntimeScheduler
 
@@ -29,7 +29,6 @@ def test_scheduler_stateless_add_request():
 
     scheduler = DllmRuntimeScheduler(
         vllm_config=mock_config,
-        executor=MagicMock(),
     )
 
     # Create mock request with empty spec_token_ids (upstream default)
@@ -66,7 +65,6 @@ def test_scheduler_stateless_schedule_first_iteration():
 
     scheduler = DllmRuntimeScheduler(
         vllm_config=mock_config,
-        executor=MagicMock(),
     )
 
     # Create mock request with empty spec_token_ids
@@ -106,7 +104,6 @@ def test_scheduler_stateless_no_cache_infrastructure():
 
     scheduler = DllmRuntimeScheduler(
         vllm_config=mock_config,
-        executor=MagicMock(),
     )
 
     # Verify no cache attributes exist

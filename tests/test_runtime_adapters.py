@@ -108,12 +108,13 @@ def test_runtime_scheduler_contract_rejects_missing_output_coverage() -> None:
 def test_runtime_worker_contract_rejects_missing_input_draft() -> None:
     from dllm_plugin.runtime_worker import validate_runtime_input_draft
 
-    with pytest.raises(ValueError, match="missing scheduled_spec_decode_tokens"):
-        validate_runtime_input_draft(
-            request_id="r1",
-            input_draft=None,
-            draft_size=DRAFT_SIZE,
-        )
+    # First iteration: None input_draft is valid (returns empty list)
+    result = validate_runtime_input_draft(
+        request_id="r1",
+        input_draft=None,
+        draft_size=DRAFT_SIZE,
+    )
+    assert result == [], "First iteration with None input should return empty list"
 
 
 def test_runtime_worker_contract_rejects_malformed_input_draft_length() -> None:
