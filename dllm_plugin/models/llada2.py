@@ -900,7 +900,10 @@ class LLaDA2ForCausalLM(nn.Module):
                     f"model={layer.mlp.experts.w2_weight.shape}"
                 )
 
-            # Use weight_loader pattern (supports future TP sharding)
+            # Load stacked weights using weight_loader pattern
+            # NOTE: TP sharding NOT supported - loads full weights on each rank
+            # Stacking before loading bypasses per-expert TP sharding hooks
+            # Phase 8.2 TODO: Refactor to per-expert load for TP > 1 support
             param_w13 = layer.mlp.experts.w13_weight
             weight_loader_w13 = getattr(
                 param_w13, "weight_loader", default_weight_loader

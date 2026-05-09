@@ -139,11 +139,11 @@ class LLaDA2BlockAttention(nn.Module):
             attn_type=attn_type,
         )
 
-        # Attention strategy: Dual-chunk approach (delegates to vLLM attention backend)
-        # Uses vLLM's PagedAttention with block-style metadata from scheduler.
-        # The scheduler/worker sets up attention metadata for block visibility;
-        # this layer trusts the backend to handle non-causal patterns correctly.
-        self._use_dual_chunk = True
+        # Attention strategy: Dual-chunk decomposition (Strategy 2)
+        # Decomposes each forward pass into prefix chunk (causal over
+        # committed prefix) and block chunk (non-causal within current block).
+        # Delegates to vLLM's PagedAttention with per-chunk metadata.
+        # Strategy 1 (metadata modification) deferred - see ATTENTION_DESIGN.md
 
     def _get_kv_cache_block_size(self) -> int:
         """Query KV cache block size from cache_config.
@@ -212,22 +212,18 @@ class LLaDA2BlockAttention(nn.Module):
         q = q.reshape(batch_size, seq_len, self.num_heads * self.head_size)
         k = k.reshape(batch_size, seq_len, self.num_kv_heads * self.head_size)
 
-        # Apply attention
-        if self._use_dual_chunk:
-            attn_output = self._forward_dual_chunk(
-                q,
-                k,
-                v,
-                positions,
-                kv_cache,
-                attn_metadata,
-                kv_scale,
-                num_prefix_tokens_list,
-            )
-        else:
-            attn_output = self._forward_metadata_modification(
-                q, k, v, positions, kv_cache, attn_metadata, kv_scale
-            )
+        # Apply block-style attention via dual-chunk decomposition
+        # Strategy 1 (metadata modification) deferred - see ATTENTION_DESIGN.md
+        attn_output = self._forward_dual_chunk(
+            q,
+            k,
+            v,
+            positions,
+            kv_cache,
+            attn_metadata,
+            kv_scale,
+            num_prefix_tokens_list,
+        )
 
         # Output projection
         output, _ = self.o_proj(attn_output)
@@ -324,32 +320,6 @@ class LLaDA2BlockAttention(nn.Module):
 
         # Combine outputs (additive for overlapping queries, disjoint KV)
         return prefix_output + block_output
-
-    def _forward_metadata_modification(
-        self,
-        query: torch.Tensor,
-        key: torch.Tensor,
-        value: torch.Tensor,
-        positions: torch.Tensor,
-        kv_cache: torch.Tensor,
-        attn_metadata: AttentionMetadata,
-        kv_scale: float = 1.0,
-    ) -> torch.Tensor:
-        """Strategy 1: Modify attention metadata for block-style mask.
-
-        **Not implemented in MVP.** This is a placeholder for future optimization.
-
-        The idea is to modify `attn_metadata` to represent block-style visibility
-        using vLLM's existing slot_mapping and is_causal=False, avoiding dual-chunk
-        overhead.
-
-        Deferred to post-MVP for performance optimization.
-        """
-        raise NotImplementedError(
-            "Strategy 1 (metadata modification) not implemented in Phase 7 MVP. "
-            "Using Strategy 2 (dual-chunk) instead. "
-            "See ATTENTION_DESIGN.md for details."
-        )
 
 
 # Alias for compatibility with model code expecting standard naming

@@ -259,19 +259,20 @@ class DllmGPUModelRunner(HookedGPUModelRunner):
                 # Fallback for edge cases (shouldn't happen with spec decode)
                 block_logits_tensor = all_logits
 
-            # Validate logits don't contain NaN/inf before remasking
-            if torch.isnan(block_logits_tensor).any():
-                nan_count = torch.isnan(block_logits_tensor).sum().item()
-                raise ValueError(
-                    f"Logits contain {nan_count} NaN value(s) for request {req_id}. "
-                    f"Shape: {block_logits_tensor.shape}"
-                )
-            if torch.isinf(block_logits_tensor).any():
-                inf_count = torch.isinf(block_logits_tensor).sum().item()
-                raise ValueError(
-                    f"Logits contain {inf_count} inf value(s) for request {req_id}. "
-                    f"Shape: {block_logits_tensor.shape}"
-                )
+            # Validate logits before remasking (debug mode only - CPU-GPU sync overhead)
+            if os.getenv("VLLM_DEBUG", "0") == "1":
+                if torch.isnan(block_logits_tensor).any():
+                    nan_count = torch.isnan(block_logits_tensor).sum().item()
+                    raise ValueError(
+                        f"Logits contain {nan_count} NaN value(s) for "
+                        f"request {req_id}. Shape: {block_logits_tensor.shape}"
+                    )
+                if torch.isinf(block_logits_tensor).any():
+                    inf_count = torch.isinf(block_logits_tensor).sum().item()
+                    raise ValueError(
+                        f"Logits contain {inf_count} inf value(s) for "
+                        f"request {req_id}. Shape: {block_logits_tensor.shape}"
+                    )
 
             block_logits = self._tensor_block_to_rows(block_logits_tensor)
 
