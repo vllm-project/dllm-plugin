@@ -36,11 +36,28 @@ The optional extra pins **`vllm>=0.20.0,<0.21`** (API-churn guard, bart-plugin-s
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for pre-commit, CI parity, and contribution norms.
 
-## Using the plugin (future)
+## Using the plugin
 
 **PyPI vs Python package:** install the distribution as **`vllm-dllm-plugin`** (`pip install vllm-dllm-plugin` / `uv add vllm-dllm-plugin`). Import and CLI class paths use the **`dllm_plugin`** package name.
 
-For MVP stack bring-up, enable the plugin by name and point vLLM at the runtime adapters. **Preferred** short flags:
+**Quick start:**
+
+```bash
+export VLLM_PLUGINS=dllm  # Entry point name is "dllm" (not "dllm_plugin")
+export VLLM_USE_V2_MODEL_RUNNER=1
+export VLLM_ENABLE_V1_MULTIPROCESSING=0
+
+vllm serve inclusionAI/LLaDA2.0-mini \
+  --max-model-len 2048 \
+  --max-num-seqs 32 \
+  --trust-remote-code \
+  --scheduler-cls dllm_plugin.runtime_scheduler.DllmRuntimeScheduler \
+  --worker-cls dllm_plugin.runtime_worker.DllmRuntimeWorker
+```
+
+**See [docs/VLLM_PLUGIN_SETUP.md](docs/VLLM_PLUGIN_SETUP.md) for complete setup guide, troubleshooting, and Kubernetes deployment.**
+
+**Short form aliases:**
 
 ```bash
 export VLLM_PLUGINS=dllm
@@ -58,7 +75,8 @@ vllm serve <model> \
 - [docs/CONTRACTS.md](docs/CONTRACTS.md) — copy-friendly field mapping / invariants for contributors (see DESIGN_MVP section 7).
 - [docs/ROADMAP.md](docs/ROADMAP.md) — phased future work.
 - [docs/OPERATOR_LLaDA2.md](docs/OPERATOR_LLaDA2.md) — Phase 6 operator runbook (`VLLM_PLUGINS`, CLI flags, v2 runner, integration test).
-- [docs/structured-outputs-benchmark-results.md](docs/structured-outputs-benchmark-results.md) — structured outputs performance benchmarks (guidellm, LLaDA2.0-mini, A100).
+- [docs/BENCHMARK_RESULTS_MULTI_REQUEST.md](docs/BENCHMARK_RESULTS_MULTI_REQUEST.md) — **comprehensive multi-request batching benchmarks** (guidellm, concurrency spectrum 1→100, A100-40GB).
+- [docs/structured-outputs-benchmark-results.md](docs/structured-outputs-benchmark-results.md) — initial structured outputs benchmarks (superseded by BENCHMARK_RESULTS_MULTI_REQUEST.md).
 - [docs/TOOLING.md](docs/TOOLING.md) — accurate tooling summary (pre-commit uses **`uv run`**, DCO/`sh`, run-from-root note, CI) for contributors and PR descriptions.
 - [docs/MILESTONE_PR_CHECKLIST.md](docs/MILESTONE_PR_CHECKLIST.md) — optional PR description checklist aligned with milestone issue [#19](https://github.com/vllm-project/dllm-plugin/issues/19).
 

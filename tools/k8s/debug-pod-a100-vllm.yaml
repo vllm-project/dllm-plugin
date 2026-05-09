@@ -31,7 +31,7 @@ spec:
           nvidia.com/gpu: 1
       env:
         - name: VLLM_PLUGINS
-          value: dllm_plugin
+          value: dllm
         - name: VLLM_USE_V2_MODEL_RUNNER
           value: "1"
         - name: VLLM_ENABLE_V1_MULTIPROCESSING

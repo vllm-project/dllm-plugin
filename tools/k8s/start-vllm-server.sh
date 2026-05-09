@@ -38,10 +38,15 @@ pkill -9 -f vllm || true
 sleep 2
 
 echo "=== Starting vLLM server ==="
+# IMPORTANT: Plugin entry point name is "dllm" (not "dllm_plugin")
 export VLLM_PLUGINS=dllm
-nohup uv run python -m vllm.entrypoints.openai.api_server \
-    --model inclusionAI/LLaDA2.0-mini \
+export VLLM_USE_V2_MODEL_RUNNER=1
+export VLLM_ENABLE_V1_MULTIPROCESSING=0
+
+# Use vllm serve CLI (simpler than python -m vllm.entrypoints.openai.api_server)
+nohup vllm serve inclusionAI/LLaDA2.0-mini \
     --max-model-len 2048 \
+    --max-num-seqs 32 \
     --port 8000 \
     --trust-remote-code \
     --gpu-memory-utilization 0.85 \

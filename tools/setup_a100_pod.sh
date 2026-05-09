@@ -49,17 +49,19 @@ kubectl exec $POD_NAME -- bash -c "
   pkill -9 -f 'python.*vllm' || true
   sleep 2
 
-  # Start server
+  # Start server with vllm serve CLI
+  # NOTE: Plugin entry point name is 'dllm' (not 'dllm_plugin')
   export VLLM_PLUGINS=dllm
   export VLLM_USE_V2_MODEL_RUNNER=1
   export VLLM_ENABLE_V1_MULTIPROCESSING=0
-  nohup python -m vllm.entrypoints.openai.api_server \
-    --model $MODEL \
+  nohup vllm serve $MODEL \
     --max-model-len 2048 \
+    --max-num-seqs 32 \
     --port 8000 \
     --trust-remote-code \
-    --gpu-memory-utilization 0.9 \
+    --gpu-memory-utilization 0.85 \
     --scheduler-cls dllm_plugin.runtime_scheduler.DllmRuntimeScheduler \
+    --worker-cls dllm_plugin.runtime_worker.DllmRuntimeWorker \
     > /tmp/vllm-server.log 2>&1 &
 "
 
