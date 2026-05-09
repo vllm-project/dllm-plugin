@@ -38,8 +38,10 @@ def mock_tp_group():
 
 @pytest.mark.gpu
 @pytest.mark.parametrize("tp_size", [1, 2, 4])
-def test_llada2_tp_weight_loading(tp_size):
+def test_llada2_tp_weight_loading(tp_size, default_vllm_config):
     """Validate per-expert weight loading distributes experts across TP ranks."""
+    from vllm.config.vllm import set_current_vllm_config
+
     from dllm_plugin.models.llada2 import LLaDA2ForCausalLM
 
     # Mock vLLM config with TP
@@ -66,7 +68,8 @@ def test_llada2_tp_weight_loading(tp_size):
     config.lora_config = None
 
     # Create model
-    model = LLaDA2ForCausalLM(vllm_config=config)
+    with set_current_vllm_config(default_vllm_config):
+        model = LLaDA2ForCausalLM(vllm_config=config)
 
     # Simulate weight loading
     fake_weights = []

@@ -377,14 +377,17 @@ class TestModelForwardShape:
 
         return config
 
-    def test_forward_output_shape(self, minimal_model_config):
+    def test_forward_output_shape(self, minimal_model_config, default_vllm_config):
         """Test that forward pass produces correct output shape."""
+        from vllm.config.vllm import set_current_vllm_config
+
         from dllm_plugin.models.llada2 import LLaDA2ForCausalLM
 
         with (
             patch("dllm_plugin.models.llada2.assert_compatible_stack"),
             patch("dllm_plugin.models.llada2.get_pp_group") as mock_pp,
             patch("dllm_plugin.models.llada2.get_tp_group"),
+            set_current_vllm_config(default_vllm_config),
         ):
             # Mock PP group
             mock_pp.return_value.is_first_rank = True
@@ -411,15 +414,20 @@ class TestConfigDefaults:
         assert LLADA2_DEFAULT_TOPK_GROUP == 4
         assert LLADA2_DEFAULT_ROUTED_SCALING_FACTOR == 2.5
 
-    def test_config_fallback_to_defaults(self):
+    def test_config_fallback_to_defaults(self, default_vllm_config):
         """Test that missing config values fall back to defaults."""
+        from vllm.config.vllm import set_current_vllm_config
+
         from dllm_plugin.models.llada2 import LLaDA2MoE
 
         # Config without MoE-specific parameters
         config = Mock()
         config.hidden_size = 512
 
-        with patch("dllm_plugin.models.llada2.get_tp_group"):
+        with (
+            patch("dllm_plugin.models.llada2.get_tp_group"),
+            set_current_vllm_config(default_vllm_config),
+        ):
             moe = LLaDA2MoE(config=config, tp_size=1, prefix="test")
 
         # Should use defaults
