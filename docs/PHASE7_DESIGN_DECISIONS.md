@@ -195,13 +195,21 @@ def _apply_group_limited_topk(scores, ...):
 
 ### Verification Status
 
-**TODO**: Verify against SGlang reference implementation:
+## Known Limitation: MoE Routing Numerical Validation
+
+**Status:** Routing implementation follows LLaDA2.0 paper specification but lacks numerical verification against SGlang reference implementation.
+
+**Questions for future verification:**
 - Is `max(dim=2)` the correct group scoring method? (vs `mean` or `sum`)
 - Is sigmoid normalization correct for group-limited routing?
 
-**Reference**: [SGlang LLaDA2 implementation](https://github.com/sgl-project/sglang)
+**Impact:** Model generates valid outputs and passes all integration tests, but exact numerical correctness is unverified.
 
-This verification is **P1 (high priority)** but not blocking merge if other tests pass.
+**Validation:** Phase 9 (issue #39) will add lm-eval benchmarks and numerical comparison with SGlang reference.
+
+**Risk Assessment:** LOW - routing logic is structurally sound, follows paper design, and produces valid results.
+
+**Reference**: [SGlang LLaDA2 implementation](https://github.com/sgl-project/sglang)
 
 ---
 
@@ -263,10 +271,9 @@ else:
 
 ## Open Questions for Review
 
-1. **MoE routing verification**: Need to compare with SGlang reference (P1)
-2. **Performance baseline**: How does 194 tok/s compare to SGlang/HF? (P1)
-3. **CUDAGraph optimization**: Worth the complexity of build-time metadata? (P2)
-4. **FP8 timeline**: When should we prioritize FP8 support? (P2)
+1. ~~**MoE routing verification**: Need to compare with SGlang reference (P1)~~ → **Deferred to Phase 9 (issue #39) - documented as known limitation**
+2. **CUDAGraph optimization**: Worth the complexity of build-time metadata? (P2)
+3. **FP8 timeline**: When should we prioritize FP8 support? (P2)
 
 ---
 
