@@ -48,7 +48,7 @@ class TestLLaDA2BlockAttention:
     """Tests for block-style attention module."""
 
     @pytest.fixture
-    def attention_layer(self):
+    def attention_layer(self, default_vllm_config):
         """Create a basic attention layer for testing."""
         from dllm_plugin.models.llada2_attention import (
             LLaDA2BlockAttention,  # noqa: E402
@@ -184,7 +184,7 @@ class TestBlockMaskGeometry:
 class TestAttentionBackendCompatibility:
     """Tests for backend compatibility (FlashAttention vs FlashInfer)."""
 
-    def test_backend_environment_variables(self, monkeypatch):
+    def test_backend_environment_variables(self, default_vllm_config, monkeypatch):
         """Test that backend selection via env vars works."""
         from dllm_plugin.models.llada2_attention import LLaDA2BlockAttention
 
@@ -199,7 +199,7 @@ class TestAttentionBackendCompatibility:
         assert attn_fi.attn is not None
 
     @pytest.mark.parametrize("backend", ["FLASH_ATTN", "FLASHINFER"])
-    def test_backend_initialization(self, backend, monkeypatch):
+    def test_backend_initialization(self, default_vllm_config, backend, monkeypatch):
         """Test that both backends initialize correctly."""
         from dllm_plugin.models.llada2_attention import LLaDA2BlockAttention
 
@@ -216,7 +216,7 @@ class TestAttentionBackendCompatibility:
 class TestEdgeCases:
     """Tests for edge cases and boundary conditions."""
 
-    def test_single_token_block(self):
+    def test_single_token_block(self, default_vllm_config):
         """Test attention with block size of 1."""
         from dllm_plugin.models.llada2_attention import LLaDA2BlockAttention
 
@@ -225,7 +225,7 @@ class TestEdgeCases:
         # Should still initialize correctly
         assert attn.num_heads == 4
 
-    def test_gqa_configuration(self):
+    def test_gqa_configuration(self, default_vllm_config):
         """Test grouped-query attention (GQA) configuration."""
         from dllm_plugin.models.llada2_attention import LLaDA2BlockAttention
 
@@ -238,7 +238,7 @@ class TestEdgeCases:
         assert attn.num_heads == 32
         assert attn.num_kv_heads == 8
 
-    def test_custom_scale_factor(self):
+    def test_custom_scale_factor(self, default_vllm_config):
         """Test custom attention scale factor."""
         from dllm_plugin.models.llada2_attention import LLaDA2BlockAttention
 
