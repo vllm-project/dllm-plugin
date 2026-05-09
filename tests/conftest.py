@@ -53,7 +53,7 @@ def default_vllm_config():
             cache_dtype="auto",
         )
 
-        compilation_config = CompilationConfig(level=0)
+        compilation_config = CompilationConfig()
 
         vllm_config = VllmConfig(
             model_config=model_config,
