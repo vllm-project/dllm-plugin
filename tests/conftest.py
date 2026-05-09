@@ -44,6 +44,7 @@ def default_vllm_config():
             max_num_batched_tokens=2048,
             max_num_seqs=8,
             max_model_len=2048,
+            is_encoder_decoder=False,
         )
 
         cache_config = CacheConfig(
