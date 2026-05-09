@@ -27,6 +27,7 @@ def test_scheduler_stateless_add_request():
     mock_config.scheduler_config.max_num_seqs = 256
     mock_config.scheduler_config.max_num_batched_tokens = 8192
     mock_config.observability_config.kv_cache_metrics_sample = 1.0
+    mock_config.kv_transfer_config = None
 
     # Mock required scheduler parameters
     mock_kv_cache_config = Mock()
@@ -70,10 +71,11 @@ def test_scheduler_stateless_schedule_first_iteration():
     mock_config.model_config.max_model_len = 8192
     mock_config.scheduler_config.max_num_seqs = 256
     mock_config.scheduler_config.max_num_batched_tokens = 8192
+    mock_config.observability_config.kv_cache_metrics_sample = 1.0
+    mock_config.kv_transfer_config = None
 
     # Mock required scheduler parameters
     mock_kv_cache_config = Mock()
-    mock_kv_cache_config.sample_rate = 1.0  # For KVCacheMetrics initialization
     mock_structured_output_manager = Mock()
 
     scheduler = DllmRuntimeScheduler(
@@ -117,10 +119,11 @@ def test_scheduler_stateless_no_cache_infrastructure():
     mock_config.model_config.max_model_len = 8192
     mock_config.scheduler_config.max_num_seqs = 256
     mock_config.scheduler_config.max_num_batched_tokens = 8192
+    mock_config.observability_config.kv_cache_metrics_sample = 1.0
+    mock_config.kv_transfer_config = None
 
     # Mock required scheduler parameters
     mock_kv_cache_config = Mock()
-    mock_kv_cache_config.sample_rate = 1.0  # For KVCacheMetrics initialization
     mock_structured_output_manager = Mock()
 
     scheduler = DllmRuntimeScheduler(
