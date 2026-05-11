@@ -185,27 +185,47 @@ class LLaDA2MoE(nn.Module):
 
         # Shared expert (always active, not routed)
         if self.num_shared_experts > 0:
-            # Shared expert uses larger intermediate size
-            shared_intermediate_size = (
-                self.num_shared_experts * self.moe_intermediate_size
-            )
+            # Dense-only layers (first_k_dense_replace) use
+            # config.intermediate_size. MoE layers use
+            # num_shared_experts * moe_intermediate_size for shared expert
+            if self.is_dense_only:
+                # Dense-only: use full intermediate_size from config (e.g., 5120)
+                shared_intermediate_size = getattr(
+                    config,
+                    "intermediate_size",
+                    self.num_shared_experts * self.moe_intermediate_size,
+                )
+                # Dense-only: weights are at {prefix}.{param}.weight (no "shared_expert")
+                gate_prefix = f"{prefix}.gate_proj"
+                up_prefix = f"{prefix}.up_proj"
+                down_prefix = f"{prefix}.down_proj"
+            else:
+                # MoE layers: shared expert is just one of many, sized appropriately
+                shared_intermediate_size = (
+                    self.num_shared_experts * self.moe_intermediate_size
+                )
+                # MoE: weights are at {prefix}.shared_experts.{param}.weight (plural!)
+                gate_prefix = f"{prefix}.shared_experts.gate_proj"
+                up_prefix = f"{prefix}.shared_experts.up_proj"
+                down_prefix = f"{prefix}.shared_experts.down_proj"
+
             self.shared_expert_gate = ColumnParallelLinear(
                 self.hidden_size,
                 shared_intermediate_size,
                 bias=False,
-                prefix=f"{prefix}.shared_expert.gate_proj",
+                prefix=gate_prefix,
             )
             self.shared_expert_up = ColumnParallelLinear(
                 self.hidden_size,
                 shared_intermediate_size,
                 bias=False,
-                prefix=f"{prefix}.shared_expert.up_proj",
+                prefix=up_prefix,
             )
             self.shared_expert_down = RowParallelLinear(
                 shared_intermediate_size,
                 self.hidden_size,
                 bias=False,
-                prefix=f"{prefix}.shared_expert.down_proj",
+                prefix=down_prefix,
             )
         else:
             self.shared_expert_gate = None
@@ -218,12 +238,22 @@ class LLaDA2MoE(nn.Module):
         For dense-only layers (is_dense_only=True), only the shared expert is used.
 
         Args:
-            hidden_states: Input tensor, shape (batch_size, seq_len, hidden_size).
+            hidden_states: Input tensor, shape (num_tokens, hidden_size) for V2 Model Runner
+                           or (batch_size, seq_len, hidden_size) for legacy.
 
         Returns:
-            Output tensor, shape (batch_size, seq_len, hidden_size).
+            Output tensor, same shape as input.
         """
-        batch_size, seq_len, hidden_size = hidden_states.shape
+        # V2 Model Runner uses 2D tensors (num_tokens, hidden_size)
+        # Legacy path uses 3D tensors (batch_size, seq_len, hidden_size)
+        input_shape = hidden_states.shape
+        if hidden_states.ndim == 2:
+            num_tokens, hidden_size = hidden_states.shape
+            hidden_states_2d = hidden_states
+        else:
+            batch_size, seq_len, hidden_size = hidden_states.shape
+            num_tokens = batch_size * seq_len
+            hidden_states_2d = hidden_states.reshape(num_tokens, hidden_size)
 
         # Dense-only mode: skip routing, only use shared expert
         if self.is_dense_only:
@@ -232,11 +262,11 @@ class LLaDA2MoE(nn.Module):
             assert self.shared_expert_up is not None
             assert self.shared_expert_down is not None
             # Shared expert: SwiGLU activation
-            gate_out = self.shared_expert_gate(hidden_states)
-            up_out = self.shared_expert_up(hidden_states)
+            gate_out, _ = self.shared_expert_gate(hidden_states_2d)
+            up_out, _ = self.shared_expert_up(hidden_states_2d)
             shared_hidden = torch.nn.functional.silu(gate_out) * up_out
-            output = self.shared_expert_down(shared_hidden)
-            return output
+            output, _ = self.shared_expert_down(shared_hidden)
+            return output.reshape(input_shape)
 
         # Full MoE mode with routing
         assert self.gate is not None, "gate should exist in non-dense-only mode"
@@ -250,9 +280,12 @@ class LLaDA2MoE(nn.Module):
         # Set VLLM_LLADA2_BF16_ROUTER=1 to opt-in to BF16 (faster but unvalidated).
         use_bf16_router = os.getenv("VLLM_LLADA2_BF16_ROUTER", "0") == "1"
 
+        # NOTE: FP32 vs BF16 router precision
+        # Original intent was FP32 router for numerical stability (following DeepSeek V3 / Qwen2-MoE)
+        # However, vLLM's ReplicatedLinear doesn't support mixed-dtype (Float input + BFloat16 weights)
+        # For Phase 7 MVP, using BF16 router (same dtype as model)
+        # Phase 9 validation (issue #39) will quantify BF16 vs FP32 routing accuracy
         if use_bf16_router:
-            # BF16 router (experimental, unvalidated - see KNOWN_LIMITATIONS.md #1)
-            gate_logits = self.gate(hidden_states)  # BF16
             if not hasattr(self, "_bf16_router_warning_logged"):
                 logger.warning(
                     "LLaDA2 router using BF16 precision (EXPERIMENTAL). "
@@ -261,9 +294,8 @@ class LLaDA2MoE(nn.Module):
                     "Unset VLLM_LLADA2_BF16_ROUTER to use safe FP32 default."
                 )
                 self._bf16_router_warning_logged = True
-        else:
-            # FP32 router (safe default, validated pattern from DeepSeek V3 / Qwen2-MoE)
-            gate_logits = self.gate(hidden_states.float()).to(hidden_states.dtype)
+
+        gate_logits, _ = self.gate(hidden_states_2d)  # BF16 (model dtype)
 
         router_logits = torch.sigmoid(gate_logits)  # Sigmoid, not softmax!
 
@@ -271,13 +303,12 @@ class LLaDA2MoE(nn.Module):
         router_weights, selected_experts = self._apply_group_limited_topk(router_logits)
 
         # 3. Forward through routed experts via FusedMoE
-        # FusedMoE expects router_logits with proper top-k selection
+        # FusedMoE expects 2D inputs (num_tokens, hidden_size)
         routed_output = self.experts(
-            hidden_states.reshape(-1, hidden_size),
+            hidden_states_2d,
             router_weights,
             selected_experts,
         )
-        routed_output = routed_output.reshape(batch_size, seq_len, hidden_size)
 
         # 4. Apply routed scaling factor
         # Scale routed expert outputs by 2.5x (from HuggingFace config
@@ -291,16 +322,17 @@ class LLaDA2MoE(nn.Module):
             assert self.shared_expert_up is not None
             assert self.shared_expert_down is not None
             # Shared expert: SwiGLU activation
-            gate_out = self.shared_expert_gate(hidden_states)
-            up_out = self.shared_expert_up(hidden_states)
+            gate_out, _ = self.shared_expert_gate(hidden_states_2d)
+            up_out, _ = self.shared_expert_up(hidden_states_2d)
             shared_hidden = torch.nn.functional.silu(gate_out) * up_out
-            shared_output = self.shared_expert_down(shared_hidden)
+            shared_output, _ = self.shared_expert_down(shared_hidden)
 
             output = routed_output + shared_output
         else:
             output = routed_output
 
-        return output
+        # Reshape output back to input shape
+        return output.reshape(input_shape)
 
     def _apply_group_limited_topk(
         self, router_logits: torch.Tensor
@@ -311,19 +343,24 @@ class LLaDA2MoE(nn.Module):
         then select top-k experts from selected groups.
 
         Args:
-            router_logits: Router scores, shape (batch, seq_len, num_experts).
+            router_logits: Router scores, shape (num_tokens, num_experts) for V2 Model Runner
+                           or (batch_size, seq_len, num_experts) for legacy.
 
         Returns:
             router_weights: Normalized weights for selected experts,
-                shape (batch*seq_len, topk).
+                shape (num_tokens, topk).
             selected_experts: Indices of selected experts,
-                shape (batch*seq_len, topk).
+                shape (num_tokens, topk).
         """
-        batch_size, seq_len, num_experts = router_logits.shape
-        num_tokens = batch_size * seq_len
-
-        # Flatten for per-token processing
-        scores = router_logits.reshape(num_tokens, num_experts)  # (N, num_experts)
+        # V2 Model Runner uses 2D tensors directly
+        if router_logits.ndim == 2:
+            num_tokens, num_experts = router_logits.shape
+            scores = router_logits
+        else:
+            # Legacy 3D path
+            batch_size, seq_len, num_experts = router_logits.shape
+            num_tokens = batch_size * seq_len
+            scores = router_logits.reshape(num_tokens, num_experts)  # (N, num_experts)
 
         # Group experts: 256 experts → 8 groups of 32 experts each
         experts_per_group = num_experts // self.n_group
@@ -396,15 +433,23 @@ class LLaDA2DecoderLayer(nn.Module):
         quant_config = getattr(vllm_config, "quant_config", None)
 
         # Block-style attention
+        # TEMPORARY FIX: Use encoder_only (non-causal) attention instead of decoder (causal)
+        # LLaDA2.0 is a diffusion model with bidirectional attention within blocks
+        # Full dual-chunk block attention implementation deferred to Phase 10
         self.self_attn = LLaDA2BlockAttention(
             num_heads=config.num_attention_heads,
             head_size=config.hidden_size // config.num_attention_heads,
             num_kv_heads=getattr(
                 config, "num_key_value_heads", config.num_attention_heads
             ),
+            rope_theta=getattr(config, "rope_theta", 10000),
+            rope_scaling=getattr(config, "rope_scaling", None),
+            max_position_embeddings=getattr(config, "max_position_embeddings", 8192),
+            partial_rotary_factor=getattr(config, "partial_rotary_factor", None),
             cache_config=cache_config,
             quant_config=quant_config,
             prefix=f"{prefix}.self_attn",
+            # attn_type defaults to "decoder" - use bidirectional backend to override causal=False
         )
 
         # MoE FFN (or dense-only for early layers)
@@ -432,47 +477,43 @@ class LLaDA2DecoderLayer(nn.Module):
 
     def forward(
         self,
-        hidden_states: torch.Tensor,
         positions: torch.Tensor,
-        kv_cache: torch.Tensor,
-        attn_metadata,
-        num_prefix_tokens_list: list[int] | None = None,
-    ) -> torch.Tensor:
-        """Transformer layer forward pass.
+        hidden_states: torch.Tensor,
+        residual: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Transformer layer forward pass (V2 Model Runner signature).
 
         Args:
-            hidden_states: Input tensor, shape (batch, seq_len, hidden_size).
-            positions: Position indices, shape (batch, seq_len).
-            kv_cache: KV cache tensor (PagedAttention format).
-            attn_metadata: Attention metadata from vLLM model runner.
-            num_prefix_tokens_list: Per-request prefix lengths for virtual batch
-                attention (Phase 7.1 multi-request support).
+            positions: Position indices, shape (num_tokens,).
+            hidden_states: Input tensor, shape (num_tokens, hidden_size).
+            residual: Residual tensor from previous layer, or None for first layer.
 
         Returns:
-            Output tensor, shape (batch, seq_len, hidden_size).
+            Tuple of (hidden_states, residual).
+
+        Note:
+            V2 Model Runner pattern:
+            - KV cache accessed by attention layer via self.kv_cache
+            - Attention metadata accessed via get_forward_context().attn_metadata
         """
         # Pre-norm attention
-        residual = hidden_states
-        hidden_states = self.input_layernorm(hidden_states)
+        if residual is None:
+            residual = hidden_states
+            hidden_states = self.input_layernorm(hidden_states)
+        else:
+            hidden_states, residual = self.input_layernorm(hidden_states, residual)
 
-        # Block-style attention with QKV projection
+        # Block-style attention (V2 signature - no kv_cache/attn_metadata params)
         hidden_states = self.self_attn(
-            hidden_states=hidden_states,
             positions=positions,
-            kv_cache=kv_cache,
-            attn_metadata=attn_metadata,
-            num_prefix_tokens_list=num_prefix_tokens_list,
+            hidden_states=hidden_states,
         )
 
-        hidden_states = residual + hidden_states
-
         # Pre-norm MoE
-        residual = hidden_states
-        hidden_states = self.post_attention_layernorm(hidden_states)
+        hidden_states, residual = self.post_attention_layernorm(hidden_states, residual)
         hidden_states = self.mlp(hidden_states)
-        hidden_states = residual + hidden_states
 
-        return hidden_states
+        return hidden_states, residual
 
 
 @support_torch_compile(
@@ -602,28 +643,26 @@ class LLaDA2ForCausalLM(nn.Module):
 
     def forward(
         self,
-        input_ids: torch.Tensor | None = None,
-        positions: torch.Tensor | None = None,
-        kv_caches: list[torch.Tensor] | None = None,
-        attn_metadata=None,
+        input_ids: torch.Tensor | None,
+        positions: torch.Tensor,
         intermediate_tensors: IntermediateTensors | None = None,
         inputs_embeds: torch.Tensor | None = None,
-        num_prefix_tokens_list: list[int] | None = None,
-    ) -> torch.Tensor:
-        """Model forward pass.
+    ) -> torch.Tensor | IntermediateTensors:
+        """Model forward pass (V2 Model Runner signature).
 
         Args:
-            input_ids: Input token IDs, shape (batch, seq_len).
-            positions: Position indices, shape (batch, seq_len).
-            kv_caches: List of KV cache tensors (one per layer).
-            attn_metadata: Attention metadata from vLLM.
+            input_ids: Input token IDs, shape (num_tokens,).
+            positions: Position indices, shape (num_tokens,).
             intermediate_tensors: Intermediate tensors for PP (not used in Phase 7).
             inputs_embeds: Optional pre-computed embeddings.
-            num_prefix_tokens_list: Per-request prefix lengths for virtual batch
-                attention (Phase 7.1 multi-request support).
 
         Returns:
-            Hidden states, shape (batch, seq_len, hidden_size).
+            Hidden states, shape (num_tokens, hidden_size).
+
+        Note:
+            V2 Model Runner accesses KV cache and attention metadata via context:
+            - KV cache: accessed by attention layers via self.kv_cache
+            - Attention metadata: accessed via get_forward_context().attn_metadata
         """
         # PP rank handling (simplified for single-rank in Phase 7)
         pp_group = get_pp_group()
@@ -634,39 +673,30 @@ class LLaDA2ForCausalLM(nn.Module):
             else:
                 assert input_ids is not None
                 hidden_states = self.embed_tokens(input_ids)
+            residual = None
         else:
-            # PP > 1 not supported, this path shouldn't be reached
-            raise RuntimeError("PP > 1 not supported in Phase 7")
+            # PP > 1: receive hidden states from previous rank
+            assert intermediate_tensors is not None
+            hidden_states = intermediate_tensors["hidden_states"]
+            residual = intermediate_tensors.get("residual")
 
-        # Handle profiling mode (kv_caches/attn_metadata may be None)
-        if kv_caches is None or attn_metadata is None:
-            # Profiling mode: return embeddings without running layers
-            # vLLM will use this to estimate memory requirements
-            hidden_states = self.norm(hidden_states)
-            return hidden_states
-
-        # Create default positions if not provided (LLaDA2 doesn't use RoPE,
-        # but vLLM's Attention layer may need positions for indexing)
-        if positions is None:
-            batch_size, seq_len = hidden_states.shape[:2]
-            positions = (
-                torch.arange(seq_len, dtype=torch.long, device=hidden_states.device)
-                .unsqueeze(0)
-                .expand(batch_size, -1)
-            )
-
-        # Transformer layers
-        for layer_idx, layer in enumerate(self.layers):
-            hidden_states = layer(
-                hidden_states=hidden_states,
+        # Transformer layers (V2 signature - no kv_cache/attn_metadata params)
+        for layer in self.layers:
+            hidden_states, residual = layer(
                 positions=positions,
-                kv_cache=kv_caches[layer_idx],
-                attn_metadata=attn_metadata,
-                num_prefix_tokens_list=num_prefix_tokens_list,
+                hidden_states=hidden_states,
+                residual=residual,
             )
+
+        if not pp_group.is_last_rank:
+            # PP > 1: pass hidden states to next rank
+            return IntermediateTensors({
+                "hidden_states": hidden_states,
+                "residual": residual,
+            })
 
         # Final norm
-        hidden_states = self.norm(hidden_states)
+        hidden_states, _ = self.norm(hidden_states, residual)
 
         return hidden_states
 

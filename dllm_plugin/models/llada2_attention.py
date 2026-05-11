@@ -83,6 +83,10 @@ class LLaDA2BlockAttention(nn.Module):
         logits_soft_cap: float | None = None,
         prefix: str = "",
         attn_type: str = "decoder",
+        rope_theta: float = 10000,
+        rope_scaling: dict | None = None,
+        max_position_embeddings: int = 8192,
+        partial_rotary_factor: float | None = None,
     ) -> None:
         super().__init__()
 
@@ -122,9 +126,52 @@ class LLaDA2BlockAttention(nn.Module):
             prefix=f"{prefix}.o_proj",
         )
 
-        # Use vLLM's standard Attention layer as backend
-        # It auto-selects FlashAttention or FlashInfer based on environment
-        # NOTE: LLaDA2 doesn't use sliding window, alibi, or blocksparse
+        # Initialize RoPE (Rotary Position Embedding)
+        # LLaDA2.0 uses RoPE with custom theta=600000 and partial_rotary_factor=0.5
+        from vllm.model_executor.layers.rotary_embedding import get_rope
+
+        # Build rope_parameters dict from config
+        rope_parameters = {}
+        if rope_theta != 10000:  # Non-default theta
+            rope_parameters["rope_theta"] = rope_theta
+        if partial_rotary_factor is not None:
+            # LLaDA2 uses partial RoPE (typically 0.5 = rotate 50% of head dims)
+            rope_parameters["partial_rotary_factor"] = partial_rotary_factor
+        if rope_scaling is not None:
+            # Merge rope_scaling dict into rope_parameters
+            rope_parameters.update(rope_scaling)
+
+        self.rotary_emb = get_rope(
+            head_size,
+            max_position=max_position_embeddings,
+            rope_parameters=rope_parameters if rope_parameters else None,
+            is_neox_style=True,  # LLaDA2 uses GPT-NeoX style RoPE
+        )
+
+        # Use custom bidirectional attention backend for LLaDA2.0
+        # Following ChunkedLocalAttention pattern: get underlying backend first, then wrap
+        import torch
+        from vllm.v1.attention.selector import get_attn_backend
+
+        from dllm_plugin.models.llada2_attention_backend import (
+            create_llada2_bidirectional_attention_backend,
+        )
+
+        dtype = torch.get_default_dtype()
+        kv_cache_dtype = cache_config.cache_dtype if cache_config is not None else "auto"
+
+        print("[LLaDA2BlockAttention] Initializing with bidirectional attention")
+        print(f"[LLaDA2BlockAttention] dtype={dtype}, kv_cache_dtype={kv_cache_dtype}, head_size={head_size}")
+        print(f"[LLaDA2BlockAttention] RoPE: theta={rope_theta}, scaling={rope_scaling}")
+
+        # Get the underlying attention backend (FlashAttention or FlashInfer)
+        underlying_attn_backend = get_attn_backend(head_size, dtype, kv_cache_dtype)
+        print(f"[LLaDA2BlockAttention] Underlying backend: {underlying_attn_backend}")
+
+        # Wrap it with bidirectional attention (causal=False)
+        attn_backend = create_llada2_bidirectional_attention_backend(underlying_attn_backend)
+        print(f"[LLaDA2BlockAttention] Custom bidirectional backend: {attn_backend}")
+
         self.attn = Attention(
             num_heads=num_heads,
             head_size=head_size,
@@ -137,7 +184,9 @@ class LLaDA2BlockAttention(nn.Module):
             per_layer_sliding_window=None,  # Not used in LLaDA2
             prefix=prefix,
             attn_type=attn_type,
+            attn_backend=attn_backend,
         )
+        print(f"[LLaDA2BlockAttention] Attention layer created with backend: {self.attn.attn_backend}")
 
         # Attention strategy: Dual-chunk decomposition (Strategy 2)
         # Decomposes each forward pass into prefix chunk (causal over
@@ -173,26 +222,23 @@ class LLaDA2BlockAttention(nn.Module):
 
     def forward(
         self,
-        hidden_states: torch.Tensor,
         positions: torch.Tensor,
-        kv_cache: torch.Tensor,
-        attn_metadata: AttentionMetadata,
-        kv_scale: float = 1.0,
-        num_prefix_tokens_list: list[int] | None = None,
+        hidden_states: torch.Tensor,
     ) -> torch.Tensor:
-        """Apply block-style attention with QKV projection.
+        """Apply block-style attention with QKV projection (V2 Model Runner signature).
 
         Args:
-            hidden_states: Input tensor, shape (batch_size, seq_len, hidden_size).
-            positions: Position indices for RoPE (unused in LLaDA2.0).
-            kv_cache: KV cache tensor (PagedAttention format).
-            attn_metadata: Attention metadata from vLLM.
-            kv_scale: Scaling factor for KV cache (default: 1.0).
-            num_prefix_tokens_list: Per-request prefix lengths for virtual batch
-                attention (Phase 7.1 multi-request support).
+            positions: Position indices, shape (num_tokens,).
+            hidden_states: Input tensor, shape (num_tokens, hidden_size).
 
         Returns:
-            Attention output, shape (batch_size, seq_len, hidden_size).
+            Attention output, shape (num_tokens, hidden_size).
+
+        Note:
+            V2 Model Runner pattern:
+            - KV cache accessed by self.attn layer via self.kv_cache
+            - Attention metadata accessed via get_forward_context().attn_metadata
+            - No explicit kv_cache or attn_metadata parameters needed
         """
         # Project to Q, K, V
         qkv, _ = self.qkv_proj(hidden_states)
@@ -207,29 +253,45 @@ class LLaDA2BlockAttention(nn.Module):
 
         # Apply normalization (LLaDA2.0 specific)
         # Reshape for per-head normalization
-        batch_size, seq_len = q.shape[0], q.shape[1]
-        q = q.view(batch_size, seq_len, self.num_heads, self.head_size)
-        k = k.view(batch_size, seq_len, self.num_kv_heads, self.head_size)
+        num_tokens = q.shape[0]
+        q = q.view(num_tokens, self.num_heads, self.head_size)
+        k = k.view(num_tokens, self.num_kv_heads, self.head_size)
 
         # Normalize Q and K per-head
         q = self.q_norm(q)
         k = self.k_norm(k)
 
-        # Reshape back
-        q = q.reshape(batch_size, seq_len, self.num_heads * self.head_size)
-        k = k.reshape(batch_size, seq_len, self.num_kv_heads * self.head_size)
+        # Reshape back to (num_tokens, hidden_size)
+        q = q.reshape(num_tokens, self.num_heads * self.head_size)
+        k = k.reshape(num_tokens, self.num_kv_heads * self.head_size)
 
-        # Apply block-style attention via dual-chunk decomposition
-        # Strategy 1 (metadata modification) deferred - see ATTENTION_DESIGN.md
-        attn_output = self._forward_dual_chunk(
-            q,
-            k,
-            v,
-            positions,
-            kv_cache,
-            attn_metadata,
-            kv_scale,
-            num_prefix_tokens_list,
+        # Apply RoPE (Rotary Position Embedding)
+        # CRITICAL: This was missing and causing numerical divergence!
+        # LLaDA2 uses partial RoPE (50% of head dims) with theta=600000
+        q_before_rope = q.clone() if q.shape[0] < 20 else None  # Debug: save for comparison
+        k_before_rope = k.clone() if k.shape[0] < 20 else None  # Debug: save for comparison
+        q, k = self.rotary_emb(positions, q, k)
+
+        # Debug: verify RoPE actually changed the values
+        if q_before_rope is not None:
+            q_diff = torch.abs(q - q_before_rope).max().item()
+            k_diff = torch.abs(k - k_before_rope).max().item() if k_before_rope is not None else 0.0
+            print(f"[RoPE DEBUG] num_tokens={q.shape[0]}, positions={positions[:min(5, len(positions))]}")
+            print(f"[RoPE DEBUG] Q max change: {q_diff:.6e}, K max change: {k_diff:.6e}")
+            if q_diff < 1e-6 or k_diff < 1e-6:
+                print("[RoPE WARNING] ❌ RoPE did NOT modify values! This is a BUG!")
+                print(f"[RoPE WARNING] positions dtype={positions.dtype}, device={positions.device}")
+                print(f"[RoPE WARNING] rotary_emb type={type(self.rotary_emb).__name__}")
+            else:
+                print("[RoPE DEBUG] ✅ RoPE working correctly")
+
+        # Apply bidirectional attention using custom backend
+        # The LLaDA2BidirectionalFlashAttentionBackend overrides causal=False
+        # in the metadata builder, so we just call attention normally
+        attn_output = self.attn(
+            query=q,
+            key=k,
+            value=v,
         )
 
         # Output projection
