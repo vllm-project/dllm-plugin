@@ -38,7 +38,13 @@ def create_llada2_bidirectional_attention_backend(
     assert issubclass(underlying_builder, AttentionMetadataBuilder)
 
     class LLaDA2BidirectionalAttentionBuilder(underlying_builder):
-        """Builder that forces causal=False and applies prefix+block concatenation."""
+        """Builder that forces causal=False and applies prefix+block concatenation.
+
+        Unlike upstream ChunkedLocalAttentionBuilder, we do NOT override
+        ``update_block_table()`` because our concatenation modifies
+        ``CommonAttentionMetadata.block_table_tensor`` directly in ``build()``,
+        which is consumed before any ``update_block_table`` call.
+        """
 
         def build(
             self,
@@ -78,5 +84,16 @@ def create_llada2_bidirectional_attention_backend(
         attention_backend_cls=underlying_attn_backend,
         builder_cls=LLaDA2BidirectionalAttentionBuilder,
     )
+
+    # Disable CUDAGraphs: the concatenated virtual batch creates
+    # different-shaped metadata per step (varying num_prefix_tokens),
+    # so a fixed captured graph would be incorrect.
+    # Matches upstream ChunkedLocalAttention pattern.
+    try:
+        from vllm.v1.attention.backend import AttentionCGSupport
+
+        attn_backend._cudagraph_support = AttentionCGSupport.NEVER
+    except ImportError:
+        pass
 
     return attn_backend

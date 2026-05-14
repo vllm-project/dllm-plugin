@@ -171,7 +171,11 @@ class ChunkedAttentionCaptureHarness:
                 self.captures[checkpoint_name] = tensor.detach().cpu().clone()
 
             except Exception:
-                pass
+                import logging as _log
+
+                _log.getLogger(__name__).debug(
+                    "Capture hook failed for %s", checkpoint_name, exc_info=True
+                )
 
         return hook
 
@@ -261,7 +265,7 @@ def load_capture(capture_path: str | Path) -> dict[str, Any]:
     Returns:
         Dict with checkpoint_name, layer_idx, metadata, tensor
     """
-    data = torch.load(capture_path)
+    data = torch.load(capture_path, weights_only=True)
     return data
 
 

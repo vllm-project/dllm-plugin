@@ -57,21 +57,12 @@ def validate_scheduler_worker_contract(
     }
     req_ids = model_runner_output.req_ids
     sampled = model_runner_output.sampled_token_ids
-    if len(req_ids) != len(sampled):
-        import logging
-
-        logging.warning(
-            "req_ids/sampled_token_ids length mismatch: %d vs %d, truncating",
-            len(req_ids),
-            len(sampled),
-        )
-        sampled = sampled[: len(req_ids)]
     helper_results = tuple(
         DllmWorkerResult(
             request_id=req_id,
             sampled_token_ids=tuple(sampled_token_ids),
         )
-        for req_id, sampled_token_ids in zip(req_ids, sampled, strict=False)
+        for req_id, sampled_token_ids in zip(req_ids, sampled, strict=True)
     )
     helper.update_from_output(states=helper_states, worker_results=helper_results)
 
@@ -286,7 +277,7 @@ class DllmRuntimeScheduler(VllmScheduler):
             for req_id, token_ids in zip(
                 model_runner_output.req_ids,
                 model_runner_output.sampled_token_ids,
-                strict=False,
+                strict=True,
             ):
                 request = self.requests.get(req_id)
                 if request and hasattr(request, "dllm_state"):
@@ -294,20 +285,25 @@ class DllmRuntimeScheduler(VllmScheduler):
                     if n_sampled > 0:
                         request.dllm_state.num_computed_tokens += n_sampled
 
-        # Parent increments request.num_computed_tokens optimistically
-        result = super().update_from_output(scheduler_output, model_runner_output)
-
-        # Commit-0 rollback (DESIGN_MVP.md §6.1): when sampled is empty but
-        # spec tokens were scheduled, the parent already incremented
-        # request.num_computed_tokens by DRAFT_SIZE. Roll it back so the
-        # same block gets re-scheduled for the next denoising iteration.
+        # Commit-0 rollback (DESIGN_MVP.md §6.1): capture num_computed_tokens
+        # BEFORE the parent increments it, so we can restore on Commit-0
+        # instead of assuming the rollback amount.
         spec_decode_tokens = (
             getattr(scheduler_output, "scheduled_spec_decode_tokens", None) or {}
         )
+        saved_nct: dict[str, int] = {}
         for req_id in scheduler_output.num_scheduled_tokens:
-            spec_tokens = spec_decode_tokens.get(req_id)
-            if not spec_tokens:
+            if req_id not in spec_decode_tokens:
                 continue
+            request = self.requests.get(req_id)
+            if request is not None:
+                saved_nct[req_id] = request.num_computed_tokens
+
+        result = super().update_from_output(scheduler_output, model_runner_output)
+
+        # Restore num_computed_tokens for Commit-0 requests so the same
+        # block gets re-scheduled for the next denoising iteration.
+        for req_id, prev_nct in saved_nct.items():
             request = self.requests.get(req_id)
             if request is None:
                 continue
@@ -320,9 +316,7 @@ class DllmRuntimeScheduler(VllmScheduler):
                 else []
             )
             if not generated:
-                request.num_computed_tokens -= len(spec_tokens)
-                if request.num_computed_tokens < 0:
-                    request.num_computed_tokens = 0
+                request.num_computed_tokens = prev_nct
 
         return result
 
