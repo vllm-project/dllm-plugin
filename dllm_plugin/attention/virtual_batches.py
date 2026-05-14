@@ -100,7 +100,7 @@ def make_block_attention_virtual_batches(
         # Only block self-attention, no prefix chunk
         # Calculate blocks needed for block chunk
         num_block_blocks = (block_size + kv_cache_block_size - 1) // kv_cache_block_size
-        block_block_table = attn_metadata.block_table[:, :num_block_blocks]
+        block_block_table = attn_metadata.block_table_tensor[:, :num_block_blocks]
 
         block_metadata = CommonAttentionMetadata(
             query_start_loc=attn_metadata.query_start_loc,
@@ -112,7 +112,7 @@ def make_block_attention_virtual_batches(
             num_actual_tokens=total_query_tokens,
             max_query_len=block_size,
             max_seq_len=block_size,
-            block_table=block_block_table,
+            block_table_tensor=block_block_table,
             slot_mapping=attn_metadata.slot_mapping,
             causal=False,  # Non-causal (bidirectional within block)
         )
@@ -134,7 +134,7 @@ def make_block_attention_virtual_batches(
     for req_idx in range(num_reqs):
         n_blocks = int(num_prefix_blocks_per_req[req_idx])
         if n_blocks > 0:
-            req_blocks = attn_metadata.block_table[req_idx, :n_blocks]
+            req_blocks = attn_metadata.block_table_tensor[req_idx, :n_blocks]
         else:
             # Edge case: this request has no prefix (first block)
             req_blocks = torch.empty(0, dtype=torch.int32, device=device)
@@ -170,7 +170,7 @@ def make_block_attention_virtual_batches(
         num_actual_tokens=total_query_tokens,
         max_query_len=block_size,
         max_seq_len=max_prefix_tokens,
-        block_table=prefix_block_table,
+        block_table_tensor=prefix_block_table,
         slot_mapping=attn_metadata.slot_mapping,
         causal=False,  # Non-causal (all queries attend to all prefix keys)
     )
@@ -199,7 +199,7 @@ def make_block_attention_virtual_batches(
         block_end_idx = block_start_idx + num_block_blocks
 
         # P1-2: Validate block table bounds before slicing
-        block_table_cols = attn_metadata.block_table.shape[1]
+        block_table_cols = attn_metadata.block_table_tensor.shape[1]
         if block_end_idx > block_table_cols:
             raise ValueError(
                 f"Request {req_idx} block chunk requires pages "
@@ -210,7 +210,7 @@ def make_block_attention_virtual_batches(
             )
 
         # Extract physical page IDs for this request's current block
-        req_block_pages = attn_metadata.block_table[
+        req_block_pages = attn_metadata.block_table_tensor[
             req_idx, block_start_idx:block_end_idx
         ]
         block_block_table_list.append(req_block_pages)
@@ -226,7 +226,7 @@ def make_block_attention_virtual_batches(
         num_actual_tokens=total_query_tokens,
         max_query_len=block_size,
         max_seq_len=block_size,
-        block_table=block_block_table,
+        block_table_tensor=block_block_table,
         slot_mapping=attn_metadata.slot_mapping,
         causal=False,  # Non-causal (bidirectional within block)
     )
@@ -282,7 +282,7 @@ def _make_block_attention_virtual_batches_v2(
     for req_idx in range(num_reqs):
         n_blocks = int(num_prefix_blocks_per_req[req_idx])
         if n_blocks > 0:
-            req_blocks = attn_metadata.block_table[req_idx, :n_blocks]
+            req_blocks = attn_metadata.block_table_tensor[req_idx, :n_blocks]
         else:
             req_blocks = torch.empty(0, dtype=torch.int32, device=device)
 
@@ -311,7 +311,7 @@ def _make_block_attention_virtual_batches_v2(
         query_start_loc=attn_metadata.query_start_loc,
         max_seq_len=max_prefix_tokens,
         seq_lens=prefix_seq_lens,  # Heterogeneous!
-        block_table=prefix_block_table,
+        block_table_tensor=prefix_block_table,
         slot_mapping=attn_metadata.slot_mapping,
         use_cascade=attn_metadata.use_cascade,
         common_prefix_len=0,
@@ -336,7 +336,7 @@ def _make_block_attention_virtual_batches_v2(
         block_end_idx = block_start_idx + num_block_blocks
 
         # Validate block table bounds
-        block_table_cols = attn_metadata.block_table.shape[1]
+        block_table_cols = attn_metadata.block_table_tensor.shape[1]
         if block_end_idx > block_table_cols:
             raise ValueError(
                 f"Request {req_idx} block chunk requires pages "
@@ -344,7 +344,7 @@ def _make_block_attention_virtual_batches_v2(
                 f"{block_table_cols} columns"
             )
 
-        req_block_pages = attn_metadata.block_table[
+        req_block_pages = attn_metadata.block_table_tensor[
             req_idx, block_start_idx:block_end_idx
         ]
         block_block_table_list.append(req_block_pages)
@@ -357,7 +357,7 @@ def _make_block_attention_virtual_batches_v2(
         query_start_loc=attn_metadata.query_start_loc,
         max_seq_len=block_size,
         seq_lens=torch.full((num_reqs,), block_size, dtype=torch.int32, device=device),
-        block_table=block_block_table,
+        block_table_tensor=block_block_table,
         slot_mapping=attn_metadata.slot_mapping,
         use_cascade=attn_metadata.use_cascade,
         common_prefix_len=0,
