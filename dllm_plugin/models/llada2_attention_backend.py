@@ -46,6 +46,17 @@ def create_llada2_bidirectional_attention_backend(
         which is consumed before any ``update_block_table`` call.
         """
 
+        @classmethod
+        def get_cudagraph_support(cls, vllm_config, kv_cache_spec):
+            """Disable CUDAGraphs: concatenated virtual batch creates
+            different-shaped metadata per step (varying num_prefix_tokens),
+            so a fixed captured graph would be incorrect.
+            Matches upstream ChunkedLocalAttention pattern.
+            """
+            from vllm.v1.attention.backend import AttentionCGSupport
+
+            return AttentionCGSupport.NEVER
+
         def build(
             self,
             common_prefix_len: int,
@@ -84,16 +95,5 @@ def create_llada2_bidirectional_attention_backend(
         attention_backend_cls=underlying_attn_backend,
         builder_cls=LLaDA2BidirectionalAttentionBuilder,
     )
-
-    # Disable CUDAGraphs: the concatenated virtual batch creates
-    # different-shaped metadata per step (varying num_prefix_tokens),
-    # so a fixed captured graph would be incorrect.
-    # Matches upstream ChunkedLocalAttention pattern.
-    try:
-        from vllm.v1.attention.backend import AttentionCGSupport
-
-        attn_backend._cudagraph_support = AttentionCGSupport.NEVER
-    except ImportError:
-        pass
 
     return attn_backend

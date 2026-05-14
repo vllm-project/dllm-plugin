@@ -107,6 +107,7 @@ class LLaDA2MoE(nn.Module):
         tp_size: int,
         prefix: str = "",
         is_dense_only: bool = False,
+        quant_config: object | None = None,
     ) -> None:
         super().__init__()
 
@@ -177,6 +178,8 @@ class LLaDA2MoE(nn.Module):
                 num_expert_group=self.n_group,
                 topk_group=self.topk_group,
                 routed_scaling_factor=self.routed_scaling_factor,
+                renormalize=getattr(config, "norm_topk_prob", True),
+                quant_config=quant_config,
             )
         else:
             self.gate = None
@@ -369,6 +372,7 @@ class LLaDA2DecoderLayer(nn.Module):
             tp_size=tp_size,
             prefix=f"{prefix}.mlp",
             is_dense_only=is_dense_only,
+            quant_config=quant_config,
         )
 
         # LLaDA2RMSNorm layers

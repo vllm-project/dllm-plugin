@@ -414,15 +414,10 @@ class DllmGPUModelRunner(GPUModelRunner):
                 if n_prompt > 0:
                     committed = committed[n_prompt:]
 
-            nums.append(len(committed))
-            for j, tok in enumerate(committed):
-                if j < width:
-                    sampled[i, j] = tok
-            next_blocks.append(list(self._dllm_helper.take_draft_token_ids(step)))
-
-            # Track denoise step: increment on Commit-0, reset on commit.
-            # Guard against unbounded iteration (2x DRAFT_SIZE is generous).
+            # Track denoise step and check max-iteration guard BEFORE
+            # appending to next_blocks, so force-commit uses the right block.
             max_denoise_iters = 2 * DRAFT_SIZE
+            force_committed = False
             if len(step.sampled_token_ids) == 0:
                 new_step = step_idx + 1
                 if new_step >= max_denoise_iters:
@@ -437,10 +432,7 @@ class DllmGPUModelRunner(GPUModelRunner):
                         for t in step.next_input_block
                         if t != LLADA2_DEFAULT_MASK_TOKEN_ID
                     ]
-                    for j_fc, tok_fc in enumerate(committed):
-                        if j_fc < width:
-                            sampled[i, j_fc] = tok_fc
-                    nums[-1] = len(committed)
+                    force_committed = True
                     self._dllm_denoise_step.pop(req_id, None)
                     self._dllm_initial_prompt_len.pop(req_id, None)
                 else:
@@ -448,6 +440,17 @@ class DllmGPUModelRunner(GPUModelRunner):
             else:
                 self._dllm_denoise_step.pop(req_id, None)
                 self._dllm_initial_prompt_len.pop(req_id, None)
+
+            nums.append(len(committed))
+            for j, tok in enumerate(committed):
+                if j < width:
+                    sampled[i, j] = tok
+
+            if force_committed:
+                # Force-commit: next block is all-mask (new block)
+                next_blocks.append([LLADA2_DEFAULT_MASK_TOKEN_ID] * DRAFT_SIZE)
+            else:
+                next_blocks.append(list(self._dllm_helper.take_draft_token_ids(step)))
 
         num_sampled = torch.tensor(nums, dtype=torch.int32, device=self.device)
 

@@ -277,8 +277,12 @@ class LLaDA2BlockAttention(nn.Module):
                 if block_size is not None and block_size > 0:
                     return int(block_size)
 
-        # Default to 16 (standard vLLM block size in v1 architecture)
-        return 16
+        raise ValueError(
+            "Could not determine KV cache block size from cache_config. "
+            "Checked attributes: block_size, num_tokens_per_block, "
+            "token_block_size. Virtual batch page table requires the "
+            "correct block size."
+        )
 
     def forward(
         self,
