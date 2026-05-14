@@ -15,7 +15,7 @@ Investigated vLLM's `ChunkedLocalAttention` pattern (used by Llama4) to understa
 
 ### Usage in Llama4
 
-**File:** `/tmp/vllm-repo/vllm/model_executor/models/llama4.py`
+**File:** `vllm/model_executor/models/llama4.py`
 
 ```python
 # Line 255-256: Decision logic
@@ -50,7 +50,7 @@ attn_output = self.attn(q, k, v)
 
 ### Architecture
 
-**File:** `/tmp/vllm-repo/vllm/model_executor/layers/attention/chunked_local_attention.py`
+**File:** `vllm/model_executor/layers/attention/chunked_local_attention.py`
 
 ChunkedLocalAttention is NOT a new attention algorithm—it's a **wrapper** that:
 
@@ -78,7 +78,7 @@ def create_chunked_local_attention_backend(
             return metadata
 ```
 
-**Virtual batch decomposition:** `/tmp/vllm-repo/vllm/v1/attention/backends/utils.py:167-359`
+**Virtual batch decomposition:** `vllm/v1/attention/backends/utils.py:167-359`
 
 Example: `q_seqlens=[4,10,5]` with `attn_chunk_size=4` becomes:
 ```
@@ -93,7 +93,7 @@ Each virtual batch item represents one local attention block.
 
 ## Critical Finding: Still Uses Causal Attention
 
-**File:** `/tmp/vllm-repo/vllm/v1/attention/backends/utils.py`
+**File:** `vllm/v1/attention/backends/utils.py`
 
 ```python
 # Line 358
@@ -127,7 +127,7 @@ return CommonAttentionMetadata(
 
 ### V2 Attention Backend
 
-**File:** `/tmp/vllm-repo/vllm/v1/attention/backends/flash_attn.py`
+**File:** `vllm/v1/attention/backends/flash_attn.py`
 
 ```python
 # FlashAttention call (lines ~510-550)
@@ -145,7 +145,7 @@ torch.ops.vllm.flash_attn_varlen_func(
 
 ### Encoder Attention (Bidirectional Example)
 
-**File:** `/tmp/vllm-repo/vllm/v1/attention/backends/flash_attn.py:1037`
+**File:** `vllm/v1/attention/backends/flash_attn.py:1037`
 
 ```python
 # Encoder attention forward
@@ -204,7 +204,7 @@ finally:
 
 ## V2 Attention Signature
 
-**File:** `/tmp/vllm-repo/vllm/model_executor/layers/attention/attention.py:457-475`
+**File:** `vllm/model_executor/layers/attention/attention.py:457-475`
 
 ```python
 def forward(
@@ -231,83 +231,3 @@ def forward(
 - ✓ Only `query`, `key`, `value` (+ optional `output_shape`)
 
 ---
-
-## Next Steps
-
-### Immediate (Phase 9.1)
-
-1. **Run numerical validation in GPU pod:**
-   ```bash
-   kubectl exec llada2-numerical-validation -- bash -c '
-     cd /workspace/dllm-plugin
-     python3 /tmp/test_bidirectional_generation.py
-   '
-   ```
-
-2. **Verify coherent text generation:**
-   - Expected: "Hello, World!..." (programming tutorial from dInfer)
-   - Previous (causal): "!\n\n\n..." (20 newlines)
-   - New (bidirectional): Should match dInfer output
-
-3. **Run prefill validation:**
-   ```bash
-   kubectl exec llada2-numerical-validation -- bash -c '
-     cd /workspace
-     python3 validate_prefill_only.py
-   '
-   ```
-
-4. **Compare layer-by-layer outputs:**
-   - Previous: layer0_attention divergence 0.72 max diff
-   - Expected: layer0_attention < 1e-3 max diff (within BF16 tolerance)
-
-### Phase 7: Proper Block Attention
-
-Implement dual-chunk virtual batch decomposition:
-
-1. **Calculate block boundaries from positions:**
-   ```python
-   # positions: [0, 1, 2, ..., 95] for 96-token prefill
-   # block_size = 32
-   # Block 0: positions 0-31
-   # Block 1: positions 32-63
-   # Block 2: positions 64-95
-   ```
-
-2. **Create virtual batches for prefix + block chunks:**
-   - Use `make_local_attention_virtual_batches` pattern from ChunkedLocalAttention
-   - Modify to support heterogeneous prefix lengths (Phase 7.1)
-
-3. **Two attention calls per forward:**
-   - Prefix chunk: `attn_metadata.causal = True` (attend to previous blocks)
-   - Block chunk: `attn_metadata.causal = False` (attend within current block)
-   - Combine: `output = prefix_output + block_output`
-
-4. **Handle decode (single token) separately:**
-   - No virtual batch decomposition needed
-   - Single token attends to: prefix (causal) + current block (bidirectional)
-
----
-
-## References
-
-- **ChunkedLocalAttention:** `/tmp/vllm-repo/vllm/model_executor/layers/attention/chunked_local_attention.py`
-- **Virtual batches:** `/tmp/vllm-repo/vllm/v1/attention/backends/utils.py:167-359`
-- **Llama4 usage:** `/tmp/vllm-repo/vllm/model_executor/models/llama4.py:255-270`
-- **FlashAttention backend:** `/tmp/vllm-repo/vllm/v1/attention/backends/flash_attn.py`
-- **LLaDA2BlockAttention:** `/Users/akellner/MyDir/Code/Open/dllm-plugin/dllm_plugin/models/llada2_attention.py`
-
----
-
-## Key Takeaways
-
-1. **ChunkedLocalAttention** is local + causal (not suitable for LLaDA2.0)
-2. **Causal flag** comes from `attn_metadata.causal` (can be modified)
-3. **V2 signature** uses context for KV cache and metadata (not parameters)
-4. **Simple fix** for Phase 9.1: set `attn_metadata.causal = False`
-5. **Full fix** for Phase 7: dual-chunk virtual batch decomposition with block boundaries
-6. **Validation needed** in GPU pod to verify numerical correctness
-
----
-
-**Status:** Implementation complete, awaiting GPU pod validation.

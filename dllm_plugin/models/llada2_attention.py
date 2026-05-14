@@ -199,17 +199,32 @@ class LLaDA2BlockAttention(nn.Module):
             cache_config.cache_dtype if cache_config is not None else "auto"
         )
 
-        # Prefer FlashInfer for non-causal attention: FA2's paged kernel
-        # ignores causal=False on A100 (SM80), producing causal output
-        # even when causal=False is set. FlashInfer handles it correctly.
-        # Falls back to auto-selection if FlashInfer is unavailable.
-        # TODO: respect VLLM_ATTENTION_BACKEND once FA2 causal=False
-        # is fixed upstream or version-gated.
+        # FlashInfer is required for non-causal paged attention.
+        # FA2's paged kernel ignores causal=False on A100 (SM80).
+        # TODO(#45): version-gate per GPU arch once FA2 is fixed.
+        import logging as _logging
+        import os
+
+        _attn_log = _logging.getLogger(__name__)
+        user_backend = os.environ.get("VLLM_ATTENTION_BACKEND")
         try:
-            from vllm.v1.attention.backends.flashinfer import FlashInferBackend
+            from vllm.v1.attention.backends.flashinfer import (
+                FlashInferBackend,
+            )
 
             underlying_attn_backend = FlashInferBackend
+            if user_backend and user_backend.upper() != "FLASHINFER":
+                _attn_log.warning(
+                    "LLaDA2 requires FlashInfer for non-causal "
+                    "attention. Ignoring VLLM_ATTENTION_BACKEND=%s",
+                    user_backend,
+                )
         except ImportError:
+            _attn_log.warning(
+                "FlashInfer unavailable, falling back to "
+                "auto-selected backend. Non-causal attention "
+                "may not work on A100 (SM80).",
+            )
             underlying_attn_backend = get_attn_backend(head_size, dtype, kv_cache_dtype)
 
         # Wrap it with bidirectional attention (causal=False) + block concatenation

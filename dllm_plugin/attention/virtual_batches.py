@@ -1,9 +1,10 @@
-"""Virtual batch decomposition for block-style attention.
+"""Virtual batch decomposition for block-style attention (dual-chunk).
 
-Following vLLM's chunked_local_attention pattern, transforms attention metadata
-to create virtual batches for prefix and block attention chunks.
-
-Supports both V1 CommonAttentionMetadata and V2 FlashAttentionMetadata.
+.. deprecated::
+    This dual-chunk approach is superseded by the concatenated virtual
+    batch in ``concatenated_virtual_batch.py`` which runs inside the
+    builder's ``build()`` method. This module is retained for existing
+    tests but is no longer used in the production attention path.
 
 Reference: vllm/model_executor/layers/attention/chunked_local_attention.py
 """

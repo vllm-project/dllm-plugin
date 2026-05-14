@@ -40,7 +40,7 @@ PR38_CRITICAL_REVIEW.md
 # Claude Code
 .claude/
 
-# Investigation artifacts (generated during numerical validation, repo root only)
+# Investigation artifacts (repo root only — leading / prevents matching in subdirs)
 /investigation_captures/
 /validation_outputs_hf/
 /validation_results/

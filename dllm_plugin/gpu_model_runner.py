@@ -143,6 +143,9 @@ class DllmGPUModelRunner(GPUModelRunner):
 
     def shutdown(self) -> None:
         """vLLM v1 worker calls this during engine teardown."""
+        self._dllm_denoise_step.clear()
+        self._dllm_initial_prompt_len.clear()
+        self._dllm_scheduled_spec_decode_tokens.clear()
 
         parent = super()
         fn = getattr(parent, "shutdown", None)
@@ -393,7 +396,9 @@ class DllmGPUModelRunner(GPUModelRunner):
 
             # On first denoising step for a block, record how many leading
             # positions are prompt tokens (not masks) so we can strip them
-            # at commit time.
+            # at commit time. Assumes prompt tokens form a contiguous prefix
+            # before mask tokens. Safe because LLADA2_DEFAULT_MASK_TOKEN_ID
+            # (156895) is far above typical prompt token IDs.
             if req_id not in self._dllm_initial_prompt_len:
                 n_prompt = 0
                 for t in scheduled_draft:
@@ -427,7 +432,11 @@ class DllmGPUModelRunner(GPUModelRunner):
                         req_id,
                         max_denoise_iters,
                     )
-                    committed = list(step.next_input_block)
+                    committed = [
+                        t
+                        for t in step.next_input_block
+                        if t != LLADA2_DEFAULT_MASK_TOKEN_ID
+                    ]
                     for j_fc, tok_fc in enumerate(committed):
                         if j_fc < width:
                             sampled[i, j_fc] = tok_fc
