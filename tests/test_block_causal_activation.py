@@ -12,8 +12,9 @@ import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import pytest
-import torch
-from vllm import LLM, SamplingParams
+
+torch = pytest.importorskip("torch")
+from vllm import LLM, SamplingParams  # noqa: E402
 
 
 @pytest.mark.gpu

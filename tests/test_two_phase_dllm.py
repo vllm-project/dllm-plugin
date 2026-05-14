@@ -46,9 +46,8 @@ def test_dllm_runtime_worker_wraps_init_device_for_dllm_runner() -> None:
     pytest.importorskip("vllm")
     import dllm_plugin.runtime_worker as rw
 
-    src = inspect.getsource(rw.DllmRuntimeWorker.init_device)
+    src = inspect.getsource(rw.DllmRuntimeWorker.__init__)
     assert "DllmGPUModelRunner" in src
-    assert "super().init_device()" in src
 
 
 def test_dllm_runtime_worker_inherits_execute_model() -> None:

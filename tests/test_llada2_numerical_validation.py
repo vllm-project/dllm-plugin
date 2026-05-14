@@ -32,7 +32,7 @@ import pytest
 # Skip if torch not available
 pytest.importorskip("torch")
 
-import torch  # noqa: E402
+torch = pytest.importorskip("torch")  # noqa: E402
 
 # Mark entire module for GPU integration and numerical validation
 pytestmark = [

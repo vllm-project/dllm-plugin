@@ -22,7 +22,8 @@ import os
 from pathlib import Path
 
 import pytest
-import torch
+
+torch = pytest.importorskip("torch")
 
 # Mark entire module for GPU integration
 pytestmark = [

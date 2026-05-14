@@ -9,12 +9,12 @@ import pytest
 # Skip if vLLM not installed (macOS dev environments)
 pytest.importorskip("vllm")
 
-import torch
-
 from dllm_plugin.attention.virtual_batches import (
     make_block_attention_virtual_batches,
 )
 from dllm_plugin.vllm_compat import CommonAttentionMetadata
+
+torch = pytest.importorskip("torch")
 
 
 def test_heterogeneous_prefix_lengths():

@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from typing import Any
 
-import torch
+try:
+    import torch
+except ModuleNotFoundError:
+    torch = None  # type: ignore[assignment]
 
 
 class TensorExtractor:

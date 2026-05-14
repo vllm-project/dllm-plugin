@@ -5,7 +5,8 @@ Validates that metadata is constructed correctly for single-batch attention.
 """
 
 import pytest
-import torch
+
+torch = pytest.importorskip("torch")
 
 
 def test_concatenated_metadata_construction():
