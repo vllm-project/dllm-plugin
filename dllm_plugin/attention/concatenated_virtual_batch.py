@@ -119,4 +119,6 @@ def create_concatenated_virtual_batch(
         max_seq_len=max_combined_seq_len,
         block_table_tensor=concatenated_block_table,
         causal=False,
+        # Reset cached CPU tensors so they get recomputed from new seq_lens
+        _seq_lens_cpu=None,
     )

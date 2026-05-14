@@ -199,9 +199,12 @@ class LLaDA2BlockAttention(nn.Module):
             cache_config.cache_dtype if cache_config is not None else "auto"
         )
 
-        # Use FlashInfer as the underlying attention backend.
-        # FlashInfer correctly handles causal=False with paged KV cache,
-        # unlike FA2 which may ignore it on some GPU/driver combinations.
+        # Prefer FlashInfer for non-causal attention: FA2's paged kernel
+        # ignores causal=False on A100 (SM80), producing causal output
+        # even when causal=False is set. FlashInfer handles it correctly.
+        # Falls back to auto-selection if FlashInfer is unavailable.
+        # TODO: respect VLLM_ATTENTION_BACKEND once FA2 causal=False
+        # is fixed upstream or version-gated.
         try:
             from vllm.v1.attention.backends.flashinfer import FlashInferBackend
 

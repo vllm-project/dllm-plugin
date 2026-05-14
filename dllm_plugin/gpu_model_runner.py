@@ -226,6 +226,13 @@ class DllmGPUModelRunner(GPUModelRunner):
         raw = getattr(scheduler_output, "scheduled_spec_decode_tokens", None) or {}
         self._dllm_scheduled_spec_decode_tokens = {k: tuple(v) for k, v in raw.items()}
 
+        # Clean up per-request state for requests no longer scheduled
+        # (aborted, completed, or preempted).
+        active = set(getattr(scheduler_output, "num_scheduled_tokens", {}).keys())
+        for stale in set(self._dllm_denoise_step) - active:
+            self._dllm_denoise_step.pop(stale, None)
+            self._dllm_initial_prompt_len.pop(stale, None)
+
         # Continue with existing metadata extraction
         self._dllm_so_frontier_flat_indices = getattr(
             scheduler_output, "dllm_so_frontier_flat_indices", None
@@ -256,11 +263,11 @@ class DllmGPUModelRunner(GPUModelRunner):
             # No dllm-scheduled drafts (warmup, prefill, or non-dllm).
             # Force num_draft_tokens=0 for parent since we have no rejection_sampler.
             orig_num_draft = input_batch.num_draft_tokens
-            object.__setattr__(input_batch, "num_draft_tokens", 0)
+            input_batch.num_draft_tokens = 0
             try:
                 result = super().sample(hidden_states, input_batch, grammar_output)
             finally:
-                object.__setattr__(input_batch, "num_draft_tokens", orig_num_draft)
+                input_batch.num_draft_tokens = orig_num_draft
 
             # For dLLM prefill steps (no drafts), suppress the AR token —
             # the first block's committed output will contain the real tokens.
@@ -408,9 +415,27 @@ class DllmGPUModelRunner(GPUModelRunner):
                     sampled[i, j] = tok
             next_blocks.append(list(self._dllm_helper.take_draft_token_ids(step)))
 
-            # Track denoise step: increment on Commit-0, reset on commit
+            # Track denoise step: increment on Commit-0, reset on commit.
+            # Guard against unbounded iteration (2x DRAFT_SIZE is generous).
+            max_denoise_iters = 2 * DRAFT_SIZE
             if len(step.sampled_token_ids) == 0:
-                self._dllm_denoise_step[req_id] = step_idx + 1
+                new_step = step_idx + 1
+                if new_step >= max_denoise_iters:
+                    logger.warning(
+                        "req %s: denoise hit max iterations (%d), "
+                        "force-committing block",
+                        req_id,
+                        max_denoise_iters,
+                    )
+                    committed = list(step.next_input_block)
+                    for j_fc, tok_fc in enumerate(committed):
+                        if j_fc < width:
+                            sampled[i, j_fc] = tok_fc
+                    nums[-1] = len(committed)
+                    self._dllm_denoise_step.pop(req_id, None)
+                    self._dllm_initial_prompt_len.pop(req_id, None)
+                else:
+                    self._dllm_denoise_step[req_id] = new_step
             else:
                 self._dllm_denoise_step.pop(req_id, None)
                 self._dllm_initial_prompt_len.pop(req_id, None)
@@ -460,10 +485,10 @@ class DllmGPUModelRunner(GPUModelRunner):
 
         Sets context variable for chunked block attention before calling parent's
         execute_model (Phase 7 virtual batch decomposition).
-        """
-        # Run dLLM pre-processing (extract scheduled drafts, metadata)
-        self.before_execute_model(scheduler_output, dummy_run=dummy_run)
 
+        Note: before_execute_model() is called by the parent's execute_model(),
+        so we don't call it explicitly here.
+        """
         # Extract num_prefix_tokens directly from scheduler_output (Phase 7.1)
         num_prefix_tokens_list = None
         if dllm_architecture_match(self.vllm_config) and not dummy_run:
