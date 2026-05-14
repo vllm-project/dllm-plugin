@@ -162,15 +162,18 @@ def test_torch_tensor_logits_matches_list_path(
     logits_t = torch.zeros(DRAFT_SIZE, vocab, dtype=torch.float32)
     logits_t[:, 0] = 1.0
     logits_list = _mock_logits(vocab_size=vocab)
+    _cfg = {"mask_token_id": 1, "commit_confidence_threshold": 0.01}
     out_t = remask_after_block_forward(
         input_draft=draft,
         logits=logits_t,
         policy=llada2_policy,
+        remasking_config=_cfg,
     )
     out_list = remask_after_block_forward(
         input_draft=draft,
         logits=logits_list,
         policy=llada2_policy,
+        remasking_config=_cfg,
     )
     assert out_t == out_list
 
