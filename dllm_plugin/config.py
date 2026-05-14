@@ -99,7 +99,7 @@ def resolve_strict_stack_validation(explicit: bool | None) -> bool:
 
 #: Placeholder **mask** token id for :mod:`~dllm_plugin.remasking.llada2_default`
 #: ``next_input_block`` remasked positions until real HF config lands (Phase 7 / #12).
-LLADA2_DEFAULT_MASK_TOKEN_ID: Final[int] = 1
+LLADA2_DEFAULT_MASK_TOKEN_ID: Final[int] = 156895
 
 #: Default number of denoise steps used to build the per-step **transfer count**
 #: schedule (``block_len // steps`` layout). Matches configured ``DRAFT_SIZE`` for
@@ -110,7 +110,7 @@ LLADA2_DEFAULT_DENOISE_STEPS: Final[int] = DRAFT_SIZE
 #: **commit** that position (issue #7). Tuned so the Phase 2 mock stub logits
 #: (zeros + ``1.0`` at index ``0``, ``docs/MOCK_STACK_MODEL.md``) commit under
 #: default settings for stack tests.
-LLADA2_DEFAULT_COMMIT_CONFIDENCE_THRESHOLD: Final[float] = 0.01
+LLADA2_DEFAULT_COMMIT_CONFIDENCE_THRESHOLD: Final[float] = 0.9
 
 # Phase 7: Real LLaDA2.0 model configuration (issue #12)
 

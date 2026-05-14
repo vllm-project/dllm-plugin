@@ -55,16 +55,23 @@ def validate_scheduler_worker_contract(
         )
         for req_id in expected_req_ids
     }
+    req_ids = model_runner_output.req_ids
+    sampled = model_runner_output.sampled_token_ids
+    if len(req_ids) != len(sampled):
+        import logging
+
+        logging.warning(
+            "req_ids/sampled_token_ids length mismatch: %d vs %d, truncating",
+            len(req_ids),
+            len(sampled),
+        )
+        sampled = sampled[: len(req_ids)]
     helper_results = tuple(
         DllmWorkerResult(
             request_id=req_id,
             sampled_token_ids=tuple(sampled_token_ids),
         )
-        for req_id, sampled_token_ids in zip(
-            model_runner_output.req_ids,
-            model_runner_output.sampled_token_ids,
-            strict=True,
-        )
+        for req_id, sampled_token_ids in zip(req_ids, sampled, strict=False)
     )
     helper.update_from_output(states=helper_states, worker_results=helper_results)
 
@@ -95,22 +102,8 @@ class DllmRuntimeScheduler(VllmScheduler):
         """
         out = super().schedule()
 
-        # BUGFIX: Filter out requests that have already completed their max_tokens.
-        # This happens when max_tokens < DRAFT_SIZE (32) and a draft block has already
-        # satisfied the output requirement. The parent scheduler computes negative
-        # remaining tokens, which we must filter before they reach the model runner.
-        if out.num_scheduled_tokens:
-            req_ids_to_remove = []
-            for req_id, num_tokens in out.num_scheduled_tokens.items():
-                if num_tokens <= 0:
-                    req_ids_to_remove.append(req_id)
-
-            for req_id in req_ids_to_remove:
-                del out.num_scheduled_tokens[req_id]
-                if hasattr(out, "total_num_scheduled_tokens"):
-                    out.total_num_scheduled_tokens = sum(
-                        out.num_scheduled_tokens.values()
-                    )
+        # Note: spec_token_ids population and negative num_scheduled_tokens
+        # filtering are handled by the vLLM fork's scheduler.
 
         # Frontier repair metadata for dLLM structured outputs. Consumed in phase two
         # by :class:`~dllm_plugin.gpu_model_runner.DllmGPUModelRunner` (stashed from
@@ -128,9 +121,8 @@ class DllmRuntimeScheduler(VllmScheduler):
             for req_id in out.num_scheduled_tokens:
                 request = self.requests.get(req_id)
                 if request and hasattr(request, "dllm_state"):
-                    out.dllm_num_prefix_tokens[req_id] = (
-                        request.dllm_state.num_computed_tokens
-                    )
+                    num_computed = request.dllm_state.num_computed_tokens
+                    out.dllm_num_prefix_tokens[req_id] = num_computed
 
         # FIX B: Workaround for vLLM 0.20.1 not reliably setting
         # has_structured_output_requests under high concurrency.
@@ -182,13 +174,30 @@ class DllmRuntimeScheduler(VllmScheduler):
         )
 
     def add_request(self, request: Any) -> None:
-        """Stateless add - forwards to parent scheduler.
+        """Initialize spec_token_ids with first block for dLLM requests.
 
-        Following upstream vLLM pattern (v1/core/sched/scheduler.py:1741):
-        Scheduler does NOT initialize spec_token_ids. Draft generation happens
-        in model runner (see gpu_model_runner.before_execute_model).
+        For dLLM block diffusion, we generate the first block immediately when
+        adding the request, so the first decode step already has a 32-token draft.
         """
         super().add_request(request)
+
+        # Create dLLM state for request (Phase 7 - virtual batch attention)
+        # Track num_computed_tokens for chunked block attention
+        if not hasattr(request, "dllm_state"):
+            request.dllm_state = DllmRequestState(
+                request_id=request.request_id,
+                num_computed_tokens=0,  # Start with no committed prefix
+            )
+
+        # Initialize first block for dLLM requests
+        # This ensures scheduled_spec_decode_tokens is populated from the start
+        if not hasattr(request, "spec_token_ids") or not request.spec_token_ids:
+            prompt_token_ids = getattr(request, "prompt_token_ids", [])
+            if prompt_token_ids:
+                first_block = self._dllm_helper.initialize_first_block(
+                    prompt_token_ids=prompt_token_ids
+                )
+                request.spec_token_ids = list(first_block)
 
     def update_draft_token_ids(self, draft_token_ids: DraftTokenIds) -> None:
         """Keep fixed ``DRAFT_SIZE`` blocks; do not grammar-truncate drafts here."""
@@ -261,14 +270,61 @@ class DllmRuntimeScheduler(VllmScheduler):
         scheduler_output: Any,
         model_runner_output: ModelRunnerOutput,
     ) -> dict[int, Any]:
-        """Validate dLLM scheduler-worker contract before delegating upstream."""
+        """Validate dLLM contract, delegate upstream, then apply Commit-0 rollback."""
 
         validate_scheduler_worker_contract(
             helper=self._dllm_helper,
             expected_req_ids=tuple(scheduler_output.num_scheduled_tokens.keys()),
             model_runner_output=model_runner_output,
         )
-        return super().update_from_output(scheduler_output, model_runner_output)
+
+        # Update dllm_state.num_computed_tokens for committed blocks
+        if (
+            hasattr(model_runner_output, "sampled_token_ids")
+            and model_runner_output.sampled_token_ids
+        ):
+            for req_id, token_ids in zip(
+                model_runner_output.req_ids,
+                model_runner_output.sampled_token_ids,
+                strict=False,
+            ):
+                request = self.requests.get(req_id)
+                if request and hasattr(request, "dllm_state"):
+                    n_sampled = len(token_ids)
+                    if n_sampled > 0:
+                        request.dllm_state.num_computed_tokens += n_sampled
+
+        # Parent increments request.num_computed_tokens optimistically
+        result = super().update_from_output(scheduler_output, model_runner_output)
+
+        # Commit-0 rollback (DESIGN_MVP.md §6.1): when sampled is empty but
+        # spec tokens were scheduled, the parent already incremented
+        # request.num_computed_tokens by DRAFT_SIZE. Roll it back so the
+        # same block gets re-scheduled for the next denoising iteration.
+        spec_decode_tokens = (
+            getattr(scheduler_output, "scheduled_spec_decode_tokens", None) or {}
+        )
+        for req_id in scheduler_output.num_scheduled_tokens:
+            spec_tokens = spec_decode_tokens.get(req_id)
+            if not spec_tokens:
+                continue
+            request = self.requests.get(req_id)
+            if request is None:
+                continue
+            req_index = model_runner_output.req_id_to_index.get(req_id)
+            if req_index is None:
+                continue
+            generated = (
+                model_runner_output.sampled_token_ids[req_index]
+                if model_runner_output.sampled_token_ids
+                else []
+            )
+            if not generated:
+                request.num_computed_tokens -= len(spec_tokens)
+                if request.num_computed_tokens < 0:
+                    request.num_computed_tokens = 0
+
+        return result
 
     def _validate_draft_lengths(self, draft_token_ids: DraftTokenIds) -> None:
         for req_id, token_ids in zip(

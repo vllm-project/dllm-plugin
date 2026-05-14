@@ -21,7 +21,6 @@ References:
 from __future__ import annotations
 
 import logging
-import os
 import re
 from collections import defaultdict
 from collections.abc import Iterable
@@ -33,7 +32,6 @@ from vllm.compilation.decorators import support_torch_compile
 from vllm.config import VllmConfig
 from vllm.distributed.parallel_state import get_pp_group, get_tp_group
 from vllm.model_executor.layers.fused_moe import FusedMoE
-from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.linear import (
     ColumnParallelLinear,
     ReplicatedLinear,
@@ -57,7 +55,7 @@ from dllm_plugin.config import (
     LLADA2_DEFAULT_TOPK_GROUP,
 )
 from dllm_plugin.gpu_capability import detect_gpu_capabilities
-from dllm_plugin.models.llada2_attention import LLaDA2BlockAttention
+from dllm_plugin.models.llada2_attention import LLaDA2BlockAttention, LLaDA2RMSNorm
 from dllm_plugin.validation import assert_compatible_stack
 
 logger = logging.getLogger(__name__)
@@ -164,6 +162,9 @@ class LLaDA2MoE(nn.Module):
             )
 
             # Routed experts (vLLM FusedMoE)
+            # Pass LLaDA2-specific routing parameters so FusedMoE handles
+            # sigmoid scoring, group-limited top-k, and routed scaling
+            # internally — instead of re-routing with softmax defaults.
             self.experts = FusedMoE(
                 num_experts=self.num_experts,
                 top_k=self.num_experts_per_tok,
@@ -171,6 +172,11 @@ class LLaDA2MoE(nn.Module):
                 intermediate_size=self.moe_intermediate_size,
                 tp_size=self.tp_size,
                 prefix=f"{prefix}.experts",
+                scoring_func="sigmoid",
+                use_grouped_topk=True,
+                num_expert_group=self.n_group,
+                topk_group=self.topk_group,
+                routed_scaling_factor=self.routed_scaling_factor,
             )
         else:
             self.gate = None
@@ -195,7 +201,7 @@ class LLaDA2MoE(nn.Module):
                     "intermediate_size",
                     self.num_shared_experts * self.moe_intermediate_size,
                 )
-                # Dense-only: weights are at {prefix}.{param}.weight (no "shared_expert")
+                # Dense-only: no "shared_expert" in weight path
                 gate_prefix = f"{prefix}.gate_proj"
                 up_prefix = f"{prefix}.up_proj"
                 down_prefix = f"{prefix}.down_proj"
@@ -238,7 +244,8 @@ class LLaDA2MoE(nn.Module):
         For dense-only layers (is_dense_only=True), only the shared expert is used.
 
         Args:
-            hidden_states: Input tensor, shape (num_tokens, hidden_size) for V2 Model Runner
+            hidden_states: Input tensor, shape (num_tokens, hidden_size)
+                           for V2 Model Runner
                            or (batch_size, seq_len, hidden_size) for legacy.
 
         Returns:
@@ -272,51 +279,14 @@ class LLaDA2MoE(nn.Module):
         assert self.gate is not None, "gate should exist in non-dense-only mode"
         assert self.experts is not None, "experts should exist in non-dense-only mode"
 
-        # 1. Compute gate logits and apply sigmoid (LLaDA2.0 specific)
-        # Router precision: Default to FP32 (safe) with BF16 opt-in for experimentation
-        # Following DeepSeek V3 and Qwen2-MoE patterns which use FP32 router for
-        # numerical stability. Unlike softmax (proven to need FP32), sigmoid stability
-        # in BF16 is unvalidated for LLaDA2's group-limited routing.
-        # Set VLLM_LLADA2_BF16_ROUTER=1 to opt-in to BF16 (faster but unvalidated).
-        use_bf16_router = os.getenv("VLLM_LLADA2_BF16_ROUTER", "0") == "1"
+        # Compute gate logits and pass to FusedMoE which handles
+        # sigmoid scoring, group-limited top-k, routed scaling internally
+        gate_logits, _ = self.gate(hidden_states_2d)
 
-        # NOTE: FP32 vs BF16 router precision
-        # Original intent was FP32 router for numerical stability (following DeepSeek V3 / Qwen2-MoE)
-        # However, vLLM's ReplicatedLinear doesn't support mixed-dtype (Float input + BFloat16 weights)
-        # For Phase 7 MVP, using BF16 router (same dtype as model)
-        # Phase 9 validation (issue #39) will quantify BF16 vs FP32 routing accuracy
-        if use_bf16_router:
-            if not hasattr(self, "_bf16_router_warning_logged"):
-                logger.warning(
-                    "LLaDA2 router using BF16 precision (EXPERIMENTAL). "
-                    "Numerical correctness unvalidated - may cause expert mis-routing. "
-                    "Phase 9 validation (issue #39) will compare BF16 vs FP32 routing. "
-                    "Unset VLLM_LLADA2_BF16_ROUTER to use safe FP32 default."
-                )
-                self._bf16_router_warning_logged = True
-
-        gate_logits, _ = self.gate(hidden_states_2d)  # BF16 (model dtype)
-
-        router_logits = torch.sigmoid(gate_logits)  # Sigmoid, not softmax!
-
-        # 2. Apply group-limited top-k routing
-        router_weights, selected_experts = self._apply_group_limited_topk(router_logits)
-
-        # 3. Forward through routed experts via FusedMoE
-        # FusedMoE expects 2D inputs (num_tokens, hidden_size)
-        routed_output = self.experts(
-            hidden_states_2d,
-            router_weights,
-            selected_experts,
-        )
-
-        # 4. Apply routed scaling factor
-        # Scale routed expert outputs by 2.5x (from HuggingFace config
-        # `routed_scaling_factor` field). This asymmetric scaling (routed vs
-        # shared experts) follows LLaDA2.0 architecture specification.
-        routed_output = routed_output * self.routed_scaling_factor
+        routed_output = self.experts(hidden_states_2d, gate_logits)
 
         # 5. Add shared expert output (if present)
+        # Note: Shared expert is NOT scaled by routed_scaling_factor
         if self.num_shared_experts > 0:
             assert self.shared_expert_gate is not None
             assert self.shared_expert_up is not None
@@ -334,68 +304,6 @@ class LLaDA2MoE(nn.Module):
         # Reshape output back to input shape
         return output.reshape(input_shape)
 
-    def _apply_group_limited_topk(
-        self, router_logits: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Apply group-limited top-k expert selection.
-
-        LLaDA2.0's unique routing: divide experts into groups, select top groups,
-        then select top-k experts from selected groups.
-
-        Args:
-            router_logits: Router scores, shape (num_tokens, num_experts) for V2 Model Runner
-                           or (batch_size, seq_len, num_experts) for legacy.
-
-        Returns:
-            router_weights: Normalized weights for selected experts,
-                shape (num_tokens, topk).
-            selected_experts: Indices of selected experts,
-                shape (num_tokens, topk).
-        """
-        # V2 Model Runner uses 2D tensors directly
-        if router_logits.ndim == 2:
-            num_tokens, num_experts = router_logits.shape
-            scores = router_logits
-        else:
-            # Legacy 3D path
-            batch_size, seq_len, num_experts = router_logits.shape
-            num_tokens = batch_size * seq_len
-            scores = router_logits.reshape(num_tokens, num_experts)  # (N, num_experts)
-
-        # Group experts: 256 experts → 8 groups of 32 experts each
-        experts_per_group = num_experts // self.n_group
-        scores_grouped = scores.reshape(num_tokens, self.n_group, experts_per_group)
-
-        # Select top-k groups based on maximum score in each group
-        group_scores, _ = scores_grouped.max(dim=2)  # (N, n_group)
-        _, top_group_indices = torch.topk(
-            group_scores, k=self.topk_group, dim=1
-        )  # (N, topk_group)
-
-        # Create mask for selected groups
-        group_mask = torch.zeros(
-            num_tokens, self.n_group, device=scores.device, dtype=torch.bool
-        )
-        group_mask.scatter_(1, top_group_indices, True)
-
-        # Apply group mask to scores
-        group_mask_expanded = group_mask.unsqueeze(2).expand_as(
-            scores_grouped
-        )  # (N, n_group, experts_per_group)
-        masked_scores = scores_grouped.clone()
-        masked_scores[~group_mask_expanded] = float("-inf")
-
-        # Flatten back and select top-k experts from selected groups
-        masked_scores_flat = masked_scores.reshape(num_tokens, num_experts)
-        topk_weights, topk_indices = torch.topk(
-            masked_scores_flat, k=self.num_experts_per_tok, dim=1
-        )  # (N, topk)
-
-        # Normalize weights
-        topk_weights = topk_weights / (topk_weights.sum(dim=1, keepdim=True) + 1e-20)
-
-        return topk_weights, topk_indices
-
 
 class LLaDA2DecoderLayer(nn.Module):
     """Single LLaDA2.0 transformer layer with block attention and MoE.
@@ -403,7 +311,7 @@ class LLaDA2DecoderLayer(nn.Module):
     Combines:
     - LLaDA2BlockAttention (non-causal within blocks)
     - LLaDA2MoE (group-limited routing with shared expert)
-    - RMSNorm pre-normalization
+    - LLaDA2RMSNorm pre-normalization
 
     Architecture:
         hidden = residual + self_attn(norm(residual))
@@ -432,10 +340,9 @@ class LLaDA2DecoderLayer(nn.Module):
         cache_config = vllm_config.cache_config
         quant_config = getattr(vllm_config, "quant_config", None)
 
-        # Block-style attention
-        # TEMPORARY FIX: Use encoder_only (non-causal) attention instead of decoder (causal)
-        # LLaDA2.0 is a diffusion model with bidirectional attention within blocks
-        # Full dual-chunk block attention implementation deferred to Phase 10
+        # Block-style attention with bidirectional (non-causal) attention.
+        # Uses decoder attn_type (for KV cache support in block diffusion)
+        # with LLaDA2BidirectionalFlashAttentionBackend overriding causal=False.
         self.self_attn = LLaDA2BlockAttention(
             num_heads=config.num_attention_heads,
             head_size=config.hidden_size // config.num_attention_heads,
@@ -449,7 +356,6 @@ class LLaDA2DecoderLayer(nn.Module):
             cache_config=cache_config,
             quant_config=quant_config,
             prefix=f"{prefix}.self_attn",
-            # attn_type defaults to "decoder" - use bidirectional backend to override causal=False
         )
 
         # MoE FFN (or dense-only for early layers)
@@ -465,12 +371,12 @@ class LLaDA2DecoderLayer(nn.Module):
             is_dense_only=is_dense_only,
         )
 
-        # RMSNorm layers
-        self.input_layernorm = RMSNorm(
+        # LLaDA2RMSNorm layers
+        self.input_layernorm = LLaDA2RMSNorm(
             config.hidden_size,
             eps=getattr(config, "rms_norm_eps", 1e-6),
         )
-        self.post_attention_layernorm = RMSNorm(
+        self.post_attention_layernorm = LLaDA2RMSNorm(
             config.hidden_size,
             eps=getattr(config, "rms_norm_eps", 1e-6),
         )
@@ -558,6 +464,11 @@ class LLaDA2ForCausalLM(nn.Module):
                 "multi-GPU inference. PP support may be added in a future phase."
             )
 
+        # Note: chunked prefill and prefix caching are automatically disabled
+        # for non-causal models by the vLLM fork's per-model control in
+        # ModelConfig.is_chunked_prefill_supported / is_prefix_caching_supported
+        # when attention_config.use_non_causal=True.
+
         # Log GPU capability (Phase 8)
         try:
             gpu_caps = detect_gpu_capabilities()
@@ -608,7 +519,7 @@ class LLaDA2ForCausalLM(nn.Module):
         )
 
         # Final layer norm
-        self.norm = RMSNorm(
+        self.norm = LLaDA2RMSNorm(
             self.hidden_size,
             eps=getattr(self.config, "rms_norm_eps", 1e-6),
         )
@@ -690,10 +601,12 @@ class LLaDA2ForCausalLM(nn.Module):
 
         if not pp_group.is_last_rank:
             # PP > 1: pass hidden states to next rank
-            return IntermediateTensors({
-                "hidden_states": hidden_states,
-                "residual": residual,
-            })
+            return IntermediateTensors(
+                {
+                    "hidden_states": hidden_states,
+                    "residual": residual,
+                }
+            )
 
         # Final norm
         hidden_states, _ = self.norm(hidden_states, residual)

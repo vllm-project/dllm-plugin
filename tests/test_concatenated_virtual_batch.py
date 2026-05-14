@@ -4,7 +4,6 @@ Tests the fix for softmax normalization bug without requiring GPU.
 Validates that metadata is constructed correctly for single-batch attention.
 """
 
-import numpy as np
 import pytest
 import torch
 
@@ -14,6 +13,7 @@ def test_concatenated_metadata_construction():
     pytest.importorskip("vllm")
 
     from vllm.v1.attention.backend import CommonAttentionMetadata
+
     from dllm_plugin.attention.concatenated_virtual_batch import (
         create_concatenated_virtual_batch,
     )
@@ -28,13 +28,16 @@ def test_concatenated_metadata_construction():
     # Create mock original metadata
     # Request 0: 64 prefix tokens → 4 prefix blocks, + 2 block blocks = 6 total blocks
     # Request 1: 32 prefix tokens → 2 prefix blocks, + 2 block blocks = 4 total blocks
-    max_blocks = 6  # Max blocks needed per request
 
     # Mock block table (physical page IDs)
-    block_table_tensor = torch.tensor([
-        [0, 1, 2, 3, 4, 5],      # Request 0: 6 blocks
-        [6, 7, 8, 9, -1, -1],    # Request 1: 4 blocks + padding
-    ], dtype=torch.int32, device=device)
+    block_table_tensor = torch.tensor(
+        [
+            [0, 1, 2, 3, 4, 5],  # Request 0: 6 blocks
+            [6, 7, 8, 9, -1, -1],  # Request 1: 4 blocks + padding
+        ],
+        dtype=torch.int32,
+        device=device,
+    )
 
     original_metadata = CommonAttentionMetadata(
         query_start_loc=torch.tensor([0, 32, 64], dtype=torch.int32, device=device),
@@ -60,10 +63,14 @@ def test_concatenated_metadata_construction():
     # Verify: Check metadata properties
 
     # 1. Combined seq_lens should be prefix + block
-    expected_seq_lens = torch.tensor([
-        64 + 32,  # Request 0: 64 prefix + 32 block = 96
-        32 + 32,  # Request 1: 32 prefix + 32 block = 64
-    ], dtype=torch.int32, device=device)
+    expected_seq_lens = torch.tensor(
+        [
+            64 + 32,  # Request 0: 64 prefix + 32 block = 96
+            32 + 32,  # Request 1: 32 prefix + 32 block = 64
+        ],
+        dtype=torch.int32,
+        device=device,
+    )
 
     assert torch.equal(concatenated_metadata.seq_lens, expected_seq_lens), (
         f"Expected seq_lens={expected_seq_lens.tolist()}, "
@@ -78,12 +85,18 @@ def test_concatenated_metadata_construction():
     # 3. Block table should concatenate prefix + block pages
     # Request 0: pages [0,1,2,3] (prefix) + [4,5] (block) = [0,1,2,3,4,5]
     # Request 1: pages [6,7] (prefix) + [8,9] (block) = [6,7,8,9] + padding
-    expected_block_table = torch.tensor([
-        [0, 1, 2, 3, 4, 5],      # Request 0: all 6 pages
-        [6, 7, 8, 9, -1, -1],    # Request 1: 4 pages + padding
-    ], dtype=torch.int32, device=device)
+    expected_block_table = torch.tensor(
+        [
+            [0, 1, 2, 3, 4, 5],  # Request 0: all 6 pages
+            [6, 7, 8, 9, -1, -1],  # Request 1: 4 pages + padding
+        ],
+        dtype=torch.int32,
+        device=device,
+    )
 
-    assert torch.equal(concatenated_metadata.block_table_tensor, expected_block_table), (
+    assert torch.equal(
+        concatenated_metadata.block_table_tensor, expected_block_table
+    ), (
         f"Block table mismatch:\n"
         f"Expected:\n{expected_block_table}\n"
         f"Got:\n{concatenated_metadata.block_table_tensor}"
@@ -96,12 +109,12 @@ def test_concatenated_metadata_construction():
     assert concatenated_metadata.max_query_len == block_size
 
     # 6. causal should be False (bidirectional within block, block-causal across blocks)
-    assert concatenated_metadata.causal == False
+    assert not concatenated_metadata.causal
 
     print("✅ Concatenated metadata constructed correctly")
-    print(f"   Request 0: {num_prefix_tokens_per_request[0]} prefix + {block_size} block = {expected_seq_lens[0]} total")
-    print(f"   Request 1: {num_prefix_tokens_per_request[1]} prefix + {block_size} block = {expected_seq_lens[1]} total")
-    print(f"   Single softmax will normalize over ALL {expected_seq_lens[0]} (or {expected_seq_lens[1]}) keys")
+    print(f"   Req 0: {num_prefix_tokens_per_request[0]}+{block_size}")
+    print(f"   Req 1: {num_prefix_tokens_per_request[1]}+{block_size}")
+    print(f"   Softmax over {expected_seq_lens[0]}/{expected_seq_lens[1]} keys")
 
 
 def test_concatenated_first_block_edge_case():
@@ -109,6 +122,7 @@ def test_concatenated_first_block_edge_case():
     pytest.importorskip("vllm")
 
     from vllm.v1.attention.backend import CommonAttentionMetadata
+
     from dllm_plugin.attention.concatenated_virtual_batch import (
         create_concatenated_virtual_batch,
     )
@@ -122,10 +136,14 @@ def test_concatenated_first_block_edge_case():
 
     # Mock block table: only block pages (no prefix)
     # Each request needs 2 blocks (32 / 16 = 2)
-    block_table_tensor = torch.tensor([
-        [0, 1],  # Request 0: 2 block pages
-        [2, 3],  # Request 1: 2 block pages
-    ], dtype=torch.int32, device=device)
+    block_table_tensor = torch.tensor(
+        [
+            [0, 1],  # Request 0: 2 block pages
+            [2, 3],  # Request 1: 2 block pages
+        ],
+        dtype=torch.int32,
+        device=device,
+    )
 
     original_metadata = CommonAttentionMetadata(
         query_start_loc=torch.tensor([0, 32, 64], dtype=torch.int32, device=device),
@@ -164,6 +182,7 @@ def test_concatenated_heterogeneous_prefixes():
     pytest.importorskip("vllm")
 
     from vllm.v1.attention.backend import CommonAttentionMetadata
+
     from dllm_plugin.attention.concatenated_virtual_batch import (
         create_concatenated_virtual_batch,
     )
@@ -179,13 +198,16 @@ def test_concatenated_heterogeneous_prefixes():
     # Request 0: 128 prefix → 8 blocks, + 2 block blocks = 10 total
     # Request 1: 64 prefix → 4 blocks, + 2 block blocks = 6 total
     # Request 2: 0 prefix → 0 blocks, + 2 block blocks = 2 total
-    max_blocks = 10
 
-    block_table_tensor = torch.tensor([
-        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],           # Request 0: 10 blocks
-        [10, 11, 12, 13, 14, 15, -1, -1, -1, -1], # Request 1: 6 blocks + padding
-        [16, 17, -1, -1, -1, -1, -1, -1, -1, -1], # Request 2: 2 blocks + padding
-    ], dtype=torch.int32, device=device)
+    block_table_tensor = torch.tensor(
+        [
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],  # Request 0: 10 blocks
+            [10, 11, 12, 13, 14, 15, -1, -1, -1, -1],  # Request 1: 6 blocks + padding
+            [16, 17, -1, -1, -1, -1, -1, -1, -1, -1],  # Request 2: 2 blocks + padding
+        ],
+        dtype=torch.int32,
+        device=device,
+    )
 
     original_metadata = CommonAttentionMetadata(
         query_start_loc=torch.tensor([0, 32, 64, 96], dtype=torch.int32, device=device),
@@ -209,23 +231,27 @@ def test_concatenated_heterogeneous_prefixes():
     )
 
     # Verify: Combined seq_lens
-    expected_seq_lens = torch.tensor([
-        128 + 32,  # Request 0: 160
-        64 + 32,   # Request 1: 96
-        0 + 32,    # Request 2: 32
-    ], dtype=torch.int32, device=device)
+    expected_seq_lens = torch.tensor(
+        [
+            128 + 32,  # Request 0: 160
+            64 + 32,  # Request 1: 96
+            0 + 32,  # Request 2: 32
+        ],
+        dtype=torch.int32,
+        device=device,
+    )
 
     assert torch.equal(concatenated_metadata.seq_lens, expected_seq_lens), (
-        f"Expected {expected_seq_lens.tolist()}, got {concatenated_metadata.seq_lens.tolist()}"
+        "seq_lens mismatch"
     )
 
     # max_seq_len should be max(160, 96, 32) = 160
     assert concatenated_metadata.max_seq_len == 160
 
     print("✅ Heterogeneous prefix lengths handled correctly")
-    print(f"   Request 0: {num_prefix_tokens_per_request[0]} + {block_size} = {expected_seq_lens[0]}")
-    print(f"   Request 1: {num_prefix_tokens_per_request[1]} + {block_size} = {expected_seq_lens[1]}")
-    print(f"   Request 2: {num_prefix_tokens_per_request[2]} + {block_size} = {expected_seq_lens[2]}")
+    print(f"   Req0: {num_prefix_tokens_per_request[0]}+{block_size}")
+    print(f"   Req1: {num_prefix_tokens_per_request[1]}+{block_size}")
+    print(f"   Req2: {num_prefix_tokens_per_request[2]}+{block_size}")
 
 
 if __name__ == "__main__":

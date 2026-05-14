@@ -50,6 +50,54 @@ except PackageNotFoundError:
 
 _logger = logging.getLogger(__name__)
 
+_non_causal_flag_applied = False
+
+
+def _apply_non_causal_flag() -> None:
+    """Set attention_config.use_non_causal=True for LLaDA2 models.
+
+    The vLLM fork reads this flag to set causal=False in
+    CommonAttentionMetadata and to disable chunked prefill /
+    prefix caching for non-causal models.
+    """
+    global _non_causal_flag_applied
+    if _non_causal_flag_applied:
+        return
+    _non_causal_flag_applied = True
+
+    try:
+        from vllm.config import VllmConfig
+    except ImportError:
+        return
+
+    from dllm_plugin.config import (
+        LLADA2_ARCHITECTURE_NAME,
+        LLADA2_HF_ARCHITECTURE_NAME,
+    )
+
+    _dllm_archs = {LLADA2_ARCHITECTURE_NAME, LLADA2_HF_ARCHITECTURE_NAME}
+    _original_post_init = VllmConfig.__post_init__
+
+    def _patched_post_init(self: VllmConfig) -> None:
+        _original_post_init(self)
+
+        model_config = getattr(self, "model_config", None)
+        if model_config is None:
+            return
+        hf_config = getattr(model_config, "hf_config", None)
+        if hf_config is None:
+            return
+        archs = set(getattr(hf_config, "architectures", []) or [])
+        if not archs.intersection(_dllm_archs):
+            return
+
+        attention_config = getattr(self, "attention_config", None)
+        if attention_config is not None:
+            attention_config.use_non_causal = True
+            _logger.info("dLLM plugin: set use_non_causal=True for LLaDA2")
+
+    VllmConfig.__post_init__ = _patched_post_init
+
 
 def register_dllm() -> None:
     """Entry point for ``vllm.general_plugins`` (``dllm``).
@@ -75,12 +123,9 @@ def register_dllm() -> None:
     DEBUG with ``exc_info`` and returns. (``find_spec`` can succeed when a full
     ``import vllm`` would still fail.)
 
-    When ``VLLM_DLLM_APPLY_ENGINE_CORE_DRAFT_HOOK`` is truthy, calls
-    ``apply_engine_core_draft_hook_patch_if_needed()`` after registration (see
-    ``dllm_plugin.engine_core_draft_hook``). The skip env
-    ``VLLM_DLLM_SKIP_ENGINE_CORE_DRAFT_HOOK_PATCH`` is enforced **inside** that
-    helper (no-op), not by omitting the call—so with both envs set, ``apply_*``
-    still runs and returns without patching.
+    When running against the vLLM fork (dllm-fork branch), no runtime patches
+    are needed — the fork handles chunked prefill, prefix caching, the draft
+    hook gate, and non-causal attention natively.
     """
     _logger.debug("dLLM plugin: register_dllm() called")
 
@@ -172,15 +217,10 @@ def register_dllm() -> None:
             DLLM_MOCK_STACK_MODEL_ID,
         )
 
-    from dllm_plugin.config import DLLM_APPLY_ENGINE_CORE_DRAFT_HOOK_ENV_VAR
-
-    _apply_raw = os.environ.get(DLLM_APPLY_ENGINE_CORE_DRAFT_HOOK_ENV_VAR, "")
-    if _apply_raw.strip().lower() in {"1", "true", "yes", "on"}:
-        from dllm_plugin.engine_core_draft_hook import (
-            apply_engine_core_draft_hook_patch_if_needed,
-        )
-
-        apply_engine_core_draft_hook_patch_if_needed()
+    # Set use_non_causal=True for LLaDA2 so the fork's
+    # CommonAttentionMetadata uses causal=False and per-model
+    # chunked prefill / prefix caching control kicks in.
+    _apply_non_causal_flag()
 
 
 __all__ = [

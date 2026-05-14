@@ -1,0 +1,28 @@
+{
+  "model_path": "/workspace/llada2-mini",
+  "capture_root": "/workspace/captures",
+  "test_prompt": "The quick brown fox",
+  "dtype": "bfloat16",
+  "seed": 42,
+  "block_size": 32,
+  "enforce_eager": true,
+  "temperature": 0.0,
+  "scenarios": {
+    "first_block": {
+      "description": "First generation block, no prefix",
+      "num_prefix_tokens": 0
+    },
+    "short_7tok": {
+      "description": "7-token prompt, first block",
+      "num_prefix_tokens": 0
+    },
+    "nth_block_p32": {
+      "description": "2nd block with 32-token prefix",
+      "num_prefix_tokens": 32
+    },
+    "nth_block_p64": {
+      "description": "3rd block with 64-token prefix",
+      "num_prefix_tokens": 64
+    }
+  }
+}

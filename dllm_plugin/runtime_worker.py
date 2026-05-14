@@ -282,9 +282,6 @@ class DllmRuntimeWorker(VllmGPUWorker):
             )
         super().__init__(*args, **kwargs)
         assert_compatible_stack(self.vllm_config, caller="DllmRuntimeWorker.__init__")
-        # Align with ``DllmWorker`` / ``is_v2_model_runner_enabled()`` (env), so tests
-        # that monkeypatch ``VLLM_USE_V2_MODEL_RUNNER`` get ``ValueError`` from the
-        # assert below instead of ``RuntimeError`` from ``DllmWorker``.
         effective_v2 = bool(self.use_v2_model_runner) and is_v2_model_runner_enabled()
         assert_runtime_worker_v2_model_runner(
             use_v2_model_runner=effective_v2,
@@ -292,14 +289,12 @@ class DllmRuntimeWorker(VllmGPUWorker):
         )
         self._dllm_helper = DllmWorker(require_v2_model_runner=effective_v2)
 
-    @instrument(span_name="Init device")
-    def init_device(self) -> None:
-        """Install :class:`~dllm_plugin.gpu_model_runner.DllmGPUModelRunner` for v2."""
-        super().init_device()
-        if getattr(self, "use_v2_model_runner", False):
+        # Tell the fork's worker to use DllmGPUModelRunner instead of stock
+        # GPUModelRunner. The fork checks _model_runner_cls in init_device().
+        if effective_v2:
             from dllm_plugin.gpu_model_runner import DllmGPUModelRunner
 
-            self.model_runner = DllmGPUModelRunner(self.vllm_config, self.device)
+            self._model_runner_cls = DllmGPUModelRunner
 
     def take_draft_token_ids(self) -> DraftTokenIds | None:
         """Prefer dLLM runner hook ``take_dllm_draft_token_ids`` when present.
