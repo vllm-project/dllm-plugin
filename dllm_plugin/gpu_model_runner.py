@@ -79,13 +79,9 @@ class DllmGPUModelRunner(GPUModelRunner):
     """v2 GPU model runner with dLLM block sampling in phase two."""
 
     def __init__(self, vllm_config: Any, device: torch.device) -> None:
+        # DiffusionConfig (set by register_dllm) provides num_speculative_tokens
+        # so parent __init__ sizes buffers correctly. No _resize_for_draft_blocks.
         super().__init__(vllm_config, device)
-
-        # dLLM uses the spec-decode infrastructure for 32-token draft blocks.
-        # Parent init sets num_speculative_steps=0 (no speculative_config).
-        # Resize buffers to fit DRAFT_SIZE-token blocks.
-        if dllm_architecture_match(vllm_config):
-            self._resize_for_draft_blocks(DRAFT_SIZE)
 
         #: Width for sampled-token tensor rows (rejection / post_update layout).
         self._dllm_slot_width = max(self.num_speculative_steps + 1, DRAFT_SIZE)
@@ -98,48 +94,6 @@ class DllmGPUModelRunner(GPUModelRunner):
         self._dllm_pending_draft_ids: Any = None
         self._dllm_denoise_step: dict[str, int] = {}
         self._dllm_initial_prompt_len: dict[str, int] = {}
-
-    def _resize_for_draft_blocks(self, draft_size: int) -> None:
-        """Resize spec-decode buffers to fit draft_size-token blocks.
-
-        Parent GPUModelRunner allocates draft_tokens as [max_reqs, 0] when
-        no speculative_config is set. dLLM reuses this buffer for 32-token
-        blocks, so we resize it and all dependent objects.
-        """
-        from vllm.v1.worker.gpu.states import RequestState
-
-        self.num_speculative_steps = draft_size
-        self.uniform_decode_query_len = 1 + draft_size
-        self.decode_query_len = draft_size + 1
-
-        self.req_states = RequestState(
-            max_num_reqs=self.max_num_reqs,
-            max_model_len=self.max_model_len,
-            max_num_batched_tokens=self.max_num_tokens,
-            num_speculative_steps=draft_size,
-            vocab_size=self.vocab_size,
-            device=self.device,
-        )
-
-        if self.is_last_pp_rank:
-            from vllm.v1.worker.gpu.sample.sampler import Sampler
-            from vllm.v1.worker.gpu.structured_outputs import (
-                StructuredOutputsWorker,
-            )
-
-            self.sampler = Sampler(
-                max_num_reqs=self.max_num_reqs,
-                vocab_size=self.vocab_size,
-                device=self.device,
-                req_states=self.req_states,
-                logprobs_mode=self.model_config.logprobs_mode,
-                num_speculative_tokens=draft_size + 1,
-            )
-            self.structured_outputs_worker = StructuredOutputsWorker(
-                max_num_logits=self.max_num_reqs * (draft_size + 1),
-                vocab_size=self.vocab_size,
-                device=self.device,
-            )
 
     def shutdown(self) -> None:
         """vLLM v1 worker calls this during engine teardown."""

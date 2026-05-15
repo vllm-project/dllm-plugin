@@ -96,6 +96,31 @@ def _apply_non_causal_flag() -> None:
             attention_config.use_non_causal = True
             _logger.info("dLLM plugin: set use_non_causal=True for LLaDA2")
 
+        # Set DiffusionConfig for buffer sizing (eliminates
+        # _resize_for_draft_blocks post-init reconstruction)
+        if getattr(self, "diffusion_config", None) is None:
+            try:
+                from vllm.config.diffusion import DiffusionConfig as DC
+
+                from dllm_plugin.config import (
+                    DRAFT_SIZE,
+                    LLADA2_DEFAULT_COMMIT_CONFIDENCE_THRESHOLD,
+                    LLADA2_DEFAULT_MASK_TOKEN_ID,
+                )
+
+                self.diffusion_config = DC(
+                    canvas_length=DRAFT_SIZE,
+                    mask_token_id=LLADA2_DEFAULT_MASK_TOKEN_ID,
+                    commit_threshold=LLADA2_DEFAULT_COMMIT_CONFIDENCE_THRESHOLD,
+                    max_denoise_steps=2 * DRAFT_SIZE,
+                )
+                _logger.info(
+                    "dLLM plugin: set diffusion_config (canvas_length=%d)",
+                    DRAFT_SIZE,
+                )
+            except ImportError:
+                pass
+
     VllmConfig.__post_init__ = _patched_post_init
 
 
