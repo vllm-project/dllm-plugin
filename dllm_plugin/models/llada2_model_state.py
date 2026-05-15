@@ -17,7 +17,7 @@ import torch
 import torch.nn as nn
 from vllm.config import VllmConfig
 from vllm.config.compilation import CUDAGraphMode
-from vllm.tasks import GenerationTask
+from vllm.tasks import GenerationTask  # Literal type alias
 from vllm.v1.core.sched.output import NewRequestData
 from vllm.v1.kv_cache_interface import KVCacheConfig
 from vllm.v1.outputs import DraftTokenIds
@@ -77,7 +77,7 @@ class LLaDA2ModelState(ModelState):
         self._pending_draft_ids: DraftTokenIds | None = None
 
     def get_supported_generation_tasks(self) -> tuple[GenerationTask, ...]:
-        return (GenerationTask.GENERATE,)
+        return ("generate",)
 
     def add_request(self, req_index: int, new_req_data: NewRequestData) -> None:
         return None
