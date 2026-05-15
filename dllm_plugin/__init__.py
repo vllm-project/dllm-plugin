@@ -90,13 +90,8 @@ def _apply_non_causal_flag() -> None:
         if not archs.intersection(_dllm_archs):
             return
 
-        attention_config = getattr(self, "attention_config", None)
-        if attention_config is not None:
-            attention_config.use_non_causal = True
-            _logger.info("dLLM plugin: set use_non_causal=True for LLaDA2")
-
-        # Set DiffusionConfig for buffer sizing (eliminates
-        # _resize_for_draft_blocks post-init reconstruction)
+        # Set DiffusionConfig for buffer sizing — must be before
+        # attention_config mutation which can fail on pydantic models
         if getattr(self, "diffusion_config", None) is None:
             try:
                 from vllm.config.diffusion import DiffusionConfig as DC
@@ -119,6 +114,18 @@ def _apply_non_causal_flag() -> None:
                 )
             except ImportError:
                 pass
+
+        # Set use_non_causal on attention_config (may fail on pydantic
+        # models with extra="forbid" if the field doesn't exist)
+        attention_config = getattr(self, "attention_config", None)
+        if attention_config is not None:
+            try:
+                attention_config.use_non_causal = True
+                _logger.info("dLLM plugin: set use_non_causal=True for LLaDA2")
+            except (AttributeError, ValueError, Exception):
+                _logger.debug(
+                    "dLLM plugin: could not set use_non_causal on attention_config"
+                )
 
     VllmConfig.__post_init__ = _patched_post_init
 
