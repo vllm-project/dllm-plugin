@@ -34,7 +34,7 @@ from dllm_plugin.config import (
     LLADA2_DEFAULT_MASK_TOKEN_ID,
 )
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("vllm.dllm_plugin.llada2_model_state")
 
 
 class LLaDA2ModelState(ModelState):
