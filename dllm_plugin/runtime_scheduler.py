@@ -84,13 +84,13 @@ class DllmRuntimeScheduler(VllmScheduler):
         self._dllm_helper = DllmSchedulerHelper()
 
     def schedule(self) -> Any:
-        """Attach grammar bitmask metadata for dLLM workers.
+        """Attach grammar bitmask metadata for dLLM workers."""
+        # Capture num_computed_tokens BEFORE super().schedule() advances them.
+        # Used by update_from_output() for Commit-0 rollback.
+        self._pre_schedule_nct: dict[str, int] = {}
+        for req_id, request in self.requests.items():
+            self._pre_schedule_nct[req_id] = request.num_computed_tokens
 
-        Following upstream vLLM pattern: scheduler is stateless, just reads
-        request.spec_token_ids if present (populated by prior iteration's
-        update_draft_token_ids call). First iteration has empty spec_token_ids,
-        handled gracefully in model runner.
-        """
         out = super().schedule()
 
         # Note: spec_token_ids population and negative num_scheduled_tokens
@@ -264,19 +264,13 @@ class DllmRuntimeScheduler(VllmScheduler):
                 cleaned.append(tokens)
             model_runner_output.sampled_token_ids = cleaned
 
-        # Commit-0 rollback: The parent scheduler's schedule() advances
-        # num_computed_tokens by num_scheduled_tokens BEFORE update_from_output.
-        # For Commit-0 (no tokens committed), we must restore the pre-step
-        # value so the same block gets re-scheduled.
-        saved_nct: dict[str, int] = {}
-        for req_id in scheduler_output.num_scheduled_tokens:
-            request = self.requests.get(req_id)
-            if request is not None:
-                saved_nct[req_id] = request.num_computed_tokens
-
         result = super().update_from_output(scheduler_output, model_runner_output)
 
-        for req_id, prev_nct in saved_nct.items():
+        # Commit-0 rollback: schedule() advanced num_computed_tokens by
+        # num_scheduled_tokens. For Commit-0 (no tokens committed), restore
+        # the pre-schedule value so the same block gets re-scheduled.
+        pre_nct = getattr(self, "_pre_schedule_nct", {})
+        for req_id in scheduler_output.num_scheduled_tokens:
             request = self.requests.get(req_id)
             if request is None:
                 continue
@@ -288,8 +282,8 @@ class DllmRuntimeScheduler(VllmScheduler):
                 if model_runner_output.sampled_token_ids
                 else []
             )
-            if not generated:
-                request.num_computed_tokens = prev_nct
+            if not generated and req_id in pre_nct:
+                request.num_computed_tokens = pre_nct[req_id]
 
         # Update dllm_state.num_computed_tokens for committed blocks
         if model_runner_output.sampled_token_ids:
