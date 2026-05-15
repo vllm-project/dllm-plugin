@@ -177,8 +177,11 @@ class DllmRuntimeScheduler(VllmScheduler):
             )
 
     def update_draft_token_ids(self, draft_token_ids: DraftTokenIds) -> None:
-        """Keep fixed ``DRAFT_SIZE`` blocks; do not grammar-truncate drafts here."""
+        """Keep fixed ``DRAFT_SIZE`` blocks; do not grammar-truncate drafts here.
 
+        Unlike AR spec-decode, dLLM always sets spec_token_ids regardless of
+        prefill state — the canvas is needed from the first decode step.
+        """
         self._validate_draft_lengths(draft_token_ids)
         for req_id, spec_token_ids in zip(
             draft_token_ids.req_ids,
@@ -188,12 +191,6 @@ class DllmRuntimeScheduler(VllmScheduler):
             request = self.requests.get(req_id)
             if request is None or request.is_finished():
                 continue
-
-            if request.is_prefill_chunk:
-                if request.spec_token_ids:
-                    request.spec_token_ids = []
-                continue
-
             request.spec_token_ids = list(spec_token_ids)
 
     def update_draft_token_ids_in_output(
