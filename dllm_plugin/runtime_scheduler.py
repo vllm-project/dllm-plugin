@@ -260,7 +260,7 @@ class DllmRuntimeScheduler(VllmScheduler):
         if model_runner_output.sampled_token_ids:
             cleaned: list[list[int]] = []
             for row in model_runner_output.sampled_token_ids:
-                tokens = [int(t) for t in row if int(t) > 0]
+                tokens = [int(t) for t in row if int(t) != -1]
                 cleaned.append(tokens)
             model_runner_output.sampled_token_ids = cleaned
 
