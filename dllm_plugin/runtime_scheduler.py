@@ -247,7 +247,7 @@ class DllmRuntimeScheduler(VllmScheduler):
         scheduler_output: Any,
         model_runner_output: ModelRunnerOutput,
     ) -> dict[int, Any]:
-        """Validate dLLM contract, delegate upstream, then apply Commit-0 rollback."""
+        """Validate dLLM contract, strip Commit-0 padding, delegate upstream."""
 
         validate_scheduler_worker_contract(
             helper=self._dllm_helper,
@@ -255,11 +255,20 @@ class DllmRuntimeScheduler(VllmScheduler):
             model_runner_output=model_runner_output,
         )
 
+        # Strip padding from sampled_token_ids: the model runner produces
+        # fixed-width rows (slot_width) padded with -1. The parent scheduler
+        # interprets the full list as accepted tokens. Filter to only
+        # non-negative, non-zero values for committed blocks, and empty
+        # lists for Commit-0 (denoising in progress).
+        if model_runner_output.sampled_token_ids:
+            cleaned: list[list[int]] = []
+            for row in model_runner_output.sampled_token_ids:
+                tokens = [int(t) for t in row if int(t) > 0]
+                cleaned.append(tokens)
+            model_runner_output.sampled_token_ids = cleaned
+
         # Update dllm_state.num_computed_tokens for committed blocks
-        if (
-            hasattr(model_runner_output, "sampled_token_ids")
-            and model_runner_output.sampled_token_ids
-        ):
+        if model_runner_output.sampled_token_ids:
             for req_id, token_ids in zip(
                 model_runner_output.req_ids,
                 model_runner_output.sampled_token_ids,
@@ -267,44 +276,10 @@ class DllmRuntimeScheduler(VllmScheduler):
             ):
                 request = self.requests.get(req_id)
                 if request and hasattr(request, "dllm_state"):
-                    n_sampled = len(token_ids)
-                    if n_sampled > 0:
-                        request.dllm_state.num_computed_tokens += n_sampled
+                    if len(token_ids) > 0:
+                        request.dllm_state.num_computed_tokens += len(token_ids)
 
-        # Commit-0 rollback (DESIGN_MVP.md §6.1): capture num_computed_tokens
-        # BEFORE the parent increments it, so we can restore on Commit-0
-        # instead of assuming the rollback amount.
-        spec_decode_tokens = (
-            getattr(scheduler_output, "scheduled_spec_decode_tokens", None) or {}
-        )
-        saved_nct: dict[str, int] = {}
-        for req_id in scheduler_output.num_scheduled_tokens:
-            if req_id not in spec_decode_tokens:
-                continue
-            request = self.requests.get(req_id)
-            if request is not None:
-                saved_nct[req_id] = request.num_computed_tokens
-
-        result = super().update_from_output(scheduler_output, model_runner_output)
-
-        # Restore num_computed_tokens for Commit-0 requests so the same
-        # block gets re-scheduled for the next denoising iteration.
-        for req_id, prev_nct in saved_nct.items():
-            request = self.requests.get(req_id)
-            if request is None:
-                continue
-            req_index = model_runner_output.req_id_to_index.get(req_id)
-            if req_index is None:
-                continue
-            generated = (
-                model_runner_output.sampled_token_ids[req_index]
-                if model_runner_output.sampled_token_ids
-                else []
-            )
-            if not generated:
-                request.num_computed_tokens = prev_nct
-
-        return result
+        return super().update_from_output(scheduler_output, model_runner_output)
 
     def _validate_draft_lengths(self, draft_token_ids: DraftTokenIds) -> None:
         for req_id, token_ids in zip(
