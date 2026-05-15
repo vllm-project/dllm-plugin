@@ -34,7 +34,7 @@ from dllm_plugin.config import (
     LLADA2_DEFAULT_MASK_TOKEN_ID,
 )
 
-logger = logging.getLogger("vllm.dllm_plugin.llada2_model_state")
+logger = logging.getLogger(__name__)
 
 
 class LLaDA2ModelState(ModelState):
@@ -129,13 +129,6 @@ class LLaDA2ModelState(ModelState):
 
         raw = getattr(scheduler_output, "scheduled_spec_decode_tokens", None) or {}
         self._scheduled_spec_decode_tokens = {k: tuple(v) for k, v in raw.items()}
-        logger.info(
-            "before_step: scheduled_spec_decode_tokens=%d reqs, sizes=%s",
-            len(self._scheduled_spec_decode_tokens),
-            {k: len(v) for k, v in self._scheduled_spec_decode_tokens.items()}
-            if self._scheduled_spec_decode_tokens
-            else "empty",
-        )
 
         active = set(getattr(scheduler_output, "num_scheduled_tokens", {}).keys())
         for stale in set(self._denoise_step) - active:
@@ -158,23 +151,29 @@ class LLaDA2ModelState(ModelState):
         req_states: RequestState,
     ) -> tuple[SamplerOutput, torch.Tensor, torch.Tensor] | None:
         has_drafts = bool(self._scheduled_spec_decode_tokens)
-        logger.info(
-            "custom_sample: has_drafts=%s, num_draft_tokens=%d, "
-            "scheduled=%d, num_reqs=%d",
-            has_drafts,
-            input_batch.num_draft_tokens,
-            len(self._scheduled_spec_decode_tokens),
-            input_batch.num_reqs,
-        )
-        if has_drafts and input_batch.num_draft_tokens == 0:
-            logger.warning(
-                "Scheduler sent %d draft requests but num_draft_tokens=0. "
-                "Check DiffusionConfig wiring and num_speculative_steps.",
-                len(self._scheduled_spec_decode_tokens),
-            )
         if not has_drafts:
-            # Prefill or no drafts yet — suppress AR token emission.
-            # The first block's committed output will contain the real tokens.
+            # Prefill or bootstrap — no remasking yet.
+            # Initialize canvas for each request and produce as pending drafts
+            # so the draft lifecycle loop starts on the next step.
+            mask_id = self._mask_id
+            next_blocks: list[list[int]] = []
+            for req_id in input_batch.req_ids:
+                canvas = [mask_id] * self._draft_size
+                next_blocks.append(canvas)
+                req_idx = req_states.req_id_to_index.get(req_id)
+                if req_idx is not None and req_states.draft_tokens.shape[1] > 0:
+                    n = min(self._draft_size, req_states.draft_tokens.shape[1])
+                    req_states.draft_tokens[req_idx, :n] = torch.tensor(
+                        canvas[:n],
+                        dtype=req_states.draft_tokens.dtype,
+                        device=req_states.draft_tokens.device,
+                    )
+
+            self._pending_draft_ids = DraftTokenIds(
+                req_ids=list(input_batch.req_ids),
+                draft_token_ids=next_blocks,
+            )
+
             num_reqs = input_batch.num_reqs
             width = self._slot_width
             sampled = torch.zeros(

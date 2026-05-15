@@ -162,30 +162,19 @@ class DllmRuntimeScheduler(VllmScheduler):
         )
 
     def add_request(self, request: Any) -> None:
-        """Initialize spec_token_ids with first block for dLLM requests.
+        """Initialize dLLM state for new requests.
 
-        For dLLM block diffusion, we generate the first block immediately when
-        adding the request, so the first decode step already has a 32-token draft.
+        Canvas bootstrap is handled by LLaDA2ModelState.custom_sample() which
+        produces initial draft tokens on the first (prefill) step. The scheduler
+        just propagates spec_token_ids set by update_draft_token_ids().
         """
         super().add_request(request)
 
-        # Create dLLM state for request (Phase 7 - virtual batch attention)
-        # Track num_computed_tokens for chunked block attention
         if not hasattr(request, "dllm_state"):
             request.dllm_state = DllmRequestState(
                 request_id=request.request_id,
-                num_computed_tokens=0,  # Start with no committed prefix
+                num_computed_tokens=0,
             )
-
-        # Initialize first block for dLLM requests
-        # This ensures scheduled_spec_decode_tokens is populated from the start
-        if not hasattr(request, "spec_token_ids") or not request.spec_token_ids:
-            prompt_token_ids = getattr(request, "prompt_token_ids", [])
-            if prompt_token_ids:
-                first_block = self._dllm_helper.initialize_first_block(
-                    prompt_token_ids=prompt_token_ids
-                )
-                request.spec_token_ids = list(first_block)
 
     def update_draft_token_ids(self, draft_token_ids: DraftTokenIds) -> None:
         """Keep fixed ``DRAFT_SIZE`` blocks; do not grammar-truncate drafts here."""
