@@ -257,20 +257,39 @@ class DllmRuntimeScheduler(VllmScheduler):
         # interprets the full list as accepted tokens. Filter to only
         # non-negative, non-zero values for committed blocks, and empty
         # lists for Commit-0 (denoising in progress).
-        import sys
         if model_runner_output.sampled_token_ids:
             cleaned: list[list[int]] = []
             for row in model_runner_output.sampled_token_ids:
                 tokens = [int(t) for t in row if int(t) > 0]
                 cleaned.append(tokens)
-            print(
-                f"[SCHED] update_from_output: cleaned sampled_token_ids "
-                f"lengths={[len(t) for t in cleaned]}, "
-                f"spec_decode_tokens={list(scheduler_output.scheduled_spec_decode_tokens.keys()) if hasattr(scheduler_output, 'scheduled_spec_decode_tokens') else 'N/A'}",
-                file=sys.stderr,
-                flush=True,
-            )
             model_runner_output.sampled_token_ids = cleaned
+
+        # Commit-0 rollback: The parent scheduler's schedule() advances
+        # num_computed_tokens by num_scheduled_tokens BEFORE update_from_output.
+        # For Commit-0 (no tokens committed), we must restore the pre-step
+        # value so the same block gets re-scheduled.
+        saved_nct: dict[str, int] = {}
+        for req_id in scheduler_output.num_scheduled_tokens:
+            request = self.requests.get(req_id)
+            if request is not None:
+                saved_nct[req_id] = request.num_computed_tokens
+
+        result = super().update_from_output(scheduler_output, model_runner_output)
+
+        for req_id, prev_nct in saved_nct.items():
+            request = self.requests.get(req_id)
+            if request is None:
+                continue
+            req_index = model_runner_output.req_id_to_index.get(req_id)
+            if req_index is None:
+                continue
+            generated = (
+                model_runner_output.sampled_token_ids[req_index]
+                if model_runner_output.sampled_token_ids
+                else []
+            )
+            if not generated:
+                request.num_computed_tokens = prev_nct
 
         # Update dllm_state.num_computed_tokens for committed blocks
         if model_runner_output.sampled_token_ids:
@@ -284,7 +303,7 @@ class DllmRuntimeScheduler(VllmScheduler):
                     if len(token_ids) > 0:
                         request.dllm_state.num_computed_tokens += len(token_ids)
 
-        return super().update_from_output(scheduler_output, model_runner_output)
+        return result
 
     def _validate_draft_lengths(self, draft_token_ids: DraftTokenIds) -> None:
         for req_id, token_ids in zip(
