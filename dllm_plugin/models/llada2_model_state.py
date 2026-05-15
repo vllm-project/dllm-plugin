@@ -154,7 +154,28 @@ class LLaDA2ModelState(ModelState):
             input_batch.num_draft_tokens > 0 and self._scheduled_spec_decode_tokens
         )
         if not has_drafts:
-            return None
+            # Prefill or no drafts yet — suppress AR token emission.
+            # The first block's committed output will contain the real tokens.
+            num_reqs = input_batch.num_reqs
+            width = self._slot_width
+            sampled = torch.zeros(
+                (num_reqs, width), dtype=torch.int64, device=self.device
+            )
+            num_sampled = torch.zeros(num_reqs, dtype=torch.int32, device=self.device)
+            sampler_output = SamplerOutput(
+                sampled_token_ids=sampled,
+                logprobs_tensors=None,
+                num_nans=None,
+                num_sampled=num_sampled,
+            )
+            num_sampled, num_rejected = get_num_sampled_and_rejected(
+                num_sampled,
+                input_batch.seq_lens,
+                input_batch.cu_num_logits,
+                input_batch.idx_mapping,
+                req_states.prefill_len.gpu,
+            )
+            return sampler_output, num_sampled, num_rejected
 
         from dllm_plugin.sampling.diffusion_sampler import batched_remask
 
