@@ -235,12 +235,22 @@ class LLaDA2ModelState(ModelState):
         batch_logits = torch.stack(block_logits_list)
         batch_draft = torch.stack(draft_tensors)
 
-        canvas, all_done, _ = batched_remask(
+        canvas, all_done, num_xfer = batched_remask(
             logits=batch_logits,
             input_draft=batch_draft,
             mask_token_id=mask_id,
             threshold=self._threshold,
         )
+
+        for _ti in range(min(num_reqs, 1)):
+            _rid = req_ids[_ti]
+            _step = self._denoise_step.get(_rid, 0)
+            _nmask = int((canvas[_ti] == mask_id).sum())
+            _top1 = batch_logits[_ti].argmax(dim=-1)[:5].tolist()
+            logger.warning(
+                "denoise req=%s step=%d masks=%d/32 xfer=%d done=%s top1=%s",
+                _rid, _step, _nmask, int(num_xfer[_ti]), all_done[_ti].item(), _top1,
+            )
 
         sampled = torch.full(
             (num_reqs, width), -1, dtype=torch.int64, device=self.device
