@@ -14,9 +14,8 @@ from dllm_plugin.scheduler import DllmScheduler
 from dllm_plugin.worker import DllmWorker
 
 # Do **not** import ``runtime_scheduler`` / ``runtime_worker`` at package import time.
-# Their top-level ``vllm`` imports must run only after submodules such as
-# ``dllm_plugin.gpu_model_runner`` have finished loading; eager imports here
-# caused circular import failures for GPU integration tests.
+# Their top-level ``vllm`` imports must run only after submodules have finished
+# loading; eager imports here caused circular import failures.
 
 
 def __getattr__(name: str):

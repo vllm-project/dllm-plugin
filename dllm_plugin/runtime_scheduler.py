@@ -96,10 +96,7 @@ class DllmRuntimeScheduler(VllmScheduler):
         # Note: spec_token_ids population and negative num_scheduled_tokens
         # filtering are handled by the vLLM fork's scheduler.
 
-        # Frontier repair metadata for dLLM structured outputs. Consumed in phase two
-        # by :class:`~dllm_plugin.gpu_model_runner.DllmGPUModelRunner` (stashed from
-        # ``SchedulerOutput`` in ``execute_model``). ``GrammarOutput`` still arrives via
-        # ``sample_tokens`` from the engine; these fields are not a second grammar path.
+        # Frontier repair metadata for dLLM structured outputs.
         out.dllm_grammar_output = None
         out.dllm_so_frontier_flat_indices = None
         out.dllm_so_frontier_block_rows = None

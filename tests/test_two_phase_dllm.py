@@ -31,23 +31,35 @@ def test_upstream_v2_runner_executes_forward_then_defers_sampling() -> None:
     assert "self.sample(" in sample_src
 
 
-def test_dllm_gpu_model_runner_overrides_phase_two_hooks() -> None:
+def test_llada2_model_state_implements_mrv2_hooks() -> None:
+    """LLaDA2ModelState provides custom_sample and take_draft_token_ids."""
     pytest.importorskip("vllm")
-    from vllm.v1.worker.gpu.model_runner import GPUModelRunner
+    from dllm_plugin.models.llada2_model_state import LLaDA2ModelState
 
-    from dllm_plugin.gpu_model_runner import DllmGPUModelRunner
+    assert hasattr(LLaDA2ModelState, "custom_sample")
+    assert hasattr(LLaDA2ModelState, "take_draft_token_ids")
+    assert hasattr(LLaDA2ModelState, "before_step")
+    assert hasattr(LLaDA2ModelState, "prepare_attn")
+    assert hasattr(LLaDA2ModelState, "remove_request")
 
-    assert issubclass(DllmGPUModelRunner, GPUModelRunner)
-    assert DllmGPUModelRunner.sample is not GPUModelRunner.sample
-    assert "sample_tokens" not in DllmGPUModelRunner.__dict__
+
+def test_llada2_model_provides_get_model_state_cls() -> None:
+    """LLaDA2 model registers its ModelState via get_model_state_cls()."""
+    pytest.importorskip("vllm")
+    from dllm_plugin.models.llada2 import LLaDA2ForCausalLM
+    from dllm_plugin.models.llada2_model_state import LLaDA2ModelState
+
+    cls = LLaDA2ForCausalLM.get_model_state_cls()
+    assert cls is LLaDA2ModelState
 
 
-def test_dllm_runtime_worker_wraps_init_device_for_dllm_runner() -> None:
+def test_dllm_runtime_worker_does_not_set_model_runner_cls() -> None:
+    """Worker delegates to ModelState (no _model_runner_cls override)."""
     pytest.importorskip("vllm")
     import dllm_plugin.runtime_worker as rw
 
     src = inspect.getsource(rw.DllmRuntimeWorker.__init__)
-    assert "DllmGPUModelRunner" in src
+    assert "_model_runner_cls" not in src
 
 
 def test_dllm_runtime_worker_inherits_execute_model() -> None:

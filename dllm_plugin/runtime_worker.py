@@ -289,38 +289,22 @@ class DllmRuntimeWorker(VllmGPUWorker):
         )
         self._dllm_helper = DllmWorker(require_v2_model_runner=effective_v2)
 
-        # Tell the fork's worker to use DllmGPUModelRunner instead of stock
-        # GPUModelRunner. The fork checks _model_runner_cls in init_device().
-        if effective_v2:
-            from dllm_plugin.gpu_model_runner import DllmGPUModelRunner
-
-            self._model_runner_cls = DllmGPUModelRunner
-
     def take_draft_token_ids(self) -> DraftTokenIds | None:
-        """Prefer dLLM runner hook ``take_dllm_draft_token_ids`` when present.
-
-        Upstream spec decode uses ``model_runner.take_draft_token_ids``; dLLM blocks use
-        runner ``take_dllm_draft_token_ids`` when implemented (see gpu_model_runner).
-        """
-        mr = self.model_runner
-        take_dllm = getattr(mr, "take_dllm_draft_token_ids", None)
-        if callable(take_dllm):
-            draft_token_ids = take_dllm()
-            if draft_token_ids is not None:
-                for req_id, next_block in zip(
-                    draft_token_ids.req_ids,
-                    draft_token_ids.draft_token_ids,
-                    strict=True,
-                ):
-                    self._dllm_helper.take_draft_token_ids(
-                        DllmWorkerStep(
-                            request_id=req_id,
-                            sampled_token_ids=(),
-                            next_input_block=tuple(next_block),
-                        ),
-                    )
-                return draft_token_ids
+        """Delegate to model_runner which checks ModelState.take_draft_token_ids()."""
         draft_token_ids = super().take_draft_token_ids()
+        if draft_token_ids is not None:
+            for req_id, next_block in zip(
+                draft_token_ids.req_ids,
+                draft_token_ids.draft_token_ids,
+                strict=True,
+            ):
+                self._dllm_helper.take_draft_token_ids(
+                    DllmWorkerStep(
+                        request_id=req_id,
+                        sampled_token_ids=(),
+                        next_input_block=tuple(next_block),
+                    ),
+                )
         return draft_token_ids
 
 

@@ -2,8 +2,8 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Batched GPU diffusion sampler for LLaDA2 block denoising.
 
-Replaces the per-request Python loop in gpu_model_runner.sample() with
-batched PyTorch operations on GPU. No CPU-GPU sync during the hot path.
+Called from LLaDA2ModelState.custom_sample() with batched PyTorch
+operations on GPU. No CPU-GPU sync during the hot path.
 
 Each step:
 1. Compute softmax probabilities from logits (batched)
