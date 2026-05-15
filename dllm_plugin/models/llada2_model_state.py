@@ -129,6 +129,12 @@ class LLaDA2ModelState(ModelState):
 
         raw = getattr(scheduler_output, "scheduled_spec_decode_tokens", None) or {}
         self._scheduled_spec_decode_tokens = {k: tuple(v) for k, v in raw.items()}
+        if self._scheduled_spec_decode_tokens:
+            logger.debug(
+                "before_step: %d requests with drafts, sizes=%s",
+                len(self._scheduled_spec_decode_tokens),
+                {k: len(v) for k, v in self._scheduled_spec_decode_tokens.items()},
+            )
 
         active = set(getattr(scheduler_output, "num_scheduled_tokens", {}).keys())
         for stale in set(self._denoise_step) - active:
@@ -150,9 +156,13 @@ class LLaDA2ModelState(ModelState):
         input_batch: InputBatch,
         req_states: RequestState,
     ) -> tuple[SamplerOutput, torch.Tensor, torch.Tensor] | None:
-        has_drafts = (
-            input_batch.num_draft_tokens > 0 and self._scheduled_spec_decode_tokens
-        )
+        has_drafts = bool(self._scheduled_spec_decode_tokens)
+        if has_drafts and input_batch.num_draft_tokens == 0:
+            logger.warning(
+                "Scheduler sent %d draft requests but num_draft_tokens=0. "
+                "Check DiffusionConfig wiring and num_speculative_steps.",
+                len(self._scheduled_spec_decode_tokens),
+            )
         if not has_drafts:
             # Prefill or no drafts yet — suppress AR token emission.
             # The first block's committed output will contain the real tokens.
