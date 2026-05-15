@@ -257,11 +257,19 @@ class DllmRuntimeScheduler(VllmScheduler):
         # interprets the full list as accepted tokens. Filter to only
         # non-negative, non-zero values for committed blocks, and empty
         # lists for Commit-0 (denoising in progress).
+        import sys
         if model_runner_output.sampled_token_ids:
             cleaned: list[list[int]] = []
             for row in model_runner_output.sampled_token_ids:
                 tokens = [int(t) for t in row if int(t) > 0]
                 cleaned.append(tokens)
+            print(
+                f"[SCHED] update_from_output: cleaned sampled_token_ids "
+                f"lengths={[len(t) for t in cleaned]}, "
+                f"spec_decode_tokens={list(scheduler_output.scheduled_spec_decode_tokens.keys()) if hasattr(scheduler_output, 'scheduled_spec_decode_tokens') else 'N/A'}",
+                file=sys.stderr,
+                flush=True,
+            )
             model_runner_output.sampled_token_ids = cleaned
 
         # Update dllm_state.num_computed_tokens for committed blocks
