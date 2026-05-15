@@ -15,7 +15,6 @@ See ``docs/DESIGN_MVP.md`` for the two-phase contract.
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 import torch
@@ -35,10 +34,6 @@ from dllm_plugin.config import (
 from dllm_plugin.forward_context import (
     _num_prefix_tokens_list_ctx,
     set_num_prefix_tokens_list,
-)
-from dllm_plugin.grammar_utils import (
-    apply_packed_bitmask_inplace_logits_row,
-    grammar_extra_transfer_slots,
 )
 from dllm_plugin.vllm_compat import VllmConfig
 from dllm_plugin.vllm_types import VllmConfigProtocol
@@ -236,18 +231,12 @@ class DllmGPUModelRunner(GPUModelRunner):
 
             return result
 
-        # Late import avoids circular import with runtime_worker.
-        from dllm_plugin.runtime_worker import (
-            run_block_contract_from_model_output,
-            validate_runtime_input_draft,
-        )
+        from dllm_plugin.sampling.diffusion_sampler import batched_remask
 
         sample_hidden_states = hidden_states[input_batch.logits_indices]
         logits = self.model.compute_logits(sample_hidden_states)
 
-        # Two-stage grammar: vLLM applies the full batch bitmask on GPU; we then
-        # refine the frontier row on CPU-float logits for dLLM remask (first invalid
-        # position per scheduler metadata — consistent with packed bitmask layout).
+        # Apply grammar bitmask if structured output is active
         if grammar_output is not None:
             assert self.structured_outputs_worker is not None
             self.structured_outputs_worker.apply_grammar_bitmask(
@@ -257,154 +246,101 @@ class DllmGPUModelRunner(GPUModelRunner):
                 grammar_output.grammar_bitmask,
             )
 
-        go = grammar_output
-        flat_indices = self._dllm_so_frontier_flat_indices
-        block_rows = self._dllm_so_frontier_block_rows
-        prefix_lens = self._dllm_so_valid_prefix_lens
-
         req_ids = input_batch.req_ids
+        num_reqs = input_batch.num_reqs
         cu = input_batch.cu_num_logits_np
         width = self._dllm_slot_width
-        sampled = torch.full(
-            (input_batch.num_reqs, width),
-            -1,
-            dtype=torch.int64,
-            device=self.device,
-        )
-        nums: list[int] = []
-        next_blocks: list[list[int]] = []
+        mask_id = LLADA2_DEFAULT_MASK_TOKEN_ID
+        threshold = 0.9  # TODO: read from DiffusionConfig
 
-        for i, req_id in enumerate(req_ids):
+        # Extract per-request block logits and input drafts as batched tensors
+        block_logits_list = []
+        draft_tensors = []
+        for i in range(num_reqs):
             lo, hi = int(cu[i]), int(cu[i + 1])
-            # Extract logits for this request
-            # cu_num_logits includes primary token + draft tokens (e.g., 1 + 32 = 33)
-            # dLLM remasking only processes draft tokens (32), so skip first row
             all_logits = logits[lo:hi]
-            if all_logits.shape[0] > self._dllm_helper.draft_size:
-                # Skip primary token logits (first row), keep only draft token logits
-                block_logits_tensor = all_logits[1:]
+            if all_logits.shape[0] > DRAFT_SIZE:
+                block_logits_list.append(all_logits[1:])
             else:
-                # Fallback for edge cases (shouldn't happen with spec decode)
-                block_logits_tensor = all_logits
+                block_logits_list.append(all_logits)
 
-            # Validate logits before remasking (debug mode only - CPU-GPU sync overhead)
-            if os.getenv("VLLM_DEBUG", "0") == "1":
-                if torch.isnan(block_logits_tensor).any():
-                    nan_count = torch.isnan(block_logits_tensor).sum().item()
-                    raise ValueError(
-                        f"Logits contain {nan_count} NaN value(s) for "
-                        f"request {req_id}. Shape: {block_logits_tensor.shape}"
-                    )
-                if torch.isinf(block_logits_tensor).any():
-                    inf_count = torch.isinf(block_logits_tensor).sum().item()
-                    raise ValueError(
-                        f"Logits contain {inf_count} inf value(s) for "
-                        f"request {req_id}. Shape: {block_logits_tensor.shape}"
-                    )
-
-            block_logits = self._tensor_block_to_rows(block_logits_tensor)
-
-            # Use scheduled draft (includes first block from scheduler for new requests)
-            scheduled_draft = self._dllm_scheduled_spec_decode_tokens.get(req_id, ())
-            input_draft = validate_runtime_input_draft(
-                request_id=req_id,
-                input_draft=list(scheduled_draft),
-                draft_size=self._dllm_helper.draft_size,
+            req_id = req_ids[i]
+            draft = self._dllm_scheduled_spec_decode_tokens.get(req_id, ())
+            if len(draft) < DRAFT_SIZE:
+                draft = tuple(draft) + (mask_id,) * (DRAFT_SIZE - len(draft))
+            draft_tensors.append(
+                torch.tensor(draft[:DRAFT_SIZE], dtype=torch.int64, device=self.device)
             )
 
-            so_reqs = getattr(go, "structured_output_request_ids", None) if go else None
-            if (
-                go is not None
-                and flat_indices is not None
-                and block_rows is not None
-                and so_reqs is not None
-                and req_id in so_reqs
-            ):
-                br = block_rows.get(req_id)
-                fi = flat_indices.get(req_id)
-                if br is not None and fi is not None:
-                    row_bm = go.grammar_bitmask[int(fi)]
-                    apply_packed_bitmask_inplace_logits_row(block_logits[br], row_bm)
-
-            extra_transfer = 0
-            if prefix_lens is not None and req_id in prefix_lens:
-                extra_transfer = grammar_extra_transfer_slots(
-                    draft_tokens=input_draft,
-                    valid_prefix_len=prefix_lens[req_id],
-                )
-            step_idx = self._dllm_denoise_step.get(req_id, 0)
-            remasking_cfg: dict[str, int | float] = {
-                "denoise_step_index": step_idx,
-            }
-            if extra_transfer:
-                remasking_cfg["grammar_extra_transfer"] = extra_transfer
-
-            step = run_block_contract_from_model_output(
-                helper=self._dllm_helper,
-                request_id=req_id,
-                input_draft=input_draft,
-                logits=block_logits,
-                remasking_config=remasking_cfg,
-            )
-            committed = list(step.sampled_token_ids)
-
-            # On first denoising step for a block, record how many leading
-            # positions are prompt tokens (not masks) so we can strip them
-            # at commit time. Assumes prompt tokens form a contiguous prefix
-            # before mask tokens. Safe because LLADA2_DEFAULT_MASK_TOKEN_ID
-            # (156895) is far above typical prompt token IDs.
+            # Record initial prompt length on first step
             if req_id not in self._dllm_initial_prompt_len:
                 n_prompt = 0
-                for t in scheduled_draft:
-                    if t != LLADA2_DEFAULT_MASK_TOKEN_ID:
+                for t in draft:
+                    if t != mask_id:
                         n_prompt += 1
                     else:
                         break
                 self._dllm_initial_prompt_len[req_id] = n_prompt
 
-            # Strip prompt prefix from committed block
-            if committed:
+        # Stack into batch tensors — all on GPU, no CPU transfer
+        batch_logits = torch.stack(block_logits_list)  # [B, block, vocab]
+        batch_draft = torch.stack(draft_tensors)  # [B, block]
+
+        # Batched GPU remasking — no per-request Python loop
+        canvas, all_done, _ = batched_remask(
+            logits=batch_logits,
+            input_draft=batch_draft,
+            mask_token_id=mask_id,
+            threshold=threshold,
+        )
+
+        # Build output: committed tokens + next blocks
+        sampled = torch.full(
+            (num_reqs, width), -1, dtype=torch.int64, device=self.device
+        )
+        nums: list[int] = []
+        next_blocks: list[list[int]] = []
+        max_denoise_iters = 2 * DRAFT_SIZE
+
+        for i in range(num_reqs):
+            req_id = req_ids[i]
+            done = all_done[i].item()
+            step_idx = self._dllm_denoise_step.get(req_id, 0)
+
+            if done:
+                # Block fully resolved — commit all positions
+                committed_t = canvas[i]
+                # Strip prompt prefix
                 n_prompt = self._dllm_initial_prompt_len.get(req_id, 0)
                 if n_prompt > 0:
-                    committed = committed[n_prompt:]
-
-            # Track denoise step and check max-iteration guard BEFORE
-            # appending to next_blocks, so force-commit uses the right block.
-            max_denoise_iters = 2 * DRAFT_SIZE
-            force_committed = False
-            if len(step.sampled_token_ids) == 0:
+                    committed_t = committed_t[n_prompt:]
+                n = committed_t.shape[0]
+                sampled[i, :n] = committed_t
+                nums.append(n)
+                next_blocks.append([mask_id] * DRAFT_SIZE)
+                self._dllm_denoise_step.pop(req_id, None)
+                self._dllm_initial_prompt_len.pop(req_id, None)
+            else:
+                # Still denoising — Commit-0
                 new_step = step_idx + 1
                 if new_step >= max_denoise_iters:
+                    # Force-commit: strip mask tokens
                     logger.warning(
-                        "req %s: denoise hit max iterations (%d), "
-                        "force-committing block",
+                        "req %s: denoise hit max iterations (%d)",
                         req_id,
                         max_denoise_iters,
                     )
-                    committed = [
-                        t
-                        for t in step.next_input_block
-                        if t != LLADA2_DEFAULT_MASK_TOKEN_ID
-                    ]
-                    force_committed = True
+                    non_mask = canvas[i][canvas[i] != mask_id]
+                    n = non_mask.shape[0]
+                    sampled[i, :n] = non_mask
+                    nums.append(n)
+                    next_blocks.append([mask_id] * DRAFT_SIZE)
                     self._dllm_denoise_step.pop(req_id, None)
                     self._dllm_initial_prompt_len.pop(req_id, None)
                 else:
+                    nums.append(0)
+                    next_blocks.append(canvas[i].tolist())
                     self._dllm_denoise_step[req_id] = new_step
-            else:
-                self._dllm_denoise_step.pop(req_id, None)
-                self._dllm_initial_prompt_len.pop(req_id, None)
-
-            nums.append(len(committed))
-            for j, tok in enumerate(committed):
-                if j < width:
-                    sampled[i, j] = tok
-
-            if force_committed:
-                # Force-commit: next block is all-mask (new block)
-                next_blocks.append([LLADA2_DEFAULT_MASK_TOKEN_ID] * DRAFT_SIZE)
-            else:
-                next_blocks.append(list(self._dllm_helper.take_draft_token_ids(step)))
 
         num_sampled = torch.tensor(nums, dtype=torch.int32, device=self.device)
 
@@ -430,13 +366,6 @@ class DllmGPUModelRunner(GPUModelRunner):
             draft_token_ids=next_blocks,
         )
         return sampler_output, num_sampled, num_rejected
-
-    @staticmethod
-    def _tensor_block_to_rows(block: torch.Tensor) -> list[list[float]]:
-        """Flatten GPU logits rows to Python floats for remask policy."""
-
-        b = block.float().detach().cpu()
-        return [row.tolist() for row in b]
 
     def execute_model(
         self,
