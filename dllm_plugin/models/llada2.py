@@ -453,6 +453,13 @@ class LLaDA2ForCausalLM(nn.Module):
     # Declare supported vLLM runners
     supported_runners = ["generate"]
 
+    @staticmethod
+    def get_model_state_cls():
+        """Return the ModelState class for LLaDA2 block diffusion."""
+        from dllm_plugin.models.llada2_model_state import LLaDA2ModelState
+
+        return LLaDA2ModelState
+
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = "") -> None:
         super().__init__()
 
