@@ -151,15 +151,6 @@ class LLaDA2ModelState(ModelState):
         req_states: RequestState,
     ) -> tuple[SamplerOutput, torch.Tensor, torch.Tensor] | None:
         has_drafts = bool(self._scheduled_spec_decode_tokens)
-        import sys
-        print(
-            f"[DLLM] custom_sample: has_drafts={has_drafts}, "
-            f"num_draft_tokens={input_batch.num_draft_tokens}, "
-            f"scheduled={len(self._scheduled_spec_decode_tokens)}, "
-            f"num_reqs={input_batch.num_reqs}",
-            file=sys.stderr,
-            flush=True,
-        )
         if not has_drafts:
             # Prefill or bootstrap — no remasking yet.
             # Initialize canvas for each request and produce as pending drafts
@@ -319,12 +310,6 @@ class LLaDA2ModelState(ModelState):
     def take_draft_token_ids(self) -> DraftTokenIds | None:
         out = self._pending_draft_ids
         self._pending_draft_ids = None
-        import sys
-        print(
-            f"[DLLM] take_draft_token_ids: returning={'None' if out is None else f'{len(out.req_ids)} reqs'}",
-            file=sys.stderr,
-            flush=True,
-        )
         return out
 
     def prepare_attn(

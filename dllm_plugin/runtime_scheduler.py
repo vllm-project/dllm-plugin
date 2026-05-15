@@ -293,9 +293,8 @@ class DllmRuntimeScheduler(VllmScheduler):
                 strict=True,
             ):
                 request = self.requests.get(req_id)
-                if request and hasattr(request, "dllm_state"):
-                    if len(token_ids) > 0:
-                        request.dllm_state.num_computed_tokens += len(token_ids)
+                if request and hasattr(request, "dllm_state") and len(token_ids) > 0:
+                    request.dllm_state.num_computed_tokens += len(token_ids)
 
         return result
 
