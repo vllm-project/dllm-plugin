@@ -138,7 +138,9 @@ class DiffusionSampler:
 
         num_reqs = input_batch.num_reqs
         width = self._slot_width
-        sampled = torch.zeros((num_reqs, width), dtype=torch.int64, device=self.device)
+        sampled = torch.full(
+            (num_reqs, width), -1, dtype=torch.int64, device=self.device
+        )
         return SamplerOutput(
             sampled_token_ids=sampled,
             logprobs_tensors=None,
