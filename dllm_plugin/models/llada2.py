@@ -166,6 +166,11 @@ class LLaDA2MoE(nn.Module):
             # Pass LLaDA2-specific routing parameters so FusedMoE handles
             # sigmoid scoring, group-limited top-k, and routed scaling
             # internally — instead of re-routing with softmax defaults.
+            # NOTE: gate= and shared_experts= are not passed here because
+            # LLaDA2's shared expert uses separate gate/up/down projections
+            # (manual SwiGLU), not a single nn.Module. Passing them would
+            # enable AITER fusion on ROCm but requires wrapping the shared
+            # expert in a module with FusedMoE's expected interface.
             self.experts = FusedMoE(
                 num_experts=self.num_experts,
                 top_k=self.num_experts_per_tok,

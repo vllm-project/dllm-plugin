@@ -1,25 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""Phase 9.1 Numerical Validation Tests for LLaDA2.0
+"""Phase 9.1 Numerical Validation Tests for LLaDA2.0 (GPU-only)
 
 Validates numerical correctness of dllm-plugin vLLM implementation
 against HuggingFace transformers reference implementation.
 
-Test Hierarchy:
-    - TestEmbeddingValidation: Validation Point 1
-    - TestAttentionValidation: Validation Point 2 (sub-components 2.1-2.4)
-    - TestMoEValidation: Validation Point 3 (sub-components 3.1-3.6)
-    - TestDecoderLayerValidation: Validation Point 4
-    - TestTransformerStackValidation: Validation Point 5
-    - TestFinalNormValidation: Validation Point 6
-    - TestLMHeadValidation: Validation Point 7
-    - TestE2EValidation: Validation Point 8
-    - TestRouterPrecisionComparison: FP32 vs BF16 router
-    - TestExpertLoadBalancing: Expert selection distribution analysis
+Requires GPU + model weights. Skip on CPU-only runners.
 
-Reference:
-    - Issue #42: Phase 9.1 - Numerical Validation (Incremental Layer-by-Layer)
-    - Plan: /Users/akellner/.claude/plans/let-s-plan-phase-7-agile-mochi.md
+Test Hierarchy:
+    - TestEmbeddingValidation: Embedding exact match
+    - TestLMHeadValidation: LM head logits + top-k agreement
+    - TestE2EValidation: Full forward pass (single token, short/full/multi-block)
 """
 
 from __future__ import annotations
@@ -203,143 +194,6 @@ class TestEmbeddingValidation:
                 f"  HF: {hf_embeddings.shape} {hf_embeddings.dtype}\n"
                 f"  Max abs diff: {max_diff:.2e}"
             )
-
-
-# ==============================================================================
-# Validation Point 2: Attention Layer
-# ==============================================================================
-
-
-class TestAttentionValidation:
-    """Validation Point 2: Attention Layer (LLaDA2BlockAttention)
-
-    Expected: atol=1e-3, rtol=1e-2 (BF16), atol=1e-5, rtol=1e-4 (FP32)
-
-    Sub-components:
-        2.1: QKV Projection
-        2.2: Q/K Normalization
-        2.3: Attention Computation
-        2.4: Output Projection
-    """
-
-    def test_qkv_projection(self, hf_model_and_tokenizer, vllm_model, fixed_seed):
-        """Test QKV projection numerical correctness (Sub-component 2.1)."""
-        pytest.skip("TODO: Implement QKV projection validation")
-
-    def test_qk_normalization(self, hf_model_and_tokenizer, vllm_model, fixed_seed):
-        """Test Q/K per-head normalization (Sub-component 2.2)."""
-        pytest.skip("TODO: Implement Q/K normalization validation")
-
-    def test_attention_computation(
-        self, hf_model_and_tokenizer, vllm_model, fixed_seed
-    ):
-        """Test attention computation (Sub-component 2.3)."""
-        pytest.skip("TODO: Implement attention computation validation")
-
-    def test_output_projection(self, hf_model_and_tokenizer, vllm_model, fixed_seed):
-        """Test output projection (Sub-component 2.4)."""
-        pytest.skip("TODO: Implement output projection validation")
-
-
-# ==============================================================================
-# Validation Point 3: MoE Layer
-# ==============================================================================
-
-
-class TestMoEValidation:
-    """Validation Point 3: MoE Layer (LLaDA2MoE)
-
-    Expected: Complex - multiple sub-components with different tolerances
-
-    Sub-components:
-        3.1: Router Gate (FP32 default, BF16 experimental)
-        3.2: Group-Limited Routing
-        3.3: Routed Experts (FusedMoE)
-        3.4: Routed Scaling (2.5x)
-        3.5: Shared Expert
-        3.6: MoE Output Combination
-    """
-
-    def test_router_gate_fp32(self, hf_model_and_tokenizer, vllm_model, fixed_seed):
-        """Test router gate in FP32 mode (Sub-component 3.1)."""
-        pytest.skip("TODO: Implement router gate FP32 validation")
-
-    def test_group_limited_routing(
-        self, hf_model_and_tokenizer, vllm_model, fixed_seed
-    ):
-        """Test group-limited routing algorithm (Sub-component 3.2)."""
-        pytest.skip("TODO: Implement group-limited routing validation")
-
-    def test_routed_experts(self, hf_model_and_tokenizer, vllm_model, fixed_seed):
-        """Test routed experts (FusedMoE) (Sub-component 3.3)."""
-        pytest.skip("TODO: Implement routed experts validation")
-
-    def test_routed_scaling(self, hf_model_and_tokenizer, vllm_model, fixed_seed):
-        """Test routed scaling factor (2.5x) (Sub-component 3.4)."""
-        pytest.skip("TODO: Implement routed scaling validation")
-
-    def test_shared_expert(self, hf_model_and_tokenizer, vllm_model, fixed_seed):
-        """Test shared expert (SwiGLU MLP) (Sub-component 3.5)."""
-        pytest.skip("TODO: Implement shared expert validation")
-
-    def test_moe_output_combination(
-        self, hf_model_and_tokenizer, vllm_model, fixed_seed
-    ):
-        """Test MoE output combination (Sub-component 3.6)."""
-        pytest.skip("TODO: Implement MoE output combination validation")
-
-
-# ==============================================================================
-# Validation Point 4: Decoder Layer
-# ==============================================================================
-
-
-class TestDecoderLayerValidation:
-    """Validation Point 4: Decoder Layer (LLaDA2DecoderLayer)
-
-    Expected: Accumulated error from attention + MoE
-    Tolerance: atol=2e-3, rtol=2e-2 (looser for residual accumulation)
-    """
-
-    def test_decoder_layer_single(self, hf_model_and_tokenizer, vllm_model, fixed_seed):
-        """Test single decoder layer numerical correctness."""
-        pytest.skip("TODO: Implement decoder layer validation")
-
-
-# ==============================================================================
-# Validation Point 5: Full Transformer Stack
-# ==============================================================================
-
-
-class TestTransformerStackValidation:
-    """Validation Point 5: Full Transformer Stack
-
-    Expected: Accumulated error over num_layers
-    Tolerance: Increases with layer depth (documented per layer)
-    """
-
-    def test_transformer_stack_per_layer(
-        self, hf_model_and_tokenizer, vllm_model, fixed_seed
-    ):
-        """Test transformer stack with per-layer error tracking."""
-        pytest.skip("TODO: Implement transformer stack validation")
-
-
-# ==============================================================================
-# Validation Point 6: Final Layer Normalization
-# ==============================================================================
-
-
-class TestFinalNormValidation:
-    """Validation Point 6: Final Layer Normalization (RMSNorm)
-
-    Expected: FP32 precision
-    Tolerance: atol=1e-4, rtol=1e-3 (after accumulated error)
-    """
-
-    def test_final_norm(self, hf_model_and_tokenizer, vllm_model, fixed_seed):
-        """Test final layer normalization."""
-        pytest.skip("TODO: Implement final norm validation")
 
 
 # ==============================================================================
@@ -747,50 +601,3 @@ class TestE2EValidation:
         assert agreement["top10_agreement"] >= 0.98, (
             "Multi-block top-10 agreement should be >98%"
         )
-
-
-# ==============================================================================
-# Router Precision Comparison (FP32 vs BF16)
-# ==============================================================================
-
-
-class TestRouterPrecisionComparison:
-    """Router Precision Comparison: FP32 vs BF16
-
-    Validates router precision modes:
-        - FP32 (default): VALIDATED
-        - BF16 (experimental via VLLM_LLADA2_BF16_ROUTER=1): UNVALIDATED
-
-    Metrics:
-        - Logit value divergence (L2 norm)
-        - Expert selection agreement (% same experts)
-        - KL divergence between distributions
-        - Load balancing distribution (entropy)
-    """
-
-    def test_router_precision_fp32_vs_bf16(
-        self, hf_model_and_tokenizer, vllm_model, fixed_seed
-    ):
-        """Test FP32 vs BF16 router precision comparison."""
-        pytest.skip("TODO: Implement router precision comparison")
-
-
-# ==============================================================================
-# Expert Load Balancing Analysis
-# ==============================================================================
-
-
-class TestExpertLoadBalancing:
-    """Expert Load Balancing Analysis
-
-    Validates that expert selection is not pathologically biased:
-        - Distribution analysis
-        - Entropy measurement
-        - No single expert dominates
-    """
-
-    def test_expert_load_balancing(
-        self, hf_model_and_tokenizer, vllm_model, fixed_seed
-    ):
-        """Test expert selection load balancing."""
-        pytest.skip("TODO: Implement expert load balancing analysis")

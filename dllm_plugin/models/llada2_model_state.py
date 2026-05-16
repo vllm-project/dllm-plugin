@@ -322,6 +322,13 @@ class LLaDA2ModelState(ModelState):
         kv_cache_config: KVCacheConfig,
         for_capture: bool = False,
     ) -> dict[str, Any]:
+        # LLaDA2 uses bidirectional attention within blocks for ALL steps
+        # (including prefill). The block-causal structure (causal across
+        # blocks, non-causal within) is handled by the virtual batch
+        # decomposition in LLaDA2BidirectionalAttentionBuilder.build(),
+        # not by the per-request causal flag. Per-request causal tensors
+        # would be needed for mixed AR+diffusion batches, which aren't
+        # supported yet.
         if cudagraph_mode == CUDAGraphMode.FULL:
             num_reqs = input_batch.num_reqs_after_padding
             num_tokens = input_batch.num_tokens_after_padding
