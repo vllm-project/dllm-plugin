@@ -164,7 +164,11 @@ class DiffusionSampler:
         draft_tensors = []
         for i in range(num_reqs):
             lo, hi = int(cu[i]), int(cu[i + 1])
-            block_logits_list.append(logits[lo:hi])
+            all_logits = logits[lo:hi]
+            if all_logits.shape[0] > self._draft_size:
+                block_logits_list.append(all_logits[1:])
+            else:
+                block_logits_list.append(all_logits)
 
             req_id = req_ids[i]
             draft = ms._scheduled_spec_decode_tokens.get(req_id, ())
