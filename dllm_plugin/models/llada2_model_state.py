@@ -150,6 +150,7 @@ class LLaDA2ModelState(ModelState):
 
         return (
             DiffusionSampler(
+                base_sampler=sampler,
                 model_state=self,
                 device=self.device,
                 mask_token_id=self._mask_id,

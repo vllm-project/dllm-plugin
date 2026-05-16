@@ -79,6 +79,7 @@ class DiffusionSampler:
 
     def __init__(
         self,
+        base_sampler: Any,
         model_state: Any,
         device: torch.device,
         mask_token_id: int,
@@ -87,6 +88,7 @@ class DiffusionSampler:
         max_denoise_iters: int,
         slot_width: int,
     ) -> None:
+        self._base_sampler = base_sampler
         self.model_state = model_state
         self.device = device
         self._mask_id = mask_token_id
@@ -94,6 +96,9 @@ class DiffusionSampler:
         self._threshold = threshold
         self._max_denoise_iters = max_denoise_iters
         self._slot_width = slot_width
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._base_sampler, name)
 
     def __call__(
         self,
