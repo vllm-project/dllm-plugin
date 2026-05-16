@@ -1,0 +1,211 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mrv2-gpu-validation
+  labels:
+    app: dllm-plugin
+    test: mrv2-gpu-validation
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: dllm-plugin
+        test: mrv2-gpu-validation
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        cloud.google.com/gke-accelerator: nvidia-tesla-a100
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+        - key: jounce.io/nodetype
+          operator: Equal
+          value: A100-40
+          effect: NoSchedule
+      containers:
+        - name: validation
+          image: vllm/vllm-openai:v0.20.2
+          imagePullPolicy: IfNotPresent
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+            requests:
+              cpu: "8"
+              memory: 64Gi
+              ephemeral-storage: 80Gi
+              nvidia.com/gpu: 1
+          env:
+            - name: VLLM_PLUGINS
+              value: dllm
+            - name: VLLM_USE_V2_MODEL_RUNNER
+              value: "1"
+            - name: VLLM_ENABLE_V1_MULTIPROCESSING
+              value: "0"
+            - name: HF_HOME
+              value: /tmp/hf_cache
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+
+              echo "=== MRV2 GPU Validation ==="
+              echo "Date: $(date -u)"
+              nvidia-smi || true
+
+              apt-get update -qq && apt-get install -y -qq git curl ca-certificates 2>&1 | tail -3
+
+              # Install uv
+              curl -LsSf https://astral.sh/uv/install.sh | sh
+              export PATH="$HOME/.local/bin:$PATH"
+
+              # Build vllm fork from source (Python-only, pre-compiled C extensions)
+              echo "=== Building vllm fork from source ==="
+              git clone --depth=1 --branch dllm-fork \
+                https://github.com/AlonKellner-RedHat/vllm.git /app/vllm-fork
+              cd /app/vllm-fork
+              VLLM_USE_PRECOMPILED=1 uv pip install --system --editable . --torch-backend=auto 2>&1 | tail -10
+              echo "vLLM fork installed: $(python3 -c 'import vllm; print(vllm.__version__)')"
+
+              # Install dllm-plugin
+              echo "=== Installing dllm-plugin ==="
+              git clone --depth=1 --branch phase9-numerical-validation \
+                https://github.com/AlonKellner-RedHat/dllm-plugin.git /app/dllm-plugin
+              cd /app/dllm-plugin
+              uv pip install --system --editable . 2>&1 | tail -5
+              echo "Plugin installed: $(python3 -c 'import dllm_plugin; print(dllm_plugin.__version__)')"
+
+              # Verify stack
+              python3 -c "
+              import dllm_plugin; dllm_plugin.register_dllm()
+              from vllm.config.diffusion import DiffusionConfig
+              from vllm.v1.worker.gpu.model_states.interface import ModelState
+              assert hasattr(ModelState, 'custom_sample'), 'Missing custom_sample'
+              assert hasattr(ModelState, 'before_step'), 'Missing before_step'
+
+              # Verify DiffusionConfig auto-detection
+              from unittest.mock import MagicMock
+              from vllm.config import VllmConfig
+              import dataclasses
+              fields = {f.name for f in dataclasses.fields(VllmConfig)}
+              print(f'diffusion_config in VllmConfig fields: {\"diffusion_config\" in fields}')
+
+              # Verify model has get_model_state_cls
+              from dllm_plugin.models.llada2 import LLaDA2ForCausalLM
+              print(f'LLaDA2ForCausalLM.get_model_state_cls: {hasattr(LLaDA2ForCausalLM, \"get_model_state_cls\")}')
+              print('Stack verification OK')
+              "
+
+              # ===== vllm serve with LLaDA2.0-mini =====
+              echo ""
+              echo "=== vllm serve + curl (LLaDA2.0-mini) ==="
+              MODEL="inclusionAI/LLaDA2.0-mini-preview"
+              PORT=8000
+
+              vllm serve "${MODEL}" \
+                --host 0.0.0.0 \
+                --port ${PORT} \
+                --enforce-eager \
+                --trust-remote-code \
+                --max-model-len 512 \
+                --max-num-seqs 4 \
+                --tensor-parallel-size 1 \
+                --scheduler-cls dllm_plugin.runtime_scheduler.DllmRuntimeScheduler \
+                --worker-cls dllm_plugin.runtime_worker.DllmRuntimeWorker \
+                --gpu-memory-utilization 0.9 \
+                --no-async-scheduling \
+                2>&1 | tee /tmp/vllm_serve.log &
+              SERVE_PID=$!
+
+              echo "Waiting for server..."
+              ready=0
+              for i in $(seq 1 300); do
+                code=$(curl -sS -o /dev/null -w "%{http_code}" "http://127.0.0.1:${PORT}/health" 2>/dev/null || echo "000")
+                if [[ "${code}" == "200" ]]; then
+                  ready=1
+                  echo "Server ready after ${i}s"
+                  break
+                fi
+                sleep 1
+              done
+
+              if [[ "${ready}" != "1" ]]; then
+                echo "FAIL: Server did not become ready in 300s"
+                tail -100 /tmp/vllm_serve.log
+                exit 1
+              fi
+
+              # Test 1: Simple completion
+              echo ""
+              echo "--- Test 1: Simple completion ---"
+              RESPONSE=$(curl -sS -X POST "http://127.0.0.1:${PORT}/v1/chat/completions" \
+                -H "Content-Type: application/json" \
+                -d '{
+                  "model": "'"${MODEL}"'",
+                  "messages": [{"role": "user", "content": "What is 2+2? Answer briefly."}],
+                  "max_tokens": 64,
+                  "temperature": 0
+                }')
+              echo "Response: ${RESPONSE}" | python3 -c "
+              import json, sys
+              r = json.load(sys.stdin)
+              text = r['choices'][0]['message']['content']
+              print(f'Generated text: {text}')
+              assert len(text) > 0, 'Empty response'
+              print('PASS: Non-empty response')
+              "
+
+              # Test 2: Multi-block generation
+              echo ""
+              echo "--- Test 2: Multi-block generation (128 tokens) ---"
+              RESPONSE=$(curl -sS -X POST "http://127.0.0.1:${PORT}/v1/chat/completions" \
+                -H "Content-Type: application/json" \
+                -d '{
+                  "model": "'"${MODEL}"'",
+                  "messages": [{"role": "user", "content": "Write a short poem about AI."}],
+                  "max_tokens": 128,
+                  "temperature": 0
+                }')
+              echo "Response: ${RESPONSE}" | python3 -c "
+              import json, sys
+              r = json.load(sys.stdin)
+              text = r['choices'][0]['message']['content']
+              usage = r.get('usage', {})
+              print(f'Generated text ({len(text)} chars): {text[:200]}...')
+              print(f'Usage: {usage}')
+              assert len(text) > 20, f'Response too short: {len(text)} chars'
+              print('PASS: Multi-block generation OK')
+              "
+
+              # Test 3: Concurrent requests
+              echo ""
+              echo "--- Test 3: Concurrent requests ---"
+              for i in 1 2 3; do
+                curl -sS -X POST "http://127.0.0.1:${PORT}/v1/chat/completions" \
+                  -H "Content-Type: application/json" \
+                  -d '{
+                    "model": "'"${MODEL}"'",
+                    "messages": [{"role": "user", "content": "Say hello in language '"${i}"'."}],
+                    "max_tokens": 32,
+                    "temperature": 0
+                  }' > /tmp/resp_${i}.json &
+              done
+              wait
+              for i in 1 2 3; do
+                python3 -c "
+              import json
+              r = json.load(open('/tmp/resp_${i}.json'))
+              text = r['choices'][0]['message']['content']
+              print(f'  Request ${i}: {text[:80]}')
+              assert len(text) > 0, 'Empty response for request ${i}'
+              "
+              done
+              echo "PASS: Concurrent requests OK"
+
+              kill ${SERVE_PID} 2>/dev/null || true
+              wait ${SERVE_PID} 2>/dev/null || true
+
+              echo ""
+              echo "=== ALL GPU VALIDATION TESTS PASSED ==="

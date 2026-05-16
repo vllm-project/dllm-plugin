@@ -181,7 +181,7 @@ class DllmRuntimeScheduler(VllmScheduler):
         """Keep fixed ``DRAFT_SIZE`` blocks; do not grammar-truncate drafts here.
 
         Unlike AR spec-decode, dLLM always sets spec_token_ids regardless of
-        prefill state — the canvas is needed from the first decode step.
+        prefill state — the draft block is needed from the first decode step.
         """
         self._validate_draft_lengths(draft_token_ids)
         for req_id, spec_token_ids in zip(

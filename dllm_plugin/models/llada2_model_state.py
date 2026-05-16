@@ -4,8 +4,7 @@
 
 Implements the ModelState interface for block diffusion models.
 Handles non-causal attention, per-request denoising state, draft token
-management, and batched GPU diffusion sampling — replacing the
-DllmGPUModelRunner subclass.
+management, and diffusion sampling via DiffusionSampler.
 """
 
 from __future__ import annotations
@@ -22,10 +21,9 @@ from vllm.v1.core.sched.output import NewRequestData
 from vllm.v1.kv_cache_interface import KVCacheConfig
 from vllm.v1.outputs import DraftTokenIds
 from vllm.v1.worker.gpu.attn_utils import build_attn_metadata
-from vllm.v1.worker.gpu.input_batch import InputBatch, get_num_sampled_and_rejected
+from vllm.v1.worker.gpu.input_batch import InputBatch
 from vllm.v1.worker.gpu.mm.encoder_cache import EncoderCache
 from vllm.v1.worker.gpu.model_states.interface import ModelState
-from vllm.v1.worker.gpu.sample.output import SamplerOutput
 from vllm.v1.worker.gpu.states import RequestState
 from vllm.v1.worker.utils import AttentionGroup
 
@@ -40,9 +38,8 @@ logger = logging.getLogger(__name__)
 class LLaDA2ModelState(ModelState):
     """ModelState for LLaDA2 block diffusion models.
 
-    Replaces DllmGPUModelRunner — all dLLM logic lives here via
-    ModelState composition hooks (prepare_attn, custom_sample,
-    before_step, take_draft_token_ids, etc.).
+    All dLLM logic lives here via ModelState composition hooks:
+    prepare_attn, custom_sampler, before_step, take_draft_token_ids.
     """
 
     def __init__(
@@ -61,7 +58,7 @@ class LLaDA2ModelState(ModelState):
         self._mask_id = (
             diff_cfg.mask_token_id if diff_cfg else LLADA2_DEFAULT_MASK_TOKEN_ID
         )
-        self._draft_size = diff_cfg.canvas_length if diff_cfg else DRAFT_SIZE
+        self._draft_size = diff_cfg.draft_length if diff_cfg else DRAFT_SIZE
         self._threshold = diff_cfg.commit_threshold if diff_cfg else 0.9
         self._max_denoise_iters = (
             diff_cfg.max_denoise_steps if diff_cfg else 2 * DRAFT_SIZE
@@ -75,6 +72,7 @@ class LLaDA2ModelState(ModelState):
         self._initial_prompt_len: dict[str, int] = {}
         self._scheduled_spec_decode_tokens: dict[str, tuple[int, ...]] = {}
         self._pending_draft_ids: DraftTokenIds | None = None
+        self._prefix_lengths: list[int] | None = None
 
     def get_supported_generation_tasks(self) -> tuple[GenerationTask, ...]:
         return ("generate",)
@@ -125,7 +123,7 @@ class LLaDA2ModelState(ModelState):
         dummy_run: bool = False,
     ) -> None:
         self._pending_draft_ids = None
-        self._prefix_lengths: list[int] | None = None
+        self._prefix_lengths = None
         if dummy_run:
             return
 
@@ -143,169 +141,25 @@ class LLaDA2ModelState(ModelState):
             req_ids = list(num_scheduled.keys())
             self._prefix_lengths = [dllm_npt.get(rid, 0) for rid in req_ids]
 
-    def custom_sample(
+    def custom_sampler(
         self,
-        logits: torch.Tensor,
-        input_batch: InputBatch,
-        req_states: RequestState,
-    ) -> tuple[SamplerOutput, torch.Tensor, torch.Tensor] | None:
-        has_drafts = bool(self._scheduled_spec_decode_tokens)
-        if not has_drafts:
-            # Prefill or bootstrap — no remasking yet.
-            # Initialize canvas for each request and produce as pending drafts
-            # so the draft lifecycle loop starts on the next step.
-            mask_id = self._mask_id
-            next_blocks: list[list[int]] = []
-            for req_id in input_batch.req_ids:
-                canvas = [mask_id] * self._draft_size
-                next_blocks.append(canvas)
-                req_idx = req_states.req_id_to_index.get(req_id)
-                if req_idx is not None and req_states.draft_tokens.shape[1] > 0:
-                    n = min(self._draft_size, req_states.draft_tokens.shape[1])
-                    req_states.draft_tokens[req_idx, :n] = torch.tensor(
-                        canvas[:n],
-                        dtype=req_states.draft_tokens.dtype,
-                        device=req_states.draft_tokens.device,
-                    )
+        sampler: Any,
+        config: Any,
+    ) -> tuple[Any, Any] | None:
+        from dllm_plugin.sampling.diffusion_sampler import DiffusionSampler
 
-            self._pending_draft_ids = DraftTokenIds(
-                req_ids=list(input_batch.req_ids),
-                draft_token_ids=next_blocks,
-            )
-
-            num_reqs = input_batch.num_reqs
-            width = self._slot_width
-            sampled = torch.zeros(
-                (num_reqs, width), dtype=torch.int64, device=self.device
-            )
-            num_sampled = torch.zeros(num_reqs, dtype=torch.int32, device=self.device)
-            sampler_output = SamplerOutput(
-                sampled_token_ids=sampled,
-                logprobs_tensors=None,
-                num_nans=None,
-                num_sampled=num_sampled,
-            )
-            num_sampled, num_rejected = get_num_sampled_and_rejected(
-                num_sampled,
-                input_batch.seq_lens,
-                input_batch.cu_num_logits,
-                input_batch.idx_mapping,
-                req_states.prefill_len.gpu,
-            )
-            return sampler_output, num_sampled, num_rejected
-
-        from dllm_plugin.sampling.diffusion_sampler import batched_remask
-
-        req_ids = input_batch.req_ids
-        num_reqs = input_batch.num_reqs
-        cu = input_batch.cu_num_logits_np
-        mask_id = self._mask_id
-        width = self._slot_width
-
-        block_logits_list = []
-        draft_tensors = []
-        for i in range(num_reqs):
-            lo, hi = int(cu[i]), int(cu[i + 1])
-            all_logits = logits[lo:hi]
-            block_logits_list.append(all_logits)
-
-            req_id = req_ids[i]
-            draft = self._scheduled_spec_decode_tokens.get(req_id, ())
-            if len(draft) < self._draft_size:
-                draft = tuple(draft) + (mask_id,) * (self._draft_size - len(draft))
-            draft_tensors.append(
-                torch.tensor(
-                    draft[: self._draft_size], dtype=torch.int64, device=self.device
-                )
-            )
-
-            if req_id not in self._initial_prompt_len:
-                n_prompt = 0
-                for t in draft:
-                    if t != mask_id:
-                        n_prompt += 1
-                    else:
-                        break
-                self._initial_prompt_len[req_id] = n_prompt
-
-        batch_logits = torch.stack(block_logits_list)
-        batch_draft = torch.stack(draft_tensors)
-
-        canvas, all_done, _ = batched_remask(
-            logits=batch_logits,
-            input_draft=batch_draft,
-            mask_token_id=mask_id,
-            threshold=self._threshold,
+        return (
+            DiffusionSampler(
+                model_state=self,
+                device=self.device,
+                mask_token_id=self._mask_id,
+                draft_size=self._draft_size,
+                threshold=self._threshold,
+                max_denoise_iters=self._max_denoise_iters,
+                slot_width=self._slot_width,
+            ),
+            None,
         )
-
-        sampled = torch.full(
-            (num_reqs, width), -1, dtype=torch.int64, device=self.device
-        )
-        nums: list[int] = []
-        next_blocks: list[list[int]] = []
-
-        all_done_cpu = all_done.cpu()
-        canvas_cpu = canvas.cpu()
-
-        for i in range(num_reqs):
-            req_id = req_ids[i]
-            done = bool(all_done_cpu[i])
-            step_idx = self._denoise_step.get(req_id, 0)
-
-            if done:
-                committed_t = canvas_cpu[i]
-                n_prompt = self._initial_prompt_len.get(req_id, 0)
-                if n_prompt > 0:
-                    committed_t = committed_t[n_prompt:]
-                n = committed_t.shape[0]
-                sampled[i, :n] = committed_t.to(self.device)
-                nums.append(n)
-                next_blocks.append([mask_id] * self._draft_size)
-                self._denoise_step.pop(req_id, None)
-                self._initial_prompt_len.pop(req_id, None)
-            else:
-                new_step = step_idx + 1
-                if new_step >= self._max_denoise_iters:
-                    logger.warning(
-                        "req %s: denoise hit max iterations (%d)",
-                        req_id,
-                        self._max_denoise_iters,
-                    )
-                    row = canvas_cpu[i]
-                    non_mask = row[row != mask_id]
-                    n = non_mask.shape[0]
-                    sampled[i, :n] = non_mask.to(self.device)
-                    nums.append(n)
-                    next_blocks.append([mask_id] * self._draft_size)
-                    self._denoise_step.pop(req_id, None)
-                    self._initial_prompt_len.pop(req_id, None)
-                else:
-                    nums.append(0)
-                    next_blocks.append(canvas_cpu[i].tolist())
-                    self._denoise_step[req_id] = new_step
-
-        num_sampled = torch.tensor(nums, dtype=torch.int32, device=self.device)
-
-        sampler_output = SamplerOutput(
-            sampled_token_ids=sampled[:, :width],
-            logprobs_tensors=None,
-            num_nans=None,
-            num_sampled=num_sampled,
-        )
-
-        num_sampled, num_rejected = get_num_sampled_and_rejected(
-            num_sampled,
-            input_batch.seq_lens,
-            input_batch.cu_num_logits,
-            input_batch.idx_mapping,
-            req_states.prefill_len.gpu,
-        )
-
-        self._pending_draft_ids = DraftTokenIds(
-            req_ids=list(req_ids),
-            draft_token_ids=next_blocks,
-        )
-        return sampler_output, num_sampled, num_rejected
 
     def take_draft_token_ids(self) -> DraftTokenIds | None:
         out = self._pending_draft_ids
