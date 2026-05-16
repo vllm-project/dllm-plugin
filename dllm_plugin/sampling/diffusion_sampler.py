@@ -101,7 +101,7 @@ class DiffusionSampler:
         try:
             base = object.__getattribute__(self, "_base_sampler")
         except AttributeError:
-            raise AttributeError(name)
+            raise AttributeError(name) from None
         return getattr(base, name)
 
     def __call__(
@@ -162,14 +162,7 @@ class DiffusionSampler:
         draft_tensors = []
         for i in range(num_reqs):
             lo, hi = int(cu[i]), int(cu[i + 1])
-            all_logits = logits[lo:hi]
-            # Skip the bonus token logit (prepended by combine kernel).
-            # num_bonus_tokens=0 declared but bonus=1 is still hardcoded
-            # in the runner until the kernel pipeline is fully validated.
-            if all_logits.shape[0] > self._draft_size:
-                block_logits_list.append(all_logits[1:])
-            else:
-                block_logits_list.append(all_logits)
+            block_logits_list.append(logits[lo:hi])
 
             req_id = req_ids[i]
             draft = ms._scheduled_spec_decode_tokens.get(req_id, ())

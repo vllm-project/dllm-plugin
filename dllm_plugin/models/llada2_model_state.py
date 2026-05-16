@@ -63,10 +63,7 @@ class LLaDA2ModelState(ModelState):
         self._max_denoise_iters = (
             diff_cfg.max_denoise_steps if diff_cfg else 2 * DRAFT_SIZE
         )
-        self._slot_width = max(
-            (diff_cfg.num_speculative_tokens if diff_cfg else DRAFT_SIZE) + 1,
-            self._draft_size,
-        )
+        self._slot_width = diff_cfg.num_speculative_tokens if diff_cfg else DRAFT_SIZE
 
         self._denoise_step: dict[str, int] = {}
         self._initial_prompt_len: dict[str, int] = {}
