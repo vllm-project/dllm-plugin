@@ -76,7 +76,7 @@ class LLaDA2ModelState(ModelState):
 
     @property
     def num_bonus_tokens(self) -> int:
-        return 1
+        return 0
 
     def add_request(self, req_index: int, new_req_data: NewRequestData) -> None:
         return None
