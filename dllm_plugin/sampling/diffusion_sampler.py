@@ -98,7 +98,11 @@ class DiffusionSampler:
         self._slot_width = slot_width
 
     def __getattr__(self, name: str) -> Any:
-        return getattr(self._base_sampler, name)
+        try:
+            base = object.__getattribute__(self, "_base_sampler")
+        except AttributeError:
+            raise AttributeError(name)
+        return getattr(base, name)
 
     def __call__(
         self,
