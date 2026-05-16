@@ -65,9 +65,9 @@ def create_llada2_bidirectional_attention_backend(
         ):
             from dataclasses import replace
 
-            from dllm_plugin.forward_context import get_num_prefix_tokens_list
-
-            num_prefix_tokens_list = get_num_prefix_tokens_list()
+            num_prefix_tokens_list = getattr(
+                common_attn_metadata, "dllm_prefix_lengths", None
+            )
 
             if num_prefix_tokens_list and any(n > 0 for n in num_prefix_tokens_list):
                 from dllm_plugin.attention.concatenated_virtual_batch import (

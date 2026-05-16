@@ -79,6 +79,10 @@ class LLaDA2ModelState(ModelState):
     def get_supported_generation_tasks(self) -> tuple[GenerationTask, ...]:
         return ("generate",)
 
+    @property
+    def num_bonus_tokens(self) -> int:
+        return 0
+
     def add_request(self, req_index: int, new_req_data: NewRequestData) -> None:
         return None
 
@@ -120,11 +124,9 @@ class LLaDA2ModelState(ModelState):
         scheduler_output: Any,
         dummy_run: bool = False,
     ) -> None:
-        from dllm_plugin.forward_context import set_num_prefix_tokens_list
-
         self._pending_draft_ids = None
+        self._prefix_lengths: list[int] | None = None
         if dummy_run:
-            set_num_prefix_tokens_list(None)
             return
 
         raw = getattr(scheduler_output, "scheduled_spec_decode_tokens", None) or {}
@@ -139,10 +141,7 @@ class LLaDA2ModelState(ModelState):
         num_scheduled = getattr(scheduler_output, "num_scheduled_tokens", None)
         if dllm_npt and num_scheduled:
             req_ids = list(num_scheduled.keys())
-            prefix_list = [dllm_npt.get(rid, 0) for rid in req_ids]
-            set_num_prefix_tokens_list(prefix_list)
-        else:
-            set_num_prefix_tokens_list(None)
+            self._prefix_lengths = [dllm_npt.get(rid, 0) for rid in req_ids]
 
     def custom_sample(
         self,
@@ -208,6 +207,9 @@ class LLaDA2ModelState(ModelState):
         for i in range(num_reqs):
             lo, hi = int(cu[i]), int(cu[i + 1])
             all_logits = logits[lo:hi]
+            # Skip the bonus token logit (prepended by combine kernel).
+            # num_bonus_tokens=0 declared but the kernel doesn't read it yet,
+            # so we slice manually. Remove when the kernel respects the property.
             if all_logits.shape[0] > self._draft_size:
                 block_logits_list.append(all_logits[1:])
             else:
@@ -358,4 +360,5 @@ class LLaDA2ModelState(ModelState):
             dcp_local_seq_lens=input_batch.dcp_local_seq_lens,
             positions=input_batch.positions,
             causal=False,
+            dllm_prefix_lengths=self._prefix_lengths,
         )
