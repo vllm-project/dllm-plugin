@@ -28,7 +28,6 @@ from collections.abc import Iterable
 import torch
 import torch.nn as nn
 from transformers import PretrainedConfig
-from vllm.compilation.decorators import support_torch_compile
 from vllm.config import VllmConfig
 from vllm.distributed.parallel_state import get_pp_group, get_tp_group
 from vllm.model_executor.layers.fused_moe import FusedMoE
@@ -431,9 +430,6 @@ class LLaDA2DecoderLayer(nn.Module):
         return hidden_states, residual
 
 
-@support_torch_compile(
-    dynamic_arg_dims={"input_ids": 0, "positions": 0},
-)
 class LLaDA2ForCausalLM(nn.Module):
     """LLaDA2.0 causal language model for vLLM.
 
@@ -442,8 +438,6 @@ class LLaDA2ForCausalLM(nn.Module):
     - Block-style non-causal attention
     - Tensor parallelism (TP) support
     - Proper weight loading from HuggingFace checkpoints
-
-    **Phase 8 Optimizations:** Supports vLLM torch.compile via `@support_torch_compile`
     decorator. Compilation is automatic when vLLM's compilation config is enabled.
     Routing and MoE layers benefit most from graph optimization.
 
@@ -489,8 +483,7 @@ class LLaDA2ForCausalLM(nn.Module):
         try:
             gpu_caps = detect_gpu_capabilities()
             logger.info(
-                "LLaDA2.0 model initialized on %s (compute %d.%d, %.1fGB) "
-                "- torch.compile via @support_torch_compile decorator",
+                "LLaDA2.0 model initialized on %s (compute %d.%d, %.1fGB)",
                 gpu_caps.device_name,
                 gpu_caps.compute_capability[0],
                 gpu_caps.compute_capability[1],

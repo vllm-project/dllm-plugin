@@ -63,18 +63,6 @@ class GPUCapabilities:
         """
         return self.compute_capability[0] >= 8
 
-    def supports_torch_compile(self) -> bool:
-        """torch.compile works on all modern GPUs (compute capability >= 7.0).
-
-        PyTorch 2.0+ graph compilation supports Volta (V100) and newer.
-        Turing (T4) and Ampere (A100) see better gains due to improved
-        compiler backends.
-
-        Returns:
-            True for V100 and newer (compute capability >= 7.0)
-        """
-        return self.compute_capability[0] >= 7
-
     def supports_trtllm_moe(self) -> bool:
         """TensorRT-LLM MoE kernels prefer H100+ for FP8 support.
 

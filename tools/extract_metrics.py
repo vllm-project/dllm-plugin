@@ -5,7 +5,6 @@
 
 Usage:
     python3 tools/extract_metrics.py benchmarks/baseline.json
-    python3 tools/extract_metrics.py benchmarks/torch_compile.json
 
 Output:
     TTFT (median): 1720.5ms
