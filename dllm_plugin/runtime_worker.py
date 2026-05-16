@@ -310,9 +310,4 @@ class DllmRuntimeWorker(VllmGPUWorker):
 
 __all__ = [
     "DllmRuntimeWorker",
-    "build_mock_model_block_logits",
-    "resolve_runtime_block_logits",
-    "run_block_contract_from_model_output",
-    "validate_runtime_draft_handoff_coverage",
-    "validate_runtime_input_draft",
 ]

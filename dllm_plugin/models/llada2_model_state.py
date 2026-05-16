@@ -248,18 +248,21 @@ class LLaDA2ModelState(ModelState):
         nums: list[int] = []
         next_blocks: list[list[int]] = []
 
+        all_done_cpu = all_done.cpu()
+        canvas_cpu = canvas.cpu()
+
         for i in range(num_reqs):
             req_id = req_ids[i]
-            done = all_done[i].item()
+            done = bool(all_done_cpu[i])
             step_idx = self._denoise_step.get(req_id, 0)
 
             if done:
-                committed_t = canvas[i]
+                committed_t = canvas_cpu[i]
                 n_prompt = self._initial_prompt_len.get(req_id, 0)
                 if n_prompt > 0:
                     committed_t = committed_t[n_prompt:]
                 n = committed_t.shape[0]
-                sampled[i, :n] = committed_t
+                sampled[i, :n] = committed_t.to(self.device)
                 nums.append(n)
                 next_blocks.append([mask_id] * self._draft_size)
                 self._denoise_step.pop(req_id, None)
@@ -272,16 +275,17 @@ class LLaDA2ModelState(ModelState):
                         req_id,
                         self._max_denoise_iters,
                     )
-                    non_mask = canvas[i][canvas[i] != mask_id]
+                    row = canvas_cpu[i]
+                    non_mask = row[row != mask_id]
                     n = non_mask.shape[0]
-                    sampled[i, :n] = non_mask
+                    sampled[i, :n] = non_mask.to(self.device)
                     nums.append(n)
                     next_blocks.append([mask_id] * self._draft_size)
                     self._denoise_step.pop(req_id, None)
                     self._initial_prompt_len.pop(req_id, None)
                 else:
                     nums.append(0)
-                    next_blocks.append(canvas[i].tolist())
+                    next_blocks.append(canvas_cpu[i].tolist())
                     self._denoise_step[req_id] = new_step
 
         num_sampled = torch.tensor(nums, dtype=torch.int32, device=self.device)

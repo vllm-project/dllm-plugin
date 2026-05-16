@@ -89,7 +89,8 @@ class DllmRuntimeScheduler(VllmScheduler):
         # Used by update_from_output() for Commit-0 rollback.
         self._pre_schedule_nct: dict[str, int] = {}
         for req_id, request in self.requests.items():
-            self._pre_schedule_nct[req_id] = request.num_computed_tokens
+            if getattr(request, "spec_token_ids", None):
+                self._pre_schedule_nct[req_id] = request.num_computed_tokens
 
         out = super().schedule()
 
@@ -285,7 +286,10 @@ class DllmRuntimeScheduler(VllmScheduler):
             if not generated and req_id in pre_nct:
                 request.num_computed_tokens = pre_nct[req_id]
 
-        # Update dllm_state.num_computed_tokens for committed blocks
+        # Update dllm_state.num_computed_tokens for committed blocks.
+        # This counter tracks the committed prefix length for virtual batch
+        # attention and is NOT rolled back on Commit-0 — re-running the same
+        # block doesn't change the prefix length.
         if model_runner_output.sampled_token_ids:
             for req_id, token_ids in zip(
                 model_runner_output.req_ids,
