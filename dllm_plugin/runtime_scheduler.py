@@ -87,10 +87,14 @@ class DllmRuntimeScheduler(VllmScheduler):
         """Attach grammar bitmask metadata for dLLM workers."""
         # Capture num_computed_tokens BEFORE super().schedule() advances them.
         # Used by update_from_output() for Commit-0 rollback.
+        # Only capture for requests that have COMPLETED prefill — rolling back
+        # before prefill completes would re-process prompt tokens on every step.
         self._pre_schedule_nct: dict[str, int] = {}
         for req_id, request in self.requests.items():
             if getattr(request, "spec_token_ids", None):
-                self._pre_schedule_nct[req_id] = request.num_computed_tokens
+                prompt_len = getattr(request, "num_prompt_tokens", 0)
+                if request.num_computed_tokens >= prompt_len > 0:
+                    self._pre_schedule_nct[req_id] = request.num_computed_tokens
 
         out = super().schedule()
 
@@ -167,13 +171,7 @@ class DllmRuntimeScheduler(VllmScheduler):
         )
 
     def add_request(self, request: Any) -> None:
-        """Initialize dLLM state and seed the first block.
-
-        The first block contains the prompt tail (tokens that fall within
-        the current block boundary) plus mask tokens. Including the prompt
-        tail ensures the model recomputes prefix KV on each denoising
-        iteration, matching dInfer's behavior.
-        """
+        """Initialize dLLM state and seed the first block."""
         super().add_request(request)
 
         if not hasattr(request, "dllm_state"):
@@ -188,7 +186,6 @@ class DllmRuntimeScheduler(VllmScheduler):
         ):
             draft_size = self._dllm_helper.draft_size
             mask_id = 156895  # TODO: read from config
-            # Prompt tail: tokens in the last partial block
             prompt_in_block = len(prompt_ids) % draft_size
             if prompt_in_block == 0 and len(prompt_ids) > 0:
                 prompt_in_block = draft_size
@@ -319,6 +316,20 @@ class DllmRuntimeScheduler(VllmScheduler):
                 request = self.requests.get(req_id)
                 if request and hasattr(request, "dllm_state") and len(token_ids) > 0:
                     request.dllm_state.num_computed_tokens += len(token_ids)
+
+        # Override num_computed_tokens using our own accounting.
+        # The parent scheduler's spec-decode logic assumes bonus_tokens=1,
+        # which causes an off-by-one in accepted token counting. We set
+        # nct = prompt_len + total_committed to match our exact state.
+        for req_id in scheduler_output.num_scheduled_tokens:
+            request = self.requests.get(req_id)
+            if request is None:
+                continue
+            if hasattr(request, "dllm_state"):
+                prompt_len = getattr(request, "num_prompt_tokens", 0)
+                committed = request.dllm_state.num_computed_tokens
+                correct_nct = prompt_len + committed
+                request.num_computed_tokens = correct_nct
 
         return result
 

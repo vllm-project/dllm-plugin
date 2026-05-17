@@ -67,6 +67,8 @@ class LLaDA2ModelState(ModelState):
 
         self._denoise_step: dict[str, int] = {}
         self._initial_prompt_len: dict[str, int] = {}
+        self._kv_refresh_done: dict[str, bool] = {}
+        self._prompt_tail_ids: dict[str, list[int]] = {}
         self._scheduled_spec_decode_tokens: dict[str, tuple[int, ...]] = {}
         self._pending_draft_ids: DraftTokenIds | None = None
         self._prefix_lengths: list[int] | None = None
@@ -79,11 +81,20 @@ class LLaDA2ModelState(ModelState):
         return 0
 
     def add_request(self, req_index: int, new_req_data: NewRequestData) -> None:
-        return None
+        req_id = new_req_data.req_id
+        prompt_ids = new_req_data.prompt_token_ids
+        if prompt_ids:
+            prompt_in_block = len(prompt_ids) % self._draft_size
+            if prompt_in_block == 0 and len(prompt_ids) > 0:
+                prompt_in_block = self._draft_size
+            self._initial_prompt_len[req_id] = len(prompt_ids)
+            self._prompt_tail_ids[req_id] = list(prompt_ids[-prompt_in_block:])
 
     def remove_request(self, req_id: str) -> None:
         self._denoise_step.pop(req_id, None)
         self._initial_prompt_len.pop(req_id, None)
+        self._kv_refresh_done.pop(req_id, None)
+        self._prompt_tail_ids.pop(req_id, None)
 
     def apply_staged_writes(self) -> None:
         return None
@@ -109,7 +120,46 @@ class LLaDA2ModelState(ModelState):
                         dtype=req_states.draft_tokens.dtype,
                         device=req_states.draft_tokens.device,
                     )
-        return {}
+
+        if not self._scheduled_spec_decode_tokens or not self._prefix_lengths:
+            return {}
+
+        num_tokens = input_batch.num_tokens
+        if num_tokens == 0 or input_batch.num_reqs == 0:
+            return {}
+
+        # Full-block recomp: only for the first block where the prompt tail
+        # is within the current block (prefix < draft_size). For subsequent
+        # blocks the standard virtual batch concatenation handles prefix KV.
+        prefix_len = self._prefix_lengths[0] if self._prefix_lengths else 0
+        if not (0 < prefix_len < self._draft_size):
+            return {}
+
+        req_id = input_batch.req_ids[0]
+        tail_ids = self._prompt_tail_ids.get(req_id)
+        if not tail_ids:
+            return {}
+
+        overrides: dict[str, Any] = {}
+
+        # Inject prompt_tail tokens in input_ids
+        n_tail = len(tail_ids)
+        if n_tail > 0 and num_tokens >= n_tail:
+            new_ids = input_batch.input_ids.clone()
+            new_ids[:n_tail] = torch.tensor(
+                tail_ids,
+                dtype=new_ids.dtype,
+                device=new_ids.device,
+            )
+            overrides["input_ids"] = new_ids
+
+        # Remap positions to block-relative [0..31]
+        new_positions = input_batch.positions.clone()
+        new_positions[:num_tokens] -= prefix_len
+        new_positions[:num_tokens].clamp_(min=0)
+        overrides["positions"] = new_positions
+
+        return overrides
 
     def prepare_dummy_inputs(self, num_reqs: int, num_tokens: int) -> dict[str, Any]:
         return {}
@@ -197,6 +247,52 @@ class LLaDA2ModelState(ModelState):
         else:
             max_seq_len = int(seq_lens_cpu_upper_bound[:num_reqs].max().item())
 
+        # Full-block recomputation: remap slot_mappings so both the KV
+        # cache WRITE (via forward context) and READ (via attention metadata)
+        # target positions [0..31] instead of [prefix..prefix+31].
+        effective_prefix_lengths = self._prefix_lengths
+        effective_seq_lens = input_batch.seq_lens
+        effective_slot_mappings = slot_mappings
+        self._remapped_slot_mappings = None
+
+        if (
+            self._prefix_lengths
+            and self._scheduled_spec_decode_tokens
+            and num_tokens > 0
+        ):
+            prefix_len = self._prefix_lengths[0]
+            if 0 < prefix_len < self._draft_size:
+                kv_block_size = kv_cache_config.kv_cache_groups[
+                    0
+                ].kv_cache_spec.block_size
+                bt = block_tables[0]
+
+                new_slots = slot_mappings.clone()
+                for token_idx in range(num_tokens):
+                    orig_pos = int(input_batch.positions[token_idx].item())
+                    new_pos = max(0, orig_pos - prefix_len)
+                    page_idx = new_pos // kv_block_size
+                    page_offset = new_pos % kv_block_size
+                    if page_idx < bt.shape[1]:
+                        page_num = int(bt[0, page_idx].item())
+                        if page_num >= 0:
+                            new_slots[0, token_idx] = (
+                                page_num * kv_block_size + page_offset
+                            )
+                effective_slot_mappings = new_slots
+                self._remapped_slot_mappings = new_slots
+
+                effective_prefix_lengths = [0] * len(self._prefix_lengths)
+                effective_seq_lens = torch.full_like(
+                    input_batch.seq_lens,
+                    self._draft_size,
+                )
+                seq_lens_cpu_upper_bound = torch.tensor(
+                    [self._draft_size] * num_reqs,
+                    dtype=seq_lens_cpu_upper_bound.dtype,
+                )
+                max_seq_len = self._draft_size
+
         return build_attn_metadata(
             attn_groups=attn_groups,
             num_reqs=num_reqs,
@@ -204,14 +300,14 @@ class LLaDA2ModelState(ModelState):
             query_start_loc_gpu=input_batch.query_start_loc,
             query_start_loc_cpu=query_start_loc_cpu,
             max_query_len=max_query_len,
-            seq_lens=input_batch.seq_lens,
+            seq_lens=effective_seq_lens,
             max_seq_len=max_seq_len,
             block_tables=block_tables,
-            slot_mappings=slot_mappings,
+            slot_mappings=effective_slot_mappings,
             kv_cache_config=kv_cache_config,
             seq_lens_cpu_upper_bound=seq_lens_cpu_upper_bound,
             dcp_local_seq_lens=input_batch.dcp_local_seq_lens,
             positions=input_batch.positions,
             causal=False,
-            dllm_prefix_lengths=self._prefix_lengths,
+            dllm_prefix_lengths=effective_prefix_lengths,
         )

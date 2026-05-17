@@ -41,22 +41,26 @@ def batched_remask(
         num_transferred: [batch] — number of newly committed positions
     """
     probs = torch.softmax(logits.float(), dim=-1)
-    max_probs, argmax_ids = probs.max(dim=-1)
+    x0 = torch.argmax(logits.float(), dim=-1)
+    x0_p = torch.gather(probs, dim=-1, index=x0.unsqueeze(-1)).squeeze(-1)
 
     is_masked = input_draft == mask_token_id
-    confident = max_probs > threshold
-    transfer = is_masked & confident
+    # Skip positions where the model predicts mask_id (matches dInfer rm_mask)
+    is_masked = is_masked & (x0 != mask_token_id)
+
+    x0 = torch.where(is_masked, x0, input_draft)
+    neg_inf = torch.tensor(-torch.inf, device=logits.device)
+    confidence = torch.where(is_masked, x0_p, neg_inf)
+
+    # Adaptive threshold: commit all positions above threshold, or if none
+    # exceed it, commit all positions within 1e-5 of the max (matches dInfer)
+    actual_threshold = (
+        (torch.max(confidence, dim=-1)[0] - 1e-5).clamp(-1000, threshold).unsqueeze(-1)
+    )
+    transfer = confidence >= actual_threshold
 
     draft = input_draft.clone()
-    draft[transfer] = argmax_ids[transfer]
-
-    no_transfer = ~transfer.any(dim=-1)
-    if no_transfer.any():
-        for b in no_transfer.nonzero(as_tuple=True)[0]:
-            masked_pos = is_masked[b].nonzero(as_tuple=True)[0]
-            if len(masked_pos) > 0:
-                best = masked_pos[max_probs[b, masked_pos].argmax()]
-                draft[b, best] = argmax_ids[b, best]
+    draft[transfer] = x0[transfer]
 
     all_done = (draft != mask_token_id).all(dim=-1)
     num_transferred = (draft != input_draft).sum(dim=-1)
@@ -121,15 +125,22 @@ class DiffusionSampler:
     def _bootstrap(
         self, logits: torch.Tensor, input_batch: InputBatch
     ) -> SamplerOutput:
-        """Prefill/bootstrap: initialize draft for each request."""
+        """Prefill/bootstrap: initialize draft for each request.
+
+        Preserves prompt_tail tokens at the start of the draft block
+        so the model sees [prompt_tail + masks] rather than [masks].
+        This matches dInfer's BlockDiffusionLLM behavior.
+        """
         from vllm.v1.outputs import DraftTokenIds
         from vllm.v1.worker.gpu.sample.output import SamplerOutput
 
         ms = self.model_state
         mask_id = self._mask_id
         next_blocks: list[list[int]] = []
-        for _req_id in input_batch.req_ids:
-            next_blocks.append([mask_id] * self._draft_size)
+        for req_id in input_batch.req_ids:
+            tail = ms._prompt_tail_ids.get(req_id, [])
+            n_masks = self._draft_size - len(tail)
+            next_blocks.append(list(tail) + [mask_id] * n_masks)
 
         ms._pending_draft_ids = DraftTokenIds(
             req_ids=list(input_batch.req_ids),
@@ -141,11 +152,17 @@ class DiffusionSampler:
         sampled = torch.full(
             (num_reqs, width), -1, dtype=torch.int64, device=self.device
         )
+
+        # Return num_sampled=1 so that the post_update kernel advances
+        # num_computed_tokens by the full query_len (query_len - 0 rejected).
+        # With num_sampled=0, the kernel computes num_rejected = num_logits - 0
+        # = 1, then advances by query_len - 1, causing a position off-by-one.
+        base_output = self._base_sampler(logits, input_batch)
         return SamplerOutput(
             sampled_token_ids=sampled,
             logprobs_tensors=None,
             num_nans=None,
-            num_sampled=torch.zeros(num_reqs, dtype=torch.int32, device=self.device),
+            num_sampled=base_output.num_sampled,
         )
 
     def _denoise(self, logits: torch.Tensor, input_batch: InputBatch) -> SamplerOutput:
@@ -210,6 +227,16 @@ class DiffusionSampler:
             step_idx = ms._denoise_step.get(req_id, 0)
 
             if done:
+                if not ms._kv_refresh_done.get(req_id, False):
+                    # All masks resolved but KV cache still reflects the
+                    # previous draft state. Return Commit-0 with the final
+                    # block to force one more forward pass that refreshes
+                    # the KV cache, matching dInfer's cross-block update.
+                    ms._kv_refresh_done[req_id] = True
+                    nums.append(0)
+                    next_blocks.append(updated_cpu[i].tolist())
+                    continue
+
                 committed = updated_cpu[i]
                 n_prompt = ms._initial_prompt_len.get(req_id, 0)
                 if n_prompt > 0:
@@ -220,6 +247,7 @@ class DiffusionSampler:
                 next_blocks.append([mask_id] * self._draft_size)
                 ms._denoise_step.pop(req_id, None)
                 ms._initial_prompt_len.pop(req_id, None)
+                ms._kv_refresh_done.pop(req_id, None)
             else:
                 new_step = step_idx + 1
                 if new_step >= self._max_denoise_iters:
