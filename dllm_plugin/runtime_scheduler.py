@@ -167,11 +167,12 @@ class DllmRuntimeScheduler(VllmScheduler):
         )
 
     def add_request(self, request: Any) -> None:
-        """Initialize dLLM state for new requests.
+        """Initialize dLLM state and seed the first block.
 
-        Canvas bootstrap is handled by LLaDA2ModelState.custom_sample() which
-        produces initial draft tokens on the first (prefill) step. The scheduler
-        just propagates spec_token_ids set by update_draft_token_ids().
+        The first block contains the prompt tail (tokens that fall within
+        the current block boundary) plus mask tokens. Including the prompt
+        tail ensures the model recomputes prefix KV on each denoising
+        iteration, matching dInfer's behavior.
         """
         super().add_request(request)
 
@@ -180,6 +181,21 @@ class DllmRuntimeScheduler(VllmScheduler):
                 request_id=request.request_id,
                 num_computed_tokens=0,
             )
+
+        prompt_ids = getattr(request, "prompt_token_ids", [])
+        if prompt_ids and (
+            not hasattr(request, "spec_token_ids") or not request.spec_token_ids
+        ):
+            draft_size = self._dllm_helper.draft_size
+            mask_id = 156895  # TODO: read from config
+            # Prompt tail: tokens in the last partial block
+            prompt_in_block = len(prompt_ids) % draft_size
+            if prompt_in_block == 0 and len(prompt_ids) > 0:
+                prompt_in_block = draft_size
+            prompt_tail = list(prompt_ids[-prompt_in_block:])
+            n_masks = draft_size - len(prompt_tail)
+            first_block = prompt_tail + [mask_id] * n_masks
+            request.spec_token_ids = first_block
 
     def update_draft_token_ids(self, draft_token_ids: DraftTokenIds) -> None:
         """Keep fixed ``DRAFT_SIZE`` blocks; do not grammar-truncate drafts here.
