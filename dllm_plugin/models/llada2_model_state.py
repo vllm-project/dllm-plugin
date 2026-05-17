@@ -78,6 +78,10 @@ class LLaDA2ModelState(ModelState):
 
     @property
     def num_bonus_tokens(self) -> int:
+        # Diffusion models don't produce a "next token sample" like AR
+        # spec-decode. Each denoising step processes the full draft block
+        # (no bonus token prepended). EOS is generated within block content
+        # by the diffusion decoder, not as a separate bonus token.
         return 0
 
     def add_request(self, req_index: int, new_req_data: NewRequestData) -> None:
@@ -131,7 +135,12 @@ class LLaDA2ModelState(ModelState):
         # Full-block recomp: only for the first block where the prompt tail
         # is within the current block (prefix < draft_size). For subsequent
         # blocks the standard virtual batch concatenation handles prefix KV.
-        prefix_len = self._prefix_lengths[0] if self._prefix_lengths else 0
+        # NOTE: multi-request batches require per-request handling via
+        # query_start_loc. Currently only single-request is supported.
+        if input_batch.num_reqs != 1:
+            return {}
+
+        prefix_len = self._prefix_lengths[0]
         if not (0 < prefix_len < self._draft_size):
             return {}
 
@@ -142,7 +151,6 @@ class LLaDA2ModelState(ModelState):
 
         overrides: dict[str, Any] = {}
 
-        # Inject prompt_tail tokens in input_ids
         n_tail = len(tail_ids)
         if n_tail > 0 and num_tokens >= n_tail:
             new_ids = input_batch.input_ids.clone()
@@ -153,7 +161,6 @@ class LLaDA2ModelState(ModelState):
             )
             overrides["input_ids"] = new_ids
 
-        # Remap positions to block-relative [0..31]
         new_positions = input_batch.positions.clone()
         new_positions[:num_tokens] -= prefix_len
         new_positions[:num_tokens].clamp_(min=0)
@@ -253,34 +260,34 @@ class LLaDA2ModelState(ModelState):
         effective_prefix_lengths = self._prefix_lengths
         effective_seq_lens = input_batch.seq_lens
         effective_slot_mappings = slot_mappings
-        self._remapped_slot_mappings = None
+        remapped_slot_mappings = None
 
         if (
             self._prefix_lengths
             and self._scheduled_spec_decode_tokens
             and num_tokens > 0
+            and num_reqs == 1
         ):
             prefix_len = self._prefix_lengths[0]
             if 0 < prefix_len < self._draft_size:
                 kv_block_size = kv_cache_config.kv_cache_groups[
                     0
                 ].kv_cache_spec.block_size
-                bt = block_tables[0]
+                bt = block_tables[0]  # [1, max_blocks]
 
+                positions = input_batch.positions[:num_tokens]
+                new_pos = (positions - prefix_len).clamp(min=0)
+                page_idx = new_pos // kv_block_size
+                page_offset = new_pos % kv_block_size
+                page_nums = bt[0][page_idx.long()]
+                new_slot_vals = page_nums * kv_block_size + page_offset
+                valid = page_nums >= 0
                 new_slots = slot_mappings.clone()
-                for token_idx in range(num_tokens):
-                    orig_pos = int(input_batch.positions[token_idx].item())
-                    new_pos = max(0, orig_pos - prefix_len)
-                    page_idx = new_pos // kv_block_size
-                    page_offset = new_pos % kv_block_size
-                    if page_idx < bt.shape[1]:
-                        page_num = int(bt[0, page_idx].item())
-                        if page_num >= 0:
-                            new_slots[0, token_idx] = (
-                                page_num * kv_block_size + page_offset
-                            )
+                new_slots[0, :num_tokens] = torch.where(
+                    valid, new_slot_vals, slot_mappings[0, :num_tokens]
+                )
                 effective_slot_mappings = new_slots
-                self._remapped_slot_mappings = new_slots
+                remapped_slot_mappings = new_slots
 
                 effective_prefix_lengths = [0] * len(self._prefix_lengths)
                 effective_seq_lens = torch.full_like(
@@ -293,7 +300,7 @@ class LLaDA2ModelState(ModelState):
                 )
                 max_seq_len = self._draft_size
 
-        return build_attn_metadata(
+        attn_metadata = build_attn_metadata(
             attn_groups=attn_groups,
             num_reqs=num_reqs,
             num_tokens=num_tokens,
@@ -311,3 +318,6 @@ class LLaDA2ModelState(ModelState):
             causal=False,
             dllm_prefix_lengths=effective_prefix_lengths,
         )
+        if remapped_slot_mappings is not None:
+            attn_metadata["remapped_slot_mappings"] = remapped_slot_mappings
+        return attn_metadata

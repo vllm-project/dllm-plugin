@@ -112,11 +112,17 @@ def take_draft_token_ids(self) -> DraftTokenIds | None:
 After `attn_metadata = self.model_state.prepare_attn(...)`, add:
 
 ```python
-remapped = getattr(self.model_state, '_remapped_slot_mappings', None)
+# attn_metadata is a dict[str, AttentionMetadata]. Check for remap key.
+remapped = None
+for group_meta in attn_metadata.values():
+    if isinstance(group_meta, dict) and "remapped_slot_mappings" in group_meta:
+        remapped = group_meta.pop("remapped_slot_mappings")
+        break
+if remapped is None:
+    remapped = attn_metadata.pop("remapped_slot_mappings", None)
 if remapped is not None:
     slot_mappings_by_layer = build_slot_mappings_by_layer(
         remapped, self.kv_cache_config)
-    self.model_state._remapped_slot_mappings = None
 ```
 
 ## Reproduction Guide
@@ -148,13 +154,14 @@ Apply the two fork patches (§ Required Fork Patches) to the vLLM pod's
 
 ### 3. Capture E2E sub-operations
 
-On the dInfer pod (captures first denoising iteration at every layer):
-```bash
-kubectl exec investigation-dinfer -- python3 /workspace/scripts/capture_e2e_dinfer.py
-```
+The capture scripts are in `tools/investigation/scripts/` (gitignored, kept
+locally). Copy them to the pods via the setup scripts, then:
 
-On the vLLM pod:
 ```bash
+# dInfer pod (captures first denoising iteration at every layer)
+kubectl exec investigation-dinfer -- python3 /workspace/scripts/capture_e2e_dinfer.py
+
+# vLLM pod
 kubectl exec investigation-vllm -- python3 /workspace/scripts/capture_e2e_vllm.py
 ```
 
@@ -169,21 +176,8 @@ kubectl exec investigation-vllm -- python3 /workspace/scripts/compare_e2e.py \
 ### 5. Verify remasking equivalence
 
 Run both remasking implementations on the same model forward outputs (on the
-dInfer pod with both `dinfer` and the plugin's `batched_remask` loaded):
-
-```python
-from dinfer.decoding.parallel_strategy import get_transfer_index_threshold
-
-# dInfer remasking
-x0_d, transfer_d = get_transfer_index_threshold(
-    logits, 0, mask_index, draft, mask_id, threshold=0.9)
-
-# Plugin remasking (same logic)
-draft_p = plugin_remask(logits, draft, mask_id, 0.9)
-
-# Compare: should be bit-identical at every step
-assert torch.equal(draft_d, draft_p)
-```
+dInfer pod with both `dinfer` and the plugin's `batched_remask` loaded).
+Both should produce bit-identical token decisions at every denoising step.
 
 ## Equivalence Proof
 

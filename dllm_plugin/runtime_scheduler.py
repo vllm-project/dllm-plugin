@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
+from dllm_plugin.config import LLADA2_DEFAULT_MASK_TOKEN_ID
 from dllm_plugin.grammar_utils import (
     flat_frontier_bitmask_row_index,
     frontier_block_row,
@@ -185,7 +186,7 @@ class DllmRuntimeScheduler(VllmScheduler):
             not hasattr(request, "spec_token_ids") or not request.spec_token_ids
         ):
             draft_size = self._dllm_helper.draft_size
-            mask_id = 156895  # TODO: read from config
+            mask_id = LLADA2_DEFAULT_MASK_TOKEN_ID
             prompt_in_block = len(prompt_ids) % draft_size
             if prompt_in_block == 0 and len(prompt_ids) > 0:
                 prompt_in_block = draft_size
@@ -317,10 +318,11 @@ class DllmRuntimeScheduler(VllmScheduler):
                 if request and hasattr(request, "dllm_state") and len(token_ids) > 0:
                     request.dllm_state.num_computed_tokens += len(token_ids)
 
-        # Override num_computed_tokens using our own accounting.
-        # The parent scheduler's spec-decode logic assumes bonus_tokens=1,
-        # which causes an off-by-one in accepted token counting. We set
-        # nct = prompt_len + total_committed to match our exact state.
+        # WORKAROUND: override num_computed_tokens using our own accounting.
+        # The parent scheduler's update_from_output() assumes bonus_tokens=1
+        # when counting accepted spec tokens, causing an off-by-one for
+        # diffusion models (bonus=0). The proper fix is to have the parent
+        # read ModelState.num_bonus_tokens; until then, we correct it here.
         for req_id in scheduler_output.num_scheduled_tokens:
             request = self.requests.get(req_id)
             if request is None:
