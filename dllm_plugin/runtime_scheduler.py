@@ -110,8 +110,12 @@ class DllmRuntimeScheduler(VllmScheduler):
             for req_id in out.num_scheduled_tokens:
                 request = self.requests.get(req_id)
                 if request and hasattr(request, "dllm_state"):
-                    num_computed = request.dllm_state.num_computed_tokens
-                    out.dllm_num_prefix_tokens[req_id] = num_computed
+                    # Prefix = prompt tokens + previously committed blocks.
+                    # For the first block, this is the prompt length.
+                    # For subsequent blocks, it grows by committed tokens.
+                    prompt_len = getattr(request, "num_prompt_tokens", 0)
+                    committed = request.dllm_state.num_computed_tokens
+                    out.dllm_num_prefix_tokens[req_id] = prompt_len + committed
 
         # FIX B: Workaround for vLLM 0.20.1 not reliably setting
         # has_structured_output_requests under high concurrency.
