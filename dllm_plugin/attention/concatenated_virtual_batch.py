@@ -18,7 +18,6 @@ the modified CommonAttentionMetadata into the correct backend format.
 
 from dataclasses import replace
 
-import numpy as np
 import torch
 from vllm.v1.attention.backend import CommonAttentionMetadata
 
@@ -36,6 +35,8 @@ def create_concatenated_virtual_batch(
     The backend builder (FlashInfer/FlashAttention) then transforms this into
     the correct backend-specific format.
 
+    All operations are GPU-resident — no CPU transfers.
+
     Args:
         attn_metadata: Original CommonAttentionMetadata from vLLM
         num_prefix_tokens_per_request: Per-request prefix lengths (list[int])
@@ -47,7 +48,8 @@ def create_concatenated_virtual_batch(
         updated seq_lens reflecting prefix + block per request.
     """
     num_reqs = attn_metadata.num_reqs
-    device = attn_metadata.block_table_tensor.device
+    block_table = attn_metadata.block_table_tensor
+    device = block_table.device
 
     if len(num_prefix_tokens_per_request) != num_reqs:
         raise ValueError(
@@ -55,48 +57,33 @@ def create_concatenated_virtual_batch(
             f"got {len(num_prefix_tokens_per_request)}"
         )
 
-    num_prefix_tokens_np = np.array(num_prefix_tokens_per_request, dtype=np.int32)
-    num_prefix_blocks_np = (
-        num_prefix_tokens_np + kv_cache_block_size - 1
-    ) // kv_cache_block_size
-    num_block_blocks = (block_size + kv_cache_block_size - 1) // kv_cache_block_size
-
-    num_total_blocks_np = num_prefix_blocks_np + num_block_blocks
-    max_total_blocks = int(num_total_blocks_np.max())
-
-    block_table = attn_metadata.block_table_tensor
-    bt_np = block_table.cpu().numpy()
-    num_bt_cols = bt_np.shape[1]
-
-    # Vectorized construction: build output block table in numpy
-    out_np = np.full((num_reqs, max_total_blocks), -1, dtype=bt_np.dtype)
-    for req_idx in range(num_reqs):
-        n_prefix = int(num_prefix_blocks_np[req_idx])
-        block_start = n_prefix
-        block_end = min(block_start + num_block_blocks, num_bt_cols)
-
-        if n_prefix > 0:
-            out_np[req_idx, :n_prefix] = bt_np[req_idx, :n_prefix]
-        if block_end > block_start:
-            n_copy = block_end - block_start
-            out_np[req_idx, n_prefix : n_prefix + n_copy] = bt_np[
-                req_idx, block_start:block_end
-            ]
-
-    concatenated_block_table = torch.from_numpy(out_np).to(device)
-
-    combined_seq_lens = torch.tensor(
-        num_prefix_tokens_np + block_size,
-        dtype=attn_metadata.seq_lens.dtype,
-        device=device,
+    prefix_tokens = torch.tensor(
+        num_prefix_tokens_per_request, dtype=torch.int32, device=device
     )
-    max_combined_seq_len = int(combined_seq_lens.max())
+    num_prefix_blocks = (prefix_tokens + kv_cache_block_size - 1) // kv_cache_block_size
+    num_block_blocks = (block_size + kv_cache_block_size - 1) // kv_cache_block_size
+    num_total_blocks = num_prefix_blocks + num_block_blocks
+    max_total_blocks = int(num_total_blocks.max().item())
+
+    # Both prefix and block pages are contiguous from column 0 in the
+    # original table, so the concatenation is bt[r, 0:n_total].
+    out = torch.full(
+        (num_reqs, max_total_blocks), -1, dtype=block_table.dtype, device=device
+    )
+    col_idx = torch.arange(max_total_blocks, device=device).unsqueeze(0)
+    valid = col_idx < num_total_blocks.unsqueeze(1)
+    # Clamp indices to block_table column range
+    src_idx = col_idx.clamp(max=block_table.shape[1] - 1)
+    out[valid] = block_table.gather(1, src_idx.expand(num_reqs, -1))[valid]
+
+    combined_seq_lens = prefix_tokens.to(attn_metadata.seq_lens.dtype) + block_size
+    max_combined_seq_len = int(combined_seq_lens.max().item())
 
     return replace(
         attn_metadata,
         seq_lens=combined_seq_lens,
         max_seq_len=max_combined_seq_len,
-        block_table_tensor=concatenated_block_table,
+        block_table_tensor=out,
         causal=False,
         _seq_lens_cpu=None,
     )
