@@ -442,9 +442,10 @@ class LLaDA2ForCausalLM(nn.Module):
 
     ``@support_torch_compile`` is intentionally omitted. Block diffusion
     requires variable attention metadata per step (slot_mapping remap,
-    seq_lens override, prefix_lengths) which is incompatible with
-    ``torch.compile`` graph capture. CUDAGraph support is ``NEVER`` for
-    the same reason (set in ``LLaDA2BidirectionalAttentionBuilder``).
+    seq_lens override, prefix_lengths) which is incompatible with full
+    ``torch.compile`` graph capture. CUDAGraph uses ``PIECEWISE`` mode:
+    the model forward is graph-captured while attention metadata setup
+    (virtual batch, slot remap) runs in eager mode per step.
     Re-enabling requires persistent buffers for all per-step metadata.
 
     **Pipeline Parallelism:** NOT supported in Phase 7 MVP. Will raise ValueError

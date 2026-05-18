@@ -48,14 +48,13 @@ def create_llada2_bidirectional_attention_backend(
 
         @classmethod
         def get_cudagraph_support(cls, vllm_config, kv_cache_spec):
-            """Disable CUDAGraphs: concatenated virtual batch creates
-            different-shaped metadata per step (varying num_prefix_tokens),
-            so a fixed captured graph would be incorrect.
-            Matches upstream ChunkedLocalAttention pattern.
+            """PIECEWISE CUDAGraph: the model forward is graph-captured
+            while attention metadata setup (virtual batch concatenation,
+            slot_mapping remap) runs in eager mode per step.
             """
             from vllm.v1.attention.backend import AttentionCGSupport
 
-            return AttentionCGSupport.NEVER
+            return AttentionCGSupport.UNIFORM_BATCH
 
         def build(
             self,
