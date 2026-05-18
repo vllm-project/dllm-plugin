@@ -86,6 +86,13 @@ class LLaDA2ModelState(ModelState):
         self._draft_block_valid = torch.zeros(max_reqs, dtype=torch.bool, device=device)
         self._slot_map: dict[str, int] = {}
 
+        # Persistent input buffers for CUDA graph capture. prepare_inputs()
+        # writes into these via .copy_() so the graph replay reads updated
+        # values from the same memory addresses.
+        max_tokens = vllm_config.scheduler_config.max_num_batched_tokens
+        self._input_ids_buf = torch.zeros(max_tokens, dtype=torch.int32, device=device)
+        self._positions_buf = torch.zeros(max_tokens, dtype=torch.long, device=device)
+
         # Prompt tail: immutable after add_request, not on hot path (A2).
         self._prompt_tail_ids: dict[str, list[int]] = {}
 
@@ -181,27 +188,29 @@ class LLaDA2ModelState(ModelState):
         if not tail_ids:
             return {}
 
-        overrides: dict[str, Any] = {}
-
+        # Write into persistent buffers (stable addresses for graph replay)
+        ids_buf = self._input_ids_buf[:num_tokens]
+        ids_buf.copy_(input_batch.input_ids[:num_tokens])
         n_tail = len(tail_ids)
         if n_tail > 0 and num_tokens >= n_tail:
-            new_ids = input_batch.input_ids.clone()
-            new_ids[:n_tail] = torch.tensor(
+            ids_buf[:n_tail] = torch.tensor(
                 tail_ids,
-                dtype=new_ids.dtype,
-                device=new_ids.device,
+                dtype=ids_buf.dtype,
+                device=ids_buf.device,
             )
-            overrides["input_ids"] = new_ids
 
-        new_positions = input_batch.positions.clone()
-        new_positions[:num_tokens] -= prefix_len
-        new_positions[:num_tokens].clamp_(min=0)
-        overrides["positions"] = new_positions
+        pos_buf = self._positions_buf[:num_tokens]
+        pos_buf.copy_(input_batch.positions[:num_tokens])
+        pos_buf -= prefix_len
+        pos_buf.clamp_(min=0)
 
-        return overrides
+        return {"input_ids": ids_buf, "positions": pos_buf}
 
     def prepare_dummy_inputs(self, num_reqs: int, num_tokens: int) -> dict[str, Any]:
-        return {}
+        return {
+            "input_ids": self._input_ids_buf[:num_tokens],
+            "positions": self._positions_buf[:num_tokens],
+        }
 
     def before_step(
         self,
