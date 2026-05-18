@@ -40,6 +40,13 @@ class LLaDA2ModelState(ModelState):
 
     All dLLM logic lives here via ModelState composition hooks:
     prepare_attn, custom_sampler, before_step, take_draft_token_ids.
+
+    .. note::
+        Per-request state (``_denoise_step``, ``_initial_prompt_len``, etc.)
+        is stored in Python dicts. For CUDA graph compatibility these should
+        migrate to pre-allocated GPU tensors indexed by request slot.
+        ``prepare_inputs()`` clones tensors per step which also prevents
+        graph capture; persistent buffers updated in-place are needed.
     """
 
     def __init__(
@@ -135,9 +142,12 @@ class LLaDA2ModelState(ModelState):
         # Full-block recomp: only for the first block where the prompt tail
         # is within the current block (prefix < draft_size). For subsequent
         # blocks the standard virtual batch concatenation handles prefix KV.
-        # NOTE: multi-request batches require per-request handling via
-        # query_start_loc. Currently only single-request is supported.
         if input_batch.num_reqs != 1:
+            logger.warning(
+                "Full-block recomputation skipped: requires num_reqs=1 "
+                "(got %d). First-block prompt-tail injection disabled.",
+                input_batch.num_reqs,
+            )
             return {}
 
         prefix_len = self._prefix_lengths[0]

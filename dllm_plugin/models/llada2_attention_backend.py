@@ -73,16 +73,12 @@ def create_llada2_bidirectional_attention_backend(
                 from dllm_plugin.attention.concatenated_virtual_batch import (
                     create_concatenated_virtual_batch,
                 )
-
-                block_size = (
-                    common_attn_metadata.num_actual_tokens
-                    // common_attn_metadata.num_reqs
-                )
+                from dllm_plugin.config import DRAFT_SIZE
 
                 common_attn_metadata = create_concatenated_virtual_batch(
                     attn_metadata=common_attn_metadata,
                     num_prefix_tokens_per_request=num_prefix_tokens_list,
-                    block_size=block_size,
+                    block_size=DRAFT_SIZE,
                     kv_cache_block_size=kv_cache_block_size,
                 )
             else:

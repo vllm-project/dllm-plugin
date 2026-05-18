@@ -79,6 +79,14 @@ class DiffusionSampler:
     - _initial_prompt_len: prompt prefix length to strip at commit
     - _scheduled_spec_decode_tokens: current draft block per request
     - _pending_draft_ids: next-step drafts for take_draft_token_ids()
+
+    .. note::
+        Performance: ``_denoise()`` uses ``.cpu()`` transfers and a Python
+        per-request loop for convergence checking. This is a known
+        GPU-CPU sync on the hot path that should be replaced with a fused
+        Triton kernel for production throughput. The per-request state
+        dicts should migrate to pre-allocated GPU tensors indexed by
+        request slot for CUDA graph compatibility.
     """
 
     def __init__(

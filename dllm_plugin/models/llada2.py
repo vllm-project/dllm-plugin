@@ -438,8 +438,13 @@ class LLaDA2ForCausalLM(nn.Module):
     - Block-style non-causal attention
     - Tensor parallelism (TP) support
     - Proper weight loading from HuggingFace checkpoints
-    decorator. Compilation is automatic when vLLM's compilation config is enabled.
-    Routing and MoE layers benefit most from graph optimization.
+
+    ``@support_torch_compile`` is intentionally omitted. Block diffusion
+    requires variable attention metadata per step (slot_mapping remap,
+    seq_lens override, prefix_lengths) which is incompatible with
+    ``torch.compile`` graph capture. CUDAGraph support is ``NEVER`` for
+    the same reason (set in ``LLaDA2BidirectionalAttentionBuilder``).
+    Re-enabling requires persistent buffers for all per-step metadata.
 
     **Pipeline Parallelism:** NOT supported in Phase 7 MVP. Will raise ValueError
     if `pipeline_parallel_size > 1`. Use `--tensor-parallel-size` for multi-GPU.

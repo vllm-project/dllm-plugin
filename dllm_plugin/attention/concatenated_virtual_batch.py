@@ -56,55 +56,34 @@ def create_concatenated_virtual_batch(
         )
 
     num_prefix_tokens_np = np.array(num_prefix_tokens_per_request, dtype=np.int32)
-
-    num_prefix_blocks_per_req = (
+    num_prefix_blocks_np = (
         num_prefix_tokens_np + kv_cache_block_size - 1
     ) // kv_cache_block_size
     num_block_blocks = (block_size + kv_cache_block_size - 1) // kv_cache_block_size
 
-    num_total_blocks_per_req = num_prefix_blocks_per_req + num_block_blocks
-    max_total_blocks = int(num_total_blocks_per_req.max())
+    num_total_blocks_np = num_prefix_blocks_np + num_block_blocks
+    max_total_blocks = int(num_total_blocks_np.max())
 
     block_table = attn_metadata.block_table_tensor
-    concatenated_block_table_list = []
+    bt_np = block_table.cpu().numpy()
+    num_bt_cols = bt_np.shape[1]
 
+    # Vectorized construction: build output block table in numpy
+    out_np = np.full((num_reqs, max_total_blocks), -1, dtype=bt_np.dtype)
     for req_idx in range(num_reqs):
-        n_prefix_blocks = int(num_prefix_blocks_per_req[req_idx])
+        n_prefix = int(num_prefix_blocks_np[req_idx])
+        block_start = n_prefix
+        block_end = min(block_start + num_block_blocks, num_bt_cols)
 
-        if n_prefix_blocks > 0:
-            prefix_pages = block_table[req_idx, :n_prefix_blocks]
-        else:
-            prefix_pages = torch.empty(0, dtype=block_table.dtype, device=device)
+        if n_prefix > 0:
+            out_np[req_idx, :n_prefix] = bt_np[req_idx, :n_prefix]
+        if block_end > block_start:
+            n_copy = block_end - block_start
+            out_np[req_idx, n_prefix : n_prefix + n_copy] = bt_np[
+                req_idx, block_start:block_end
+            ]
 
-        block_start_idx = n_prefix_blocks
-        block_end_idx = block_start_idx + num_block_blocks
-
-        if block_end_idx > block_table.shape[1]:
-            raise ValueError(
-                f"Request {req_idx} requires pages [{block_start_idx}:{block_end_idx}] "
-                f"but block_table only has {block_table.shape[1]} columns "
-                f"(prefix_blocks={n_prefix_blocks}, block_blocks={num_block_blocks})"
-            )
-
-        block_pages = block_table[req_idx, block_start_idx:block_end_idx]
-
-        if n_prefix_blocks > 0:
-            req_pages = torch.cat([prefix_pages, block_pages])
-        else:
-            req_pages = block_pages
-
-        if len(req_pages) < max_total_blocks:
-            padding = torch.full(
-                (max_total_blocks - len(req_pages),),
-                fill_value=-1,
-                dtype=block_table.dtype,
-                device=device,
-            )
-            req_pages = torch.cat([req_pages, padding])
-
-        concatenated_block_table_list.append(req_pages)
-
-    concatenated_block_table = torch.stack(concatenated_block_table_list, dim=0)
+    concatenated_block_table = torch.from_numpy(out_np).to(device)
 
     combined_seq_lens = torch.tensor(
         num_prefix_tokens_np + block_size,
@@ -119,6 +98,5 @@ def create_concatenated_virtual_batch(
         max_seq_len=max_combined_seq_len,
         block_table_tensor=concatenated_block_table,
         causal=False,
-        # Reset cached CPU tensors so they get recomputed from new seq_lens
         _seq_lens_cpu=None,
     )
