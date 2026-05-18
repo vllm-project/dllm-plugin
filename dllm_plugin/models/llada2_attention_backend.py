@@ -48,9 +48,10 @@ def create_llada2_bidirectional_attention_backend(
 
         @classmethod
         def get_cudagraph_support(cls, vllm_config, kv_cache_spec):
-            """PIECEWISE CUDAGraph: the model forward is graph-captured
-            while attention metadata setup (virtual batch concatenation,
-            slot_mapping remap) runs in eager mode per step.
+            """UNIFORM_BATCH: the model forward is graph-captured while
+            attention metadata (virtual batch, slot remap) runs in eager
+            mode. Block diffusion decode steps have constant batch shape
+            (1 request, DRAFT_SIZE tokens) compatible with graph replay.
             """
             from vllm.v1.attention.backend import AttentionCGSupport
 

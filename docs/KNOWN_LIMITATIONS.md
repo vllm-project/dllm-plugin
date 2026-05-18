@@ -1,9 +1,40 @@
-# Known Limitations - Phase 7 & 8
+# Known Limitations
 
-**Last Updated:** 2026-05-09  
-**Scope:** LLaDA2.0 real model implementation (Phase 7 + 8)
+**Last Updated:** 2026-05-18  
+**Scope:** LLaDA2.0 dllm-plugin (Phases 7-9)
 
-This document tracks known limitations, unvalidated assumptions, and deferred work for the Phase 7+8 release.
+This document tracks known limitations, unvalidated assumptions, and deferred work.
+
+---
+
+## CUDA Graph Support
+
+CUDAGraph mode is `UNIFORM_BATCH` — the model forward (embedding → layers →
+lm_head) is graph-captured, while attention metadata (virtual batch, slot
+mapping remap) runs in eager mode per step. This provides partial graph
+benefits but not full capture.
+
+**Remaining blockers for full graph capture:**
+- `prepare_inputs()` creates `torch.tensor()` from Python lists (prompt tail
+  injection on the first block). This is outside the graph region but adds
+  CPU→GPU sync.
+- The `DraftTokenIds` scheduler interface requires `tolist()` per step (one
+  GPU→CPU sync). Eliminating this requires fork changes to accept GPU tensors.
+
+## First-Block Slot Mapping Remap
+
+The first block requires slot mapping remapping to overwrite frozen prefix KV
+with values recomputed in the full-block context. This produces different RoPE
+positions than continuation positions. Position continuation was tested and
+produces degraded output — the frozen prefix KV from a short prefill dominates
+attention and the model repeats prompt tokens.
+
+## Multi-Request First-Block Recomputation
+
+Full-block recomputation (`prepare_inputs` position/input_ids override,
+`prepare_attn` slot mapping remap) only supports `num_reqs=1`. Multi-request
+batches skip first-block recomputation with a logged warning. This affects
+new requests in batches with `max_num_seqs > 1`.
 
 ---
 

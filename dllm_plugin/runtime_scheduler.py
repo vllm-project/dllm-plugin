@@ -86,17 +86,6 @@ class DllmRuntimeScheduler(VllmScheduler):
 
     def schedule(self) -> Any:
         """Attach grammar bitmask metadata for dLLM workers."""
-        # Capture num_computed_tokens BEFORE super().schedule() advances them.
-        # Used by update_from_output() for Commit-0 rollback.
-        # Only capture for requests that have COMPLETED prefill — rolling back
-        # before prefill completes would re-process prompt tokens on every step.
-        self._pre_schedule_nct: dict[str, int] = {}
-        for req_id, request in self.requests.items():
-            if getattr(request, "spec_token_ids", None):
-                prompt_len = getattr(request, "num_prompt_tokens", 0)
-                if request.num_computed_tokens >= prompt_len > 0:
-                    self._pre_schedule_nct[req_id] = request.num_computed_tokens
-
         out = super().schedule()
 
         # Note: spec_token_ids population and negative num_scheduled_tokens
@@ -285,29 +274,7 @@ class DllmRuntimeScheduler(VllmScheduler):
 
         result = super().update_from_output(scheduler_output, model_runner_output)
 
-        # Commit-0 rollback: schedule() advanced num_computed_tokens by
-        # num_scheduled_tokens. For Commit-0 (no tokens committed), restore
-        # the pre-schedule value so the same block gets re-scheduled.
-        pre_nct = getattr(self, "_pre_schedule_nct", {})
-        for req_id in scheduler_output.num_scheduled_tokens:
-            request = self.requests.get(req_id)
-            if request is None:
-                continue
-            req_index = model_runner_output.req_id_to_index.get(req_id)
-            if req_index is None:
-                continue
-            generated = (
-                model_runner_output.sampled_token_ids[req_index]
-                if model_runner_output.sampled_token_ids
-                else []
-            )
-            if not generated and req_id in pre_nct:
-                request.num_computed_tokens = pre_nct[req_id]
-
         # Update dllm_state.num_computed_tokens for committed blocks.
-        # This counter tracks the committed prefix length for virtual batch
-        # attention and is NOT rolled back on Commit-0 — re-running the same
-        # block doesn't change the prefix length.
         if model_runner_output.sampled_token_ids:
             for req_id, token_ids in zip(
                 model_runner_output.req_ids,
@@ -318,20 +285,19 @@ class DllmRuntimeScheduler(VllmScheduler):
                 if request and hasattr(request, "dllm_state") and len(token_ids) > 0:
                     request.dllm_state.num_computed_tokens += len(token_ids)
 
-        # WORKAROUND: override num_computed_tokens using our own accounting.
-        # The parent scheduler's update_from_output() assumes bonus_tokens=1
-        # when counting accepted spec tokens, causing an off-by-one for
-        # diffusion models (bonus=0). The proper fix is to have the parent
-        # read ModelState.num_bonus_tokens; until then, we correct it here.
+        # Single authoritative num_computed_tokens pass using dllm_state.
+        # The parent scheduler's spec-decode accounting assumes bonus=1,
+        # causing off-by-one for diffusion (bonus=0). We override with
+        # our own tracking: nct = prompt_len + total_committed. This
+        # also handles Commit-0 rollback (committed stays unchanged, so
+        # nct stays at prompt_len + previous_committed).
         for req_id in scheduler_output.num_scheduled_tokens:
             request = self.requests.get(req_id)
-            if request is None:
+            if request is None or not hasattr(request, "dllm_state"):
                 continue
-            if hasattr(request, "dllm_state"):
-                prompt_len = getattr(request, "num_prompt_tokens", 0)
-                committed = request.dllm_state.num_computed_tokens
-                correct_nct = prompt_len + committed
-                request.num_computed_tokens = correct_nct
+            prompt_len = getattr(request, "num_prompt_tokens", 0)
+            committed = request.dllm_state.num_computed_tokens
+            request.num_computed_tokens = prompt_len + committed
 
         return result
 

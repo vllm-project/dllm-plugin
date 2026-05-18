@@ -246,10 +246,10 @@ class LLaDA2ModelState(ModelState):
         sampler: Any,
         config: Any,
     ) -> tuple[Any, Any] | None:
-        from dllm_plugin.sampling.diffusion_sampler import DiffusionSampler
+        if not hasattr(self, "_diffusion_sampler"):
+            from dllm_plugin.sampling.diffusion_sampler import DiffusionSampler
 
-        return (
-            DiffusionSampler(
+            self._diffusion_sampler = DiffusionSampler(
                 base_sampler=sampler,
                 model_state=self,
                 device=self.device,
@@ -258,9 +258,8 @@ class LLaDA2ModelState(ModelState):
                 threshold=self._threshold,
                 max_denoise_iters=self._max_denoise_iters,
                 slot_width=self._slot_width,
-            ),
-            None,
-        )
+            )
+        return (self._diffusion_sampler, None)
 
     def take_draft_token_ids(self) -> DraftTokenIds | None:
         out = self._pending_draft_ids
