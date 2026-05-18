@@ -72,10 +72,23 @@ class LLaDA2ModelState(ModelState):
         )
         self._slot_width = diff_cfg.num_speculative_tokens if diff_cfg else DRAFT_SIZE
 
-        self._denoise_step: dict[str, int] = {}
-        self._initial_prompt_len: dict[str, int] = {}
-        self._kv_refresh_done: dict[str, bool] = {}
+        # GPU-resident per-request state, indexed by slot.
+        max_reqs = vllm_config.scheduler_config.max_num_seqs
+        self._denoise_step_t = torch.zeros(max_reqs, dtype=torch.int32, device=device)
+        self._kv_refresh_t = torch.zeros(max_reqs, dtype=torch.bool, device=device)
+        self._prompt_len_t = torch.zeros(max_reqs, dtype=torch.int32, device=device)
+        self._draft_block = torch.full(
+            (max_reqs, self._draft_size),
+            self._mask_id,
+            dtype=torch.int64,
+            device=device,
+        )
+        self._draft_block_valid = torch.zeros(max_reqs, dtype=torch.bool, device=device)
+        self._slot_map: dict[str, int] = {}
+
+        # Prompt tail: immutable after add_request, not on hot path (A2).
         self._prompt_tail_ids: dict[str, list[int]] = {}
+
         self._scheduled_spec_decode_tokens: dict[str, tuple[int, ...]] = {}
         self._pending_draft_ids: DraftTokenIds | None = None
         self._prefix_lengths: list[int] | None = None
@@ -93,18 +106,27 @@ class LLaDA2ModelState(ModelState):
 
     def add_request(self, req_index: int, new_req_data: NewRequestData) -> None:
         req_id = new_req_data.req_id
+        self._slot_map[req_id] = req_index
         prompt_ids = new_req_data.prompt_token_ids
         if prompt_ids:
             prompt_in_block = len(prompt_ids) % self._draft_size
             if prompt_in_block == 0 and len(prompt_ids) > 0:
                 prompt_in_block = self._draft_size
-            self._initial_prompt_len[req_id] = len(prompt_ids)
+            self._prompt_len_t[req_index] = prompt_in_block
             self._prompt_tail_ids[req_id] = list(prompt_ids[-prompt_in_block:])
+        self._denoise_step_t[req_index] = 0
+        self._kv_refresh_t[req_index] = False
+        self._draft_block[req_index].fill_(self._mask_id)
+        self._draft_block_valid[req_index] = False
 
     def remove_request(self, req_id: str) -> None:
-        self._denoise_step.pop(req_id, None)
-        self._initial_prompt_len.pop(req_id, None)
-        self._kv_refresh_done.pop(req_id, None)
+        slot = self._slot_map.pop(req_id, None)
+        if slot is not None:
+            self._denoise_step_t[slot] = 0
+            self._kv_refresh_t[slot] = False
+            self._prompt_len_t[slot] = 0
+            self._draft_block[slot].fill_(self._mask_id)
+            self._draft_block_valid[slot] = False
         self._prompt_tail_ids.pop(req_id, None)
 
     def apply_staged_writes(self) -> None:
@@ -194,10 +216,15 @@ class LLaDA2ModelState(ModelState):
         raw = getattr(scheduler_output, "scheduled_spec_decode_tokens", None) or {}
         self._scheduled_spec_decode_tokens = {k: tuple(v) for k, v in raw.items()}
 
-        active = set(getattr(scheduler_output, "num_scheduled_tokens", {}).keys())
-        for stale in set(self._denoise_step) - active:
-            self._denoise_step.pop(stale, None)
-            self._initial_prompt_len.pop(stale, None)
+        # Copy scheduler draft tokens to persistent draft block tensor
+        for req_id, tokens in self._scheduled_spec_decode_tokens.items():
+            slot = self._slot_map.get(req_id)
+            if slot is not None and len(tokens) > 0:
+                n = min(len(tokens), self._draft_size)
+                self._draft_block[slot, :n] = torch.tensor(
+                    tokens[:n], dtype=self._draft_block.dtype, device=self.device
+                )
+                self._draft_block_valid[slot] = True
 
         dllm_npt = getattr(scheduler_output, "dllm_num_prefix_tokens", None)
         num_scheduled = getattr(scheduler_output, "num_scheduled_tokens", None)

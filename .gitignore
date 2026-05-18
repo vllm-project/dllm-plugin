@@ -62,3 +62,4 @@ PR38_CRITICAL_REVIEW.md
 /IMPLEMENTATION_SUMMARY.md
 /SOFTMAX_NORMALIZATION_FIX.md
 tools/investigation/
+vllm_upstream_reference/

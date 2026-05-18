@@ -45,15 +45,12 @@ def batched_remask(
     x0_p = torch.gather(probs, dim=-1, index=x0.unsqueeze(-1)).squeeze(-1)
 
     is_masked = input_draft == mask_token_id
-    # Skip positions where the model predicts mask_id (matches dInfer rm_mask)
     is_masked = is_masked & (x0 != mask_token_id)
 
     x0 = torch.where(is_masked, x0, input_draft)
     neg_inf = torch.tensor(-torch.inf, device=logits.device)
     confidence = torch.where(is_masked, x0_p, neg_inf)
 
-    # Adaptive threshold: commit all positions above threshold, or if none
-    # exceed it, commit all positions within 1e-5 of the max (matches dInfer)
     actual_threshold = (
         (torch.max(confidence, dim=-1)[0] - 1e-5).clamp(-1000, threshold).unsqueeze(-1)
     )
@@ -74,19 +71,11 @@ class DiffusionSampler:
     Created at model load time via ModelState.custom_sampler().
     Called through the normal self.sampler(logits, input_batch) path.
 
-    Manages per-request denoising state:
-    - _denoise_step: current iteration count per request
-    - _initial_prompt_len: prompt prefix length to strip at commit
-    - _scheduled_spec_decode_tokens: current draft block per request
-    - _pending_draft_ids: next-step drafts for take_draft_token_ids()
-
-    .. note::
-        Performance: ``_denoise()`` uses ``.cpu()`` transfers and a Python
-        per-request loop for convergence checking. This is a known
-        GPU-CPU sync on the hot path that should be replaced with a fused
-        Triton kernel for production throughput. The per-request state
-        dicts should migrate to pre-allocated GPU tensors indexed by
-        request slot for CUDA graph compatibility.
+    Per-request denoising state lives in GPU tensors on the ModelState
+    (``_denoise_step_t``, ``_kv_refresh_t``, ``_prompt_len_t``,
+    ``_draft_block``). Convergence checking is fully vectorized on GPU.
+    The only CPU touch is a single ``tolist()`` at step end to build
+    ``DraftTokenIds`` for the scheduler interface.
     """
 
     def __init__(
@@ -133,12 +122,7 @@ class DiffusionSampler:
     def _bootstrap(
         self, logits: torch.Tensor, input_batch: InputBatch
     ) -> SamplerOutput:
-        """Prefill/bootstrap: initialize draft for each request.
-
-        Preserves prompt_tail tokens at the start of the draft block
-        so the model sees [prompt_tail + masks] rather than [masks].
-        This matches dInfer's BlockDiffusionLLM behavior.
-        """
+        """Prefill/bootstrap: initialize draft block for each request."""
         from vllm.v1.outputs import DraftTokenIds
         from vllm.v1.worker.gpu.sample.output import SamplerOutput
 
@@ -148,7 +132,15 @@ class DiffusionSampler:
         for req_id in input_batch.req_ids:
             tail = ms._prompt_tail_ids.get(req_id, [])
             n_masks = self._draft_size - len(tail)
-            next_blocks.append(list(tail) + [mask_id] * n_masks)
+            block = list(tail) + [mask_id] * n_masks
+            next_blocks.append(block)
+            # Also write to the persistent draft block tensor
+            slot = ms._slot_map.get(req_id)
+            if slot is not None:
+                ms._draft_block[slot] = torch.tensor(
+                    block, dtype=ms._draft_block.dtype, device=self.device
+                )
+                ms._draft_block_valid[slot] = True
 
         ms._pending_draft_ids = DraftTokenIds(
             req_ids=list(input_batch.req_ids),
@@ -161,10 +153,6 @@ class DiffusionSampler:
             (num_reqs, width), -1, dtype=torch.int64, device=self.device
         )
 
-        # Return num_sampled=1 so that the post_update kernel advances
-        # num_computed_tokens by the full query_len (query_len - 0 rejected).
-        # With num_sampled=0, the kernel computes num_rejected = num_logits - 0
-        # = 1, then advances by query_len - 1, causing a position off-by-one.
         base_output = self._base_sampler(logits, input_batch)
         return SamplerOutput(
             sampled_token_ids=sampled,
@@ -174,7 +162,7 @@ class DiffusionSampler:
         )
 
     def _denoise(self, logits: torch.Tensor, input_batch: InputBatch) -> SamplerOutput:
-        """Denoising step: remask and check convergence."""
+        """Denoising step with GPU-resident convergence checking."""
         from vllm.v1.outputs import DraftTokenIds
         from vllm.v1.worker.gpu.sample.output import SamplerOutput
 
@@ -185,34 +173,35 @@ class DiffusionSampler:
         mask_id = self._mask_id
         width = self._slot_width
 
+        # Map batch indices to slot indices
+        slots = torch.tensor(
+            [ms._slot_map[rid] for rid in req_ids],
+            dtype=torch.long,
+            device=self.device,
+        )
+
+        # Build logit blocks and read draft from persistent tensor
         block_logits_list = []
-        draft_tensors = []
         for i in range(num_reqs):
             lo, hi = int(cu[i]), int(cu[i + 1])
             block_logits_list.append(logits[lo:hi])
 
-            req_id = req_ids[i]
-            draft = ms._scheduled_spec_decode_tokens.get(req_id, ())
-            if len(draft) < self._draft_size:
-                draft = tuple(draft) + (mask_id,) * (self._draft_size - len(draft))
-            draft_tensors.append(
-                torch.tensor(
-                    draft[: self._draft_size], dtype=torch.int64, device=self.device
-                )
-            )
-
-            if req_id not in ms._initial_prompt_len:
-                n_prompt = 0
-                for t in draft:
-                    if t != mask_id:
-                        n_prompt += 1
-                    else:
-                        break
-                ms._initial_prompt_len[req_id] = n_prompt
-
         batch_logits = torch.stack(block_logits_list)
-        batch_draft = torch.stack(draft_tensors)
+        batch_draft = ms._draft_block[slots]  # [batch, draft_size]
 
+        # Lazy init of prompt_len from first denoising step
+        for i, _req_id in enumerate(req_ids):
+            slot = slots[i].item()
+            if ms._prompt_len_t[slot] == 0 and ms._draft_block_valid[slot]:
+                draft = batch_draft[i]
+                leading = (draft != mask_id).long()
+                first_mask = (leading == 0).long().argmax().item()
+                if first_mask == 0 and draft[0] == mask_id:
+                    ms._prompt_len_t[slot] = 0
+                else:
+                    ms._prompt_len_t[slot] = first_mask
+
+        # GPU-resident remasking
         updated, all_done, _ = batched_remask(
             logits=batch_logits,
             input_draft=batch_draft,
@@ -220,64 +209,67 @@ class DiffusionSampler:
             threshold=self._threshold,
         )
 
+        # --- Vectorized convergence on GPU ---
+        kv_done = ms._kv_refresh_t[slots]
+        needs_refresh = all_done & ~kv_done
+        ms._kv_refresh_t[slots] = kv_done | all_done
+        ready = all_done & kv_done
+
+        steps = ms._denoise_step_t[slots]
+        force_commit = ((steps + 1) >= self._max_denoise_iters) & ~all_done
+        commit = ready | force_commit
+
+        # Increment step for requests that continue denoising
+        continues = ~commit & ~needs_refresh
+        ms._denoise_step_t[slots] = torch.where(
+            continues, steps + 1, ms._denoise_step_t[slots]
+        )
+
+        # Compute num_sampled on GPU
+        prompt_lens = ms._prompt_len_t[slots]
+        non_mask_counts = (updated != mask_id).sum(dim=-1).int()
+        committed_counts = torch.where(
+            ready,
+            self._draft_size - prompt_lens,
+            torch.where(force_commit, non_mask_counts, torch.zeros_like(prompt_lens)),
+        )
+        zeros = torch.zeros_like(committed_counts)
+        num_sampled = torch.where(commit, committed_counts, zeros)
+
+        # Build sampled output (CPU touch only for committed requests)
         sampled = torch.full(
             (num_reqs, width), -1, dtype=torch.int64, device=self.device
         )
-        nums: list[int] = []
-        next_blocks: list[list[int]] = []
-
-        all_done_cpu = all_done.cpu()
-        updated_cpu = updated.cpu()
-
-        for i in range(num_reqs):
-            req_id = req_ids[i]
-            done = bool(all_done_cpu[i])
-            step_idx = ms._denoise_step.get(req_id, 0)
-
-            if done:
-                if not ms._kv_refresh_done.get(req_id, False):
-                    # All masks resolved but KV cache still reflects the
-                    # previous draft state. Return Commit-0 with the final
-                    # block to force one more forward pass that refreshes
-                    # the KV cache, matching dInfer's cross-block update.
-                    ms._kv_refresh_done[req_id] = True
-                    nums.append(0)
-                    next_blocks.append(updated_cpu[i].tolist())
+        if commit.any().item():
+            for i in range(num_reqs):
+                if not commit[i].item():
                     continue
-
-                committed = updated_cpu[i]
-                n_prompt = ms._initial_prompt_len.get(req_id, 0)
-                if n_prompt > 0:
-                    committed = committed[n_prompt:]
-                n = committed.shape[0]
-                sampled[i, :n] = committed.to(self.device)
-                nums.append(n)
-                next_blocks.append([mask_id] * self._draft_size)
-                ms._denoise_step.pop(req_id, None)
-                ms._initial_prompt_len.pop(req_id, None)
-                ms._kv_refresh_done.pop(req_id, None)
-            else:
-                new_step = step_idx + 1
-                if new_step >= self._max_denoise_iters:
-                    logger.warning(
-                        "req %s: denoise hit max iterations (%d)",
-                        req_id,
-                        self._max_denoise_iters,
-                    )
-                    row = updated_cpu[i]
+                if ready[i].item():
+                    n_prompt = prompt_lens[i].item()
+                    row = updated[i, n_prompt:]
+                    n = row.shape[0]
+                    sampled[i, :n] = row
+                else:
+                    row = updated[i]
                     non_mask = row[row != mask_id]
                     n = non_mask.shape[0]
-                    sampled[i, :n] = non_mask.to(self.device)
-                    nums.append(n)
-                    next_blocks.append([mask_id] * self._draft_size)
-                    ms._denoise_step.pop(req_id, None)
-                    ms._initial_prompt_len.pop(req_id, None)
-                else:
-                    nums.append(0)
-                    next_blocks.append(updated_cpu[i].tolist())
-                    ms._denoise_step[req_id] = new_step
+                    sampled[i, :n] = non_mask
 
-        num_sampled = torch.tensor(nums, dtype=torch.int32, device=self.device)
+            # Reset state for committed slots
+            commit_slots = slots[commit]
+            ms._denoise_step_t[commit_slots] = 0
+            ms._kv_refresh_t[commit_slots] = False
+            ms._prompt_len_t[commit_slots] = 0
+
+        # Update persistent draft block
+        ms._draft_block[slots] = torch.where(
+            commit.unsqueeze(-1),
+            torch.full_like(updated, mask_id),
+            updated,
+        )
+
+        # Build DraftTokenIds — single tolist() CPU touch
+        next_blocks = ms._draft_block[slots].cpu().tolist()
 
         ms._pending_draft_ids = DraftTokenIds(
             req_ids=list(req_ids),
