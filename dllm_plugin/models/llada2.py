@@ -31,6 +31,7 @@ from transformers import PretrainedConfig
 from vllm.config import VllmConfig
 from vllm.distributed.parallel_state import get_pp_group, get_tp_group
 from vllm.model_executor.layers.fused_moe import FusedMoE
+from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.linear import (
     ColumnParallelLinear,
     ReplicatedLinear,
@@ -54,7 +55,7 @@ from dllm_plugin.config import (
     LLADA2_DEFAULT_TOPK_GROUP,
 )
 from dllm_plugin.gpu_capability import detect_gpu_capabilities
-from dllm_plugin.models.llada2_attention import LLaDA2BlockAttention, LLaDA2RMSNorm
+from dllm_plugin.models.llada2_attention import LLaDA2BlockAttention
 from dllm_plugin.validation import assert_compatible_stack
 
 logger = logging.getLogger(__name__)
@@ -318,7 +319,7 @@ class LLaDA2DecoderLayer(nn.Module):
     Combines:
     - LLaDA2BlockAttention (non-causal within blocks)
     - LLaDA2MoE (group-limited routing with shared expert)
-    - LLaDA2RMSNorm pre-normalization
+    - RMSNorm pre-normalization
 
     Architecture:
         hidden = residual + self_attn(norm(residual))
@@ -379,12 +380,12 @@ class LLaDA2DecoderLayer(nn.Module):
             quant_config=quant_config,
         )
 
-        # LLaDA2RMSNorm layers
-        self.input_layernorm = LLaDA2RMSNorm(
+        # RMSNorm layers
+        self.input_layernorm = RMSNorm(
             config.hidden_size,
             eps=getattr(config, "rms_norm_eps", 1e-6),
         )
-        self.post_attention_layernorm = LLaDA2RMSNorm(
+        self.post_attention_layernorm = RMSNorm(
             config.hidden_size,
             eps=getattr(config, "rms_norm_eps", 1e-6),
         )
@@ -533,7 +534,7 @@ class LLaDA2ForCausalLM(nn.Module):
         )
 
         # Final layer norm
-        self.norm = LLaDA2RMSNorm(
+        self.norm = RMSNorm(
             self.hidden_size,
             eps=getattr(self.config, "rms_norm_eps", 1e-6),
         )

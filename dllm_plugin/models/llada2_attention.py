@@ -17,54 +17,13 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
-from vllm.model_executor.custom_op import CustomOp
+from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.linear import (
     QKVParallelLinear,
     RowParallelLinear,
 )
 
 from dllm_plugin.vllm_compat import Attention
-
-
-@CustomOp.register("llada2_rms_norm")
-class LLaDA2RMSNorm(CustomOp):
-    """RMSNorm matching dInfer's BF16 computation behavior.
-
-    Stock vLLM RMSNorm dispatches to ir.ops.rms_norm which may produce
-    subtly different BF16 rounding due to IrOp tracing/compilation.
-    This custom implementation forces pure PyTorch computation to
-    exactly match dInfer.
-    """
-
-    def __init__(self, hidden_size: int, eps: float = 1e-6) -> None:
-        super().__init__()
-        self.weight = nn.Parameter(torch.ones(hidden_size))
-        self.variance_epsilon = eps
-
-    def forward_native(
-        self,
-        x: torch.Tensor,
-        residual: torch.Tensor | None = None,
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-        orig_dtype = x.dtype
-        x = x.to(torch.float32)
-        if residual is not None:
-            x = x + residual
-            residual = x.to(orig_dtype)
-        variance = x.pow(2).mean(dim=-1, keepdim=True)
-        x = x * torch.rsqrt(variance + self.variance_epsilon)
-        x = x.to(orig_dtype)
-        x = x * self.weight
-        if residual is None:
-            return x
-        return x, residual
-
-    def forward_cuda(
-        self,
-        x: torch.Tensor,
-        residual: torch.Tensor | None = None,
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-        return self.forward_native(x, residual)
 
 
 class LLaDA2BlockAttention(nn.Module):
@@ -147,11 +106,8 @@ class LLaDA2BlockAttention(nn.Module):
             prefix=f"{prefix}.qkv_proj",
         )
 
-        # Q and K normalization (LLaDA2.0 specific)
-        # Applied after QKV projection, before attention
-        # Uses custom LLaDA2RMSNorm to match dInfer
-        self.q_norm = LLaDA2RMSNorm(self.head_size, eps=1e-6)
-        self.k_norm = LLaDA2RMSNorm(self.head_size, eps=1e-6)
+        self.q_norm = RMSNorm(self.head_size, eps=1e-6)
+        self.k_norm = RMSNorm(self.head_size, eps=1e-6)
 
         # Output projection
         # HF checkpoint: attention.dense.weight
