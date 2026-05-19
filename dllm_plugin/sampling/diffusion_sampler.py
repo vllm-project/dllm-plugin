@@ -174,26 +174,40 @@ class DiffusionSampler:
         width = self._slot_width
 
         # Map batch indices to slot indices
-        slots = torch.tensor(
-            [ms._slot_map[rid] for rid in req_ids],
+        all_slots = [ms._slot_map[rid] for rid in req_ids]
+
+        # Split into decode requests (with draft logits) and prefill
+        # requests (no draft logits). Only decode requests get denoised.
+        decode_indices = []
+        for i in range(num_reqs):
+            lo, hi = int(cu[i]), int(cu[i + 1])
+            if hi - lo == self._draft_size:
+                decode_indices.append(i)
+
+        if not decode_indices:
+            # All requests are prefill — return base sampler output
+            return self._base_sampler(logits, input_batch)
+
+        decode_slots = torch.tensor(
+            [all_slots[i] for i in decode_indices],
             dtype=torch.long,
             device=self.device,
         )
+        slots = decode_slots
 
-        # Build logit blocks and read draft from persistent tensor
         block_logits_list = []
-        for i in range(num_reqs):
+        for i in decode_indices:
             lo, hi = int(cu[i]), int(cu[i + 1])
             block_logits_list.append(logits[lo:hi])
 
         batch_logits = torch.stack(block_logits_list)
-        batch_draft = ms._draft_block[slots]  # [batch, draft_size]
+        batch_draft = ms._draft_block[slots]
 
         # Lazy init of prompt_len from first denoising step
-        for i, _req_id in enumerate(req_ids):
-            slot = slots[i].item()
+        for idx, _i in enumerate(decode_indices):
+            slot = slots[idx].item()
             if ms._prompt_len_t[slot] == 0 and ms._draft_block_valid[slot]:
-                draft = batch_draft[i]
+                draft = batch_draft[idx]
                 leading = (draft != mask_id).long()
                 first_mask = (leading == 0).long().argmax().item()
                 if first_mask == 0 and draft[0] == mask_id:
@@ -236,40 +250,50 @@ class DiffusionSampler:
         zeros = torch.zeros_like(committed_counts)
         num_sampled = torch.where(commit, committed_counts, zeros)
 
-        # Build sampled output (CPU touch only for committed requests)
+        # Build sampled output — map decode-local indices to batch indices
+        num_decode = len(decode_indices)
         sampled = torch.full(
             (num_reqs, width), -1, dtype=torch.int64, device=self.device
         )
+        full_num_sampled = torch.zeros(num_reqs, dtype=torch.int32, device=self.device)
+
         if commit.any().item():
-            for i in range(num_reqs):
-                if not commit[i].item():
+            for di in range(num_decode):
+                if not commit[di].item():
                     continue
-                if ready[i].item():
-                    n_prompt = prompt_lens[i].item()
-                    row = updated[i, n_prompt:]
+                bi = decode_indices[di]
+                if ready[di].item():
+                    n_prompt = prompt_lens[di].item()
+                    row = updated[di, n_prompt:]
                     n = row.shape[0]
-                    sampled[i, :n] = row
+                    sampled[bi, :n] = row
                 else:
-                    row = updated[i]
+                    row = updated[di]
                     non_mask = row[row != mask_id]
                     n = non_mask.shape[0]
-                    sampled[i, :n] = non_mask
+                    sampled[bi, :n] = non_mask
 
-            # Reset state for committed slots
             commit_slots = slots[commit]
             ms._denoise_step_t[commit_slots] = 0
             ms._kv_refresh_t[commit_slots] = False
             ms._prompt_len_t[commit_slots] = 0
 
-        # Update persistent draft block
+        # Write num_sampled for decode requests at their batch positions
+        for di in range(num_decode):
+            bi = decode_indices[di]
+            full_num_sampled[bi] = num_sampled[di]
+
+        # Update persistent draft block for decode requests
         ms._draft_block[slots] = torch.where(
             commit.unsqueeze(-1),
             torch.full_like(updated, mask_id),
             updated,
         )
 
-        # Build DraftTokenIds — single tolist() CPU touch
-        next_blocks = ms._draft_block[slots].cpu().tolist()
+        # Build DraftTokenIds for ALL requests (decode get updated
+        # drafts, prefill get current draft_block state)
+        all_slots_t = torch.tensor(all_slots, dtype=torch.long, device=self.device)
+        next_blocks = ms._draft_block[all_slots_t].cpu().tolist()
 
         ms._pending_draft_ids = DraftTokenIds(
             req_ids=list(req_ids),
@@ -280,5 +304,5 @@ class DiffusionSampler:
             sampled_token_ids=sampled[:, :width],
             logprobs_tensors=None,
             num_nans=None,
-            num_sampled=num_sampled,
+            num_sampled=full_num_sampled,
         )
