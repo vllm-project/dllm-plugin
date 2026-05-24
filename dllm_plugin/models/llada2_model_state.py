@@ -172,11 +172,6 @@ class LLaDA2ModelState(ModelState):
         # is within the current block (prefix < draft_size). For subsequent
         # blocks the standard virtual batch concatenation handles prefix KV.
         if input_batch.num_reqs != 1:
-            logger.warning(
-                "Full-block recomputation skipped: requires num_reqs=1 "
-                "(got %d). First-block prompt-tail injection disabled.",
-                input_batch.num_reqs,
-            )
             return {}
 
         prefix_len = self._prefix_lengths[0]

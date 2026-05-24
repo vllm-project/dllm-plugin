@@ -9,11 +9,13 @@ in the current generation block attends to:
 
 See docs/ATTENTION_DESIGN.md for detailed design rationale.
 
-**Supported backends:** FlashAttention (`flash-attn`) and FlashInfer (`flashinfer`),
-both with `is_causal=False` or `causal=False` for non-causal attention.
+**Supported backends:** FlashInfer (`flashinfer`) is required for non-causal
+paged attention. FA2's paged kernel ignores causal=False on A100 (SM80).
 """
 
 from __future__ import annotations
+
+import logging
 
 import torch
 import torch.nn as nn
@@ -24,6 +26,8 @@ from vllm.model_executor.layers.linear import (
 )
 
 from dllm_plugin.vllm_compat import Attention
+
+logger = logging.getLogger(__name__)
 
 
 class LLaDA2BlockAttention(nn.Module):
@@ -157,11 +161,8 @@ class LLaDA2BlockAttention(nn.Module):
 
         # FlashInfer is required for non-causal paged attention.
         # FA2's paged kernel ignores causal=False on A100 (SM80).
-        # TODO(#45): version-gate per GPU arch once FA2 is fixed.
-        import logging as _logging
         import os
 
-        _attn_log = _logging.getLogger(__name__)
         user_backend = os.environ.get("VLLM_ATTENTION_BACKEND")
         try:
             from vllm.v1.attention.backends.flashinfer import (
@@ -170,17 +171,18 @@ class LLaDA2BlockAttention(nn.Module):
 
             underlying_attn_backend = FlashInferBackend
             if user_backend and user_backend.upper() != "FLASHINFER":
-                _attn_log.warning(
+                logger.warning(
                     "LLaDA2 requires FlashInfer for non-causal "
                     "attention. Ignoring VLLM_ATTENTION_BACKEND=%s",
                     user_backend,
                 )
         except ImportError:
-            _attn_log.warning(
-                "FlashInfer unavailable, falling back to "
-                "auto-selected backend. Non-causal attention "
-                "may not work on A100 (SM80).",
-            )
+            raise ImportError(
+                "LLaDA2 requires FlashInfer for non-causal paged attention. "
+                "Install with: pip install flashinfer-python. "
+                "FA2's paged kernel ignores causal=False on A100 (SM80), "
+                "producing incorrect causal attention instead of bidirectional."
+            ) from None
             underlying_attn_backend = get_attn_backend(head_size, dtype, kv_cache_dtype)
 
         # Wrap it with bidirectional attention (causal=False) + block concatenation

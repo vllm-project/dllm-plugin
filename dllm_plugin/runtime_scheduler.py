@@ -107,7 +107,7 @@ class DllmRuntimeScheduler(VllmScheduler):
                     # Prefix = prompt tokens + previously committed blocks.
                     # For the first block, this is the prompt length.
                     # For subsequent blocks, it grows by committed tokens.
-                    prompt_len = getattr(request, "num_prompt_tokens", 0)
+                    prompt_len = request.dllm_state.num_prompt_tokens
                     committed = request.dllm_state.num_computed_tokens
                     out.dllm_num_prefix_tokens[req_id] = prompt_len + committed
 
@@ -164,13 +164,13 @@ class DllmRuntimeScheduler(VllmScheduler):
         """Initialize dLLM state and seed the first block."""
         super().add_request(request)
 
+        prompt_ids = getattr(request, "prompt_token_ids", [])
         if not hasattr(request, "dllm_state"):
             request.dllm_state = DllmRequestState(
                 request_id=request.request_id,
                 num_computed_tokens=0,
+                num_prompt_tokens=len(prompt_ids),
             )
-
-        prompt_ids = getattr(request, "prompt_token_ids", [])
         if prompt_ids and (
             not hasattr(request, "spec_token_ids") or not request.spec_token_ids
         ):
@@ -260,16 +260,13 @@ class DllmRuntimeScheduler(VllmScheduler):
             model_runner_output=model_runner_output,
         )
 
-        # Strip padding from sampled_token_ids: the model runner produces
-        # fixed-width rows (slot_width) padded with -1. The parent scheduler
-        # interprets the full list as accepted tokens. Filter to only
-        # non-negative, non-zero values for committed blocks, and empty
-        # lists for Commit-0 (denoising in progress).
+        # Strip -1 padding from sampled_token_ids before the parent
+        # scheduler processes them. Mutation is intentional: the parent's
+        # _update_request_with_output appends these to _all_token_ids.
         if model_runner_output.sampled_token_ids:
             cleaned: list[list[int]] = []
             for row in model_runner_output.sampled_token_ids:
-                tokens = [int(t) for t in row if int(t) != -1]
-                cleaned.append(tokens)
+                cleaned.append([t for t in (int(v) for v in row) if t != -1])
             model_runner_output.sampled_token_ids = cleaned
 
         result = super().update_from_output(scheduler_output, model_runner_output)
@@ -295,7 +292,7 @@ class DllmRuntimeScheduler(VllmScheduler):
             request = self.requests.get(req_id)
             if request is None or not hasattr(request, "dllm_state"):
                 continue
-            prompt_len = getattr(request, "num_prompt_tokens", 0)
+            prompt_len = request.dllm_state.num_prompt_tokens
             committed = request.dllm_state.num_computed_tokens
             request.num_computed_tokens = prompt_len + committed
 

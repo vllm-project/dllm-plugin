@@ -171,6 +171,7 @@ class LLaDA2MoE(nn.Module):
             # (manual SwiGLU), not a single nn.Module. Passing them would
             # enable AITER fusion on ROCm but requires wrapping the shared
             # expert in a module with FusedMoE's expected interface.
+            renormalize = getattr(config, "norm_topk_prob", True)
             self.experts = FusedMoE(
                 num_experts=self.num_experts,
                 top_k=self.num_experts_per_tok,
@@ -183,8 +184,18 @@ class LLaDA2MoE(nn.Module):
                 num_expert_group=self.n_group,
                 topk_group=self.topk_group,
                 routed_scaling_factor=self.routed_scaling_factor,
-                renormalize=getattr(config, "norm_topk_prob", True),
+                renormalize=renormalize,
                 quant_config=quant_config,
+            )
+            logger.debug(
+                "FusedMoE config: scoring_func=sigmoid, "
+                "use_grouped_topk=True, num_expert_group=%d, "
+                "topk_group=%d, routed_scaling_factor=%.3f, "
+                "renormalize=%s",
+                self.n_group,
+                self.topk_group,
+                self.routed_scaling_factor,
+                renormalize,
             )
         else:
             self.gate = None
