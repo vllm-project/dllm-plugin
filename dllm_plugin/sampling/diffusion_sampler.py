@@ -98,6 +98,13 @@ class DiffusionSampler:
         self._max_denoise_iters = max_denoise_iters
         self._slot_width = slot_width
 
+        try:
+            from dllm_plugin.sampling.triton_kernels import batched_remask_triton
+
+            self._remask_fn = batched_remask_triton
+        except ImportError:
+            self._remask_fn = batched_remask
+
     def __getattr__(self, name: str) -> Any:
         try:
             base = object.__getattribute__(self, "_base_sampler")
@@ -215,8 +222,7 @@ class DiffusionSampler:
                 else:
                     ms._prompt_len_t[slot] = first_mask
 
-        # GPU-resident remasking
-        updated, all_done, _ = batched_remask(
+        updated, all_done, _ = self._remask_fn(
             logits=batch_logits,
             input_draft=batch_draft,
             mask_token_id=mask_id,

@@ -101,4 +101,4 @@ docstring-code-format = true
 [tool.ty.analysis]
 # Dev/CI default sync omits ``torch``/``vllm``/``transformers``; imports are runtime-gated or skipped in tests.
 # ``guidellm`` is optional for benchmarking (tools/k8s/).
-allowed-unresolved-imports = ["numpy.**", "torch.**", "vllm.**", "huggingface_hub.**", "transformers.**", "requests.**", "guidellm.**", "dinfer.**", "safetensors.**"]
+allowed-unresolved-imports = ["numpy.**", "torch.**", "vllm.**", "huggingface_hub.**", "transformers.**", "requests.**", "guidellm.**", "dinfer.**", "safetensors.**", "triton.**", "uvicorn.**", "fastapi.**", "pydantic.**"]
