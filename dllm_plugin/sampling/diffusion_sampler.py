@@ -160,12 +160,11 @@ class DiffusionSampler:
             (num_reqs, width), -1, dtype=torch.int64, device=self.device
         )
 
-        base_output = self._base_sampler(logits, input_batch)
         return SamplerOutput(
             sampled_token_ids=sampled,
             logprobs_tensors=None,
             num_nans=None,
-            num_sampled=base_output.num_sampled,
+            num_sampled=torch.zeros(num_reqs, dtype=torch.int32, device=self.device),
         )
 
     def _denoise(self, logits: torch.Tensor, input_batch: InputBatch) -> SamplerOutput:
