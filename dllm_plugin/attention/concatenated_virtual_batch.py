@@ -85,5 +85,5 @@ def create_concatenated_virtual_batch(
         max_seq_len=max_combined_seq_len,
         block_table_tensor=out,
         causal=False,
-        _seq_lens_cpu=None,
+        _seq_lens_cpu=combined_seq_lens.cpu(),
     )

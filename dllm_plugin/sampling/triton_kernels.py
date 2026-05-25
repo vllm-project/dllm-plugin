@@ -76,6 +76,10 @@ def _argmax_confidence_kernel(
             other=neg_inf,
         ).to(tl.float32)
 
+        # rm_mask: prevent selecting mask_token_id as prediction
+        is_mask_tok = v_offsets == mask_token_id
+        logits_block = tl.where(is_mask_tok, neg_inf, logits_block)
+
         block_max = tl.max(logits_block)
         if block_max > best_val:
             best_val = block_max
@@ -87,11 +91,6 @@ def _argmax_confidence_kernel(
         running_max = new_max
 
     confidence = tl.exp(best_val - running_max) / sum_exp
-
-    if best_idx == mask_token_id:
-        tl.store(argmax_out_ptr + out_offset, current_token)
-        tl.store(confidence_out_ptr + out_offset, neg_inf)
-        return
 
     tl.store(argmax_out_ptr + out_offset, best_idx)
     tl.store(confidence_out_ptr + out_offset, confidence)

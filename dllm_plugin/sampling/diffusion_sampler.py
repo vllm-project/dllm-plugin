@@ -54,6 +54,10 @@ def batched_remask(
     applied to logits before argmax (stochastic token selection) while
     confidence is computed from CLEAN logits (no noise).
     """
+    # Prevent selecting mask_token_id as a prediction (dInfer rm_mask).
+    logits = logits.clone()
+    logits[..., mask_token_id] = float("-inf")
+
     logits_with_noise = add_gumbel_noise(logits, temperature)
     x0 = torch.argmax(logits_with_noise.float(), dim=-1)
 
@@ -64,7 +68,6 @@ def batched_remask(
     x0_p = torch.gather(probs, dim=-1, index=x0.unsqueeze(-1)).squeeze(-1)
 
     is_masked = input_draft == mask_token_id
-    is_masked = is_masked & (x0 != mask_token_id)
 
     x0 = torch.where(is_masked, x0, input_draft)
     neg_inf = torch.tensor(-torch.inf, device=logits.device)
@@ -259,6 +262,11 @@ class DiffusionSampler:
                 needs_init, computed_lens, ms._prompt_len_t[slots]
             )
 
+        # TP safety: LogitsProcessor all-gathers logits across ranks, so
+        # batch_logits is identical on all ranks.  With temperature=0 (default),
+        # Gumbel noise is a no-op and remasking is deterministic — no TP sync
+        # needed.  temperature>0 requires RNG seed sync across ranks (not yet
+        # implemented; document as single-GPU-only for stochastic sampling).
         updated, all_done, _ = self._remask_fn(
             logits=batch_logits,
             input_draft=batch_draft,

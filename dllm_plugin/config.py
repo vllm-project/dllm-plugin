@@ -35,11 +35,7 @@ def _read_draft_size() -> int:
 #: ``VLLM_DLLM_DRAFT_SIZE`` so scheduler/worker/remasking share one value.
 DRAFT_SIZE: Final[int] = _read_draft_size()
 
-#: Primary registered architecture key for the real LLaDA2.0 vLLM model module
-#: (HF mapping). Until Phase 7 (#12), registration points at the **mock** class
-#: (see ``docs/MOCK_STACK_MODEL.md``); HF configs using this name get stub logits.
-#: Prefer ``DLLM_MOCK_STACK_MODEL_ID`` when you want an explicit test-only id.
-#: Exact registry string may be refined when ``register()`` lands (issue #5).
+#: Registered architecture key for the LLaDA2.0 vLLM model module (HF mapping).
 LLADA2_ARCHITECTURE_NAME: Final[str] = "LLaDA2ForCausalLM"
 
 #: HuggingFace architecture name used by inclusionAI/LLaDA2.0-mini model config.

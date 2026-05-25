@@ -41,12 +41,11 @@ class LLaDA2ModelState(ModelState):
     All dLLM logic lives here via ModelState composition hooks:
     prepare_attn, custom_sampler, before_step, take_draft_token_ids.
 
-    .. note::
-        Per-request state (``_denoise_step``, ``_initial_prompt_len``, etc.)
-        is stored in Python dicts. For CUDA graph compatibility these should
-        migrate to pre-allocated GPU tensors indexed by request slot.
-        ``prepare_inputs()`` clones tensors per step which also prevents
-        graph capture; persistent buffers updated in-place are needed.
+    Per-request state (``_denoise_step_t``, ``_kv_refresh_t``, etc.)
+    is stored in pre-allocated GPU tensors indexed by request slot.
+    ``_input_ids_buf`` and ``_positions_buf`` are persistent buffers
+    updated via ``.copy_()`` for stable memory addresses during
+    CUDAGraph replay (UNIFORM_BATCH mode).
     """
 
     def __init__(
@@ -259,7 +258,7 @@ class LLaDA2ModelState(ModelState):
     def custom_sampler(
         self,
         sampler: Any,
-        config: Any,
+        draft_config: Any = None,
     ) -> tuple[Any, Any] | None:
         if not hasattr(self, "_diffusion_sampler"):
             from dllm_plugin.sampling.diffusion_sampler import DiffusionSampler

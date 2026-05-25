@@ -38,13 +38,7 @@ def create_llada2_bidirectional_attention_backend(
     assert issubclass(underlying_builder, AttentionMetadataBuilder)
 
     class LLaDA2BidirectionalAttentionBuilder(underlying_builder):
-        """Builder that forces causal=False and applies prefix+block concatenation.
-
-        Unlike upstream ChunkedLocalAttentionBuilder, we do NOT override
-        ``update_block_table()`` because our concatenation modifies
-        ``CommonAttentionMetadata.block_table_tensor`` directly in ``build()``,
-        which is consumed before any ``update_block_table`` call.
-        """
+        """Builder that forces causal=False and applies prefix+block concatenation."""
 
         @classmethod
         def get_cudagraph_support(cls, vllm_config, kv_cache_spec):
@@ -85,10 +79,52 @@ def create_llada2_bidirectional_attention_backend(
                     block_size=DRAFT_SIZE,
                     kv_cache_block_size=kv_cache_block_size,
                 )
+                # Store for CUDAGraph replay via update_block_table()
+                self._last_prefix_tokens_list = num_prefix_tokens_list
             else:
                 common_attn_metadata = replace(common_attn_metadata, causal=False)
+                self._last_prefix_tokens_list = None
 
             return super().build(common_prefix_len, common_attn_metadata, fast_build)
+
+        def update_block_table(self, metadata, block_table, slot_mapping):
+            if self._last_prefix_tokens_list and any(
+                n > 0 for n in self._last_prefix_tokens_list
+            ):
+                import torch
+
+                from dllm_plugin.config import DRAFT_SIZE
+
+                num_reqs = len(self._last_prefix_tokens_list)
+                prefix_t = torch.tensor(
+                    self._last_prefix_tokens_list,
+                    dtype=torch.int32,
+                    device=block_table.device,
+                )
+                n_prefix_blocks = (
+                    prefix_t + kv_cache_block_size - 1
+                ) // kv_cache_block_size
+                n_block_blocks = (
+                    DRAFT_SIZE + kv_cache_block_size - 1
+                ) // kv_cache_block_size
+                n_total = n_prefix_blocks + n_block_blocks
+                max_total = int(n_total.max().item())
+
+                out = torch.full(
+                    (num_reqs, max_total),
+                    -1,
+                    dtype=block_table.dtype,
+                    device=block_table.device,
+                )
+                col_idx = torch.arange(max_total, device=block_table.device).unsqueeze(
+                    0
+                )
+                valid = col_idx < n_total.unsqueeze(1)
+                src_idx = col_idx.clamp(max=block_table.shape[1] - 1)
+                out[valid] = block_table.gather(1, src_idx.expand(num_reqs, -1))[valid]
+                block_table = out
+
+            return super().update_block_table(metadata, block_table, slot_mapping)
 
     attn_backend = subclass_attention_backend(
         name_prefix=prefix,

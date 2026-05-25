@@ -97,8 +97,7 @@ class DllmRuntimeScheduler(VllmScheduler):
         out.dllm_so_frontier_block_rows = None
         out.dllm_so_valid_prefix_lens = None
 
-        # Extract num_prefix_tokens for virtual batch attention (Phase 7)
-        # Maps request_id -> num_computed_tokens for all scheduled requests
+        # Prefix token counts for virtual batch attention decomposition.
         out.dllm_num_prefix_tokens = {}
         if out.num_scheduled_tokens:
             for req_id in out.num_scheduled_tokens:
@@ -262,17 +261,20 @@ class DllmRuntimeScheduler(VllmScheduler):
 
         # Strip -1 padding from sampled_token_ids. The model runner
         # produces fixed-width rows padded with -1; the parent scheduler
-        # would append them to _all_token_ids. Build a cleaned copy,
-        # then restore the original after super() to avoid side effects.
+        # would append them to _all_token_ids.
         sampled_orig = model_runner_output.sampled_token_ids
         cleaned: list[list[int]] = []
         if sampled_orig:
             for row in sampled_orig:
                 cleaned.append([t for t in (int(v) for v in row) if t != -1])
-            model_runner_output.sampled_token_ids = cleaned
 
-        result = super().update_from_output(scheduler_output, model_runner_output)
-        model_runner_output.sampled_token_ids = sampled_orig
+        # Create a separate output with cleaned IDs for the parent scheduler
+        # instead of mutating the shared object in-place.
+        from dataclasses import replace as dc_replace
+
+        cleaned_output = dc_replace(model_runner_output, sampled_token_ids=cleaned)
+
+        result = super().update_from_output(scheduler_output, cleaned_output)
 
         # Update dllm_state.num_computed_tokens for committed blocks.
         if cleaned:
