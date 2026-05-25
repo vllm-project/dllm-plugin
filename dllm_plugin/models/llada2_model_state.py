@@ -171,7 +171,22 @@ class LLaDA2ModelState(ModelState):
         # Full-block recomp: only for the first block where the prompt tail
         # is within the current block (prefix < draft_size). For subsequent
         # blocks the standard virtual batch concatenation handles prefix KV.
+        # Multi-request first-block recomp is not supported — assert that
+        # no request in the batch needs it when batching multiple requests.
         if input_batch.num_reqs != 1:
+            if self._prefix_lengths:
+                for pl in self._prefix_lengths:
+                    if 0 < pl < self._draft_size:
+                        if not getattr(self, "_warned_multi_req_recomp", False):
+                            self._warned_multi_req_recomp = True
+                            logger.warning(
+                                "First-block recomputation requires num_reqs=1 "
+                                "but batch has %d requests. Prompt tail "
+                                "injection skipped — first-block output "
+                                "quality may degrade.",
+                                input_batch.num_reqs,
+                            )
+                        break
             return {}
 
         prefix_len = self._prefix_lengths[0]

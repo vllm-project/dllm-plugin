@@ -260,22 +260,25 @@ class DllmRuntimeScheduler(VllmScheduler):
             model_runner_output=model_runner_output,
         )
 
-        # Strip -1 padding from sampled_token_ids before the parent
-        # scheduler processes them. Mutation is intentional: the parent's
-        # _update_request_with_output appends these to _all_token_ids.
-        if model_runner_output.sampled_token_ids:
-            cleaned: list[list[int]] = []
-            for row in model_runner_output.sampled_token_ids:
+        # Strip -1 padding from sampled_token_ids. The model runner
+        # produces fixed-width rows padded with -1; the parent scheduler
+        # would append them to _all_token_ids. Build a cleaned copy,
+        # then restore the original after super() to avoid side effects.
+        sampled_orig = model_runner_output.sampled_token_ids
+        cleaned: list[list[int]] = []
+        if sampled_orig:
+            for row in sampled_orig:
                 cleaned.append([t for t in (int(v) for v in row) if t != -1])
             model_runner_output.sampled_token_ids = cleaned
 
         result = super().update_from_output(scheduler_output, model_runner_output)
+        model_runner_output.sampled_token_ids = sampled_orig
 
         # Update dllm_state.num_computed_tokens for committed blocks.
-        if model_runner_output.sampled_token_ids:
+        if cleaned:
             for req_id, token_ids in zip(
                 model_runner_output.req_ids,
-                model_runner_output.sampled_token_ids,
+                cleaned,
                 strict=True,
             ):
                 request = self.requests.get(req_id)
