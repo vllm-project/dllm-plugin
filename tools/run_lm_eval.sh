@@ -50,7 +50,7 @@ export VLLM_PLUGINS=dllm
 export VLLM_USE_V2_MODEL_RUNNER=1
 export VLLM_ENABLE_V1_MULTIPROCESSING=0
 
-python -m lm_eval \
+python tools/run_lm_eval_plugin.py \
     --model dllm_plugin_eval \
     --model_args "model_path=$MODEL,gen_length=2048,max_model_len=4096" \
     --tasks gsm8k_llada_mini \
