@@ -66,9 +66,8 @@ vllm serve inclusionAI/LLaDA2.0-mini \
 **Known Limitations:**
 - ✅ **Tensor Parallelism (TP)** - TP=1/2/4/8 validated, recommended for models >70B (TP overhead exceeds benefits for small models like LLaDA2.0-mini, see [TP2_BENCHMARK_RESULTS.md](docs/TP2_BENCHMARK_RESULTS.md))
 - ❌ Pipeline parallelism (PP > 1) not supported
-- ❌ CUDAGraph optimization disabled (~10-15% ITL impact)
-- ⚠️ MoE router precision defaults to FP32 (BF16 experimental via `VLLM_LLADA2_BF16_ROUTER=1`)
-- ⚠️ torch.compile shows no performance benefit for mini model + single-request workload
+- ✅ CUDAGraph supported via UNIFORM_BATCH mode (model forward graph-captured, hooks run eagerly)
+- ✅ MoE routing delegated to FusedMoE (FP32 precision by default)
 
 See [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) for complete details and tracking issues.
 

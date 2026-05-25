@@ -159,31 +159,46 @@ class LLaDA2BlockAttention(nn.Module):
             cache_config.cache_dtype if cache_config is not None else "auto"
         )
 
-        # FlashInfer is required for non-causal paged attention.
-        # FA2's paged kernel ignores causal=False on A100 (SM80).
+        # Non-causal paged attention backend selection.
+        # FA2's paged kernel ignores causal=False on all architectures
+        # (flash-attn library limitation, not hardware).
+        _NONCAUSAL_BACKENDS = {"FlashInferBackend", "TritonBackend"}
         import os
 
         user_backend = os.environ.get("VLLM_ATTENTION_BACKEND")
-        try:
-            from vllm.v1.attention.backends.flashinfer import (
-                FlashInferBackend,
-            )
+        underlying_attn_backend = None
 
-            underlying_attn_backend = FlashInferBackend
-            if user_backend and user_backend.upper() != "FLASHINFER":
-                logger.warning(
-                    "LLaDA2 requires FlashInfer for non-causal "
-                    "attention. Ignoring VLLM_ATTENTION_BACKEND=%s",
-                    user_backend,
+        if user_backend:
+            try:
+                from vllm.v1.attention.backends.utils import get_attn_backend
+
+                candidate = get_attn_backend(head_size, dtype, kv_cache_dtype)
+                if type(candidate).__name__ in _NONCAUSAL_BACKENDS:
+                    underlying_attn_backend = candidate
+            except Exception:
+                pass
+
+        if underlying_attn_backend is None:
+            try:
+                from vllm.v1.attention.backends.flashinfer import (
+                    FlashInferBackend,
                 )
-        except ImportError:
-            raise ImportError(
-                "LLaDA2 requires FlashInfer for non-causal paged attention. "
-                "Install with: pip install flashinfer-python. "
-                "FA2's paged kernel ignores causal=False on A100 (SM80), "
-                "producing incorrect causal attention instead of bidirectional."
-            ) from None
-            underlying_attn_backend = get_attn_backend(head_size, dtype, kv_cache_dtype)
+
+                underlying_attn_backend = FlashInferBackend
+                if user_backend and user_backend.upper() not in ("FLASHINFER",):
+                    logger.warning(
+                        "LLaDA2 non-causal attention: %s not in allowlist %s, "
+                        "using FlashInfer. Set VLLM_ATTENTION_BACKEND=FLASHINFER "
+                        "to suppress this warning.",
+                        user_backend,
+                        _NONCAUSAL_BACKENDS,
+                    )
+            except ImportError:
+                raise ImportError(
+                    "LLaDA2 requires a non-causal paged attention backend. "
+                    "Supported: FlashInfer, Triton. "
+                    "Install FlashInfer: pip install flashinfer-python"
+                ) from None
 
         # Wrap it with bidirectional attention (causal=False) + block concatenation
         kv_cache_block_size = self._get_kv_cache_block_size()

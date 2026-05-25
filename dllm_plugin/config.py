@@ -112,6 +112,14 @@ LLADA2_DEFAULT_DENOISE_STEPS: Final[int] = DRAFT_SIZE
 #: default settings for stack tests.
 LLADA2_DEFAULT_COMMIT_CONFIDENCE_THRESHOLD: Final[float] = 0.9
 
+#: Gumbel-max temperature for stochastic sampling.  ``0.0`` = deterministic
+#: argmax (dInfer LLaDA2.0 default).  ``> 0`` enables Gumbel-max sampling
+#: with float64 precision per arXiv:2409.02908.
+LLADA2_DEFAULT_TEMPERATURE: Final[float] = 0.0
+
+#: Use float64 precision for softmax confidence computation.
+LLADA2_DEFAULT_USE_FLOAT64: Final[bool] = False
+
 # Phase 7: Real LLaDA2.0 model configuration (issue #12)
 
 #: Lazy import target for real LLaDA2.0 vLLM model (``<module>:<Class>``).

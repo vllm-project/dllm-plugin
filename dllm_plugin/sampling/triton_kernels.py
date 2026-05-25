@@ -150,13 +150,32 @@ def batched_remask_triton(
     input_draft: torch.Tensor,
     mask_token_id: int,
     threshold: float,
+    temperature: float = 0.0,
+    use_float64: bool = False,
+    out: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Fused Triton remasking — drop-in replacement for batched_remask().
 
     Two-kernel design:
       Kernel 1: online softmax + argmax per (batch, position)
       Kernel 2: cross-position threshold + commit per batch
+
+    Falls back to PyTorch for temperature > 0 (Gumbel noise requires
+    float64 stochastic ops that don't benefit from Triton fusion).
     """
+    if temperature > 0:
+        from dllm_plugin.sampling.diffusion_sampler import batched_remask
+
+        return batched_remask(
+            logits,
+            input_draft,
+            mask_token_id,
+            threshold,
+            temperature,
+            use_float64,
+            out,
+        )
+
     batch_size, block_size, vocab_size = logits.shape
     device = logits.device
 
@@ -179,7 +198,11 @@ def batched_remask_triton(
         out_batch_stride=argmax_out.stride(0),
     )
 
-    out_draft = input_draft.clone()
+    if out is not None:
+        out_draft = out
+        out_draft.copy_(input_draft)
+    else:
+        out_draft = input_draft.clone()
     all_done = torch.zeros(batch_size, dtype=torch.int32, device=device)
     num_transferred = torch.zeros(batch_size, dtype=torch.int32, device=device)
 

@@ -10,6 +10,7 @@ returns (DiffusionSampler, None) at model load time.
 from __future__ import annotations
 
 import logging
+import math
 from typing import TYPE_CHECKING, Any
 
 import torch
@@ -21,27 +22,45 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+_CONFIDENCE_FLOOR = -1000.0
+_THRESHOLD_EPSILON = 1e-5
+
+
+def add_gumbel_noise(logits: torch.Tensor, temperature: float) -> torch.Tensor:
+    """Gumbel-max categorical sampling (dInfer ``decoding/utils.py``).
+
+    Float64 precision per arXiv:2409.02908.  No-op when temperature is 0.
+    """
+    if math.isclose(temperature, 0.0):
+        return logits
+    logits = logits.to(torch.float64)
+    noise = torch.rand_like(logits, dtype=torch.float64)
+    gumbel_noise = (-torch.log(noise)) ** temperature
+    return logits.exp() / gumbel_noise
+
+
 def batched_remask(
     logits: torch.Tensor,
     input_draft: torch.Tensor,
     mask_token_id: int,
     threshold: float,
+    temperature: float = 0.0,
+    use_float64: bool = False,
+    out: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Batched remasking on GPU.
 
-    Args:
-        logits: [batch, block_size, vocab_size] — model output logits
-        input_draft: [batch, block_size] — current draft token IDs
-        mask_token_id: token ID for masked positions
-        threshold: softmax probability threshold for committing
-
-    Returns:
-        draft: [batch, block_size] — updated draft (committed + masked)
-        all_done: [batch] — True if all positions resolved
-        num_transferred: [batch] — number of newly committed positions
+    Matches dInfer's ``get_transfer_index_threshold``: Gumbel noise is
+    applied to logits before argmax (stochastic token selection) while
+    confidence is computed from CLEAN logits (no noise).
     """
-    probs = torch.softmax(logits.float(), dim=-1)
-    x0 = torch.argmax(logits.float(), dim=-1)
+    logits_with_noise = add_gumbel_noise(logits, temperature)
+    x0 = torch.argmax(logits_with_noise.float(), dim=-1)
+
+    if use_float64:
+        probs = torch.softmax(logits.to(torch.float64), dim=-1)
+    else:
+        probs = torch.softmax(logits.float(), dim=-1)
     x0_p = torch.gather(probs, dim=-1, index=x0.unsqueeze(-1)).squeeze(-1)
 
     is_masked = input_draft == mask_token_id
@@ -52,11 +71,17 @@ def batched_remask(
     confidence = torch.where(is_masked, x0_p, neg_inf)
 
     actual_threshold = (
-        (torch.max(confidence, dim=-1)[0] - 1e-5).clamp(-1000, threshold).unsqueeze(-1)
+        (torch.max(confidence, dim=-1)[0] - _THRESHOLD_EPSILON)
+        .clamp(_CONFIDENCE_FLOOR, threshold)
+        .unsqueeze(-1)
     )
     transfer = confidence >= actual_threshold
 
-    draft = input_draft.clone()
+    if out is not None:
+        draft = out
+        draft.copy_(input_draft)
+    else:
+        draft = input_draft.clone()
     draft[transfer] = x0[transfer]
 
     all_done = (draft != mask_token_id).all(dim=-1)
@@ -88,6 +113,8 @@ class DiffusionSampler:
         threshold: float,
         max_denoise_iters: int,
         slot_width: int,
+        temperature: float = 0.0,
+        use_float64: bool = False,
     ) -> None:
         self._base_sampler = base_sampler
         self.model_state = model_state
@@ -97,6 +124,8 @@ class DiffusionSampler:
         self._threshold = threshold
         self._max_denoise_iters = max_denoise_iters
         self._slot_width = slot_width
+        self._temperature = temperature
+        self._use_float64 = use_float64
 
         try:
             from dllm_plugin.sampling.triton_kernels import batched_remask_triton
@@ -129,25 +158,34 @@ class DiffusionSampler:
     def _bootstrap(
         self, logits: torch.Tensor, input_batch: InputBatch
     ) -> SamplerOutput:
-        """Prefill/bootstrap: initialize draft block for each request."""
+        """Prefill/bootstrap: write prompt tail into draft block.
+
+        The draft block is already initialized to all-masks by
+        ``LLaDA2ModelState.add_request()``.  This method only overwrites
+        the prompt-tail prefix positions, avoiding a redundant full-block
+        recomputation.
+        """
         from vllm.v1.outputs import DraftTokenIds
         from vllm.v1.worker.gpu.sample.output import SamplerOutput
 
         ms = self.model_state
-        mask_id = self._mask_id
-        next_blocks: list[list[int]] = []
         for req_id in input_batch.req_ids:
-            tail = ms._prompt_tail_ids.get(req_id, [])
-            n_masks = self._draft_size - len(tail)
-            block = list(tail) + [mask_id] * n_masks
-            next_blocks.append(block)
-            # Also write to the persistent draft block tensor
             slot = ms._slot_map.get(req_id)
-            if slot is not None:
-                ms._draft_block[slot] = torch.tensor(
-                    block, dtype=ms._draft_block.dtype, device=self.device
+            if slot is None:
+                continue
+            tail = ms._prompt_tail_ids.get(req_id, [])
+            if tail:
+                n = len(tail)
+                ms._draft_block[slot, :n] = torch.tensor(
+                    tail, dtype=ms._draft_block.dtype, device=self.device
                 )
-                ms._draft_block_valid[slot] = True
+            ms._draft_block_valid[slot] = True
+
+        all_slots = [
+            ms._slot_map[rid] for rid in input_batch.req_ids if rid in ms._slot_map
+        ]
+        all_slots_t = torch.tensor(all_slots, dtype=torch.long, device=self.device)
+        next_blocks = ms._draft_block[all_slots_t].cpu().tolist()
 
         ms._pending_draft_ids = DraftTokenIds(
             req_ids=list(input_batch.req_ids),
@@ -209,23 +247,25 @@ class DiffusionSampler:
         batch_logits = torch.stack(block_logits_list)
         batch_draft = ms._draft_block[slots]
 
-        # Lazy init of prompt_len from first denoising step
-        for idx, _i in enumerate(decode_indices):
-            slot = slots[idx].item()
-            if ms._prompt_len_t[slot] == 0 and ms._draft_block_valid[slot]:
-                draft = batch_draft[idx]
-                leading = (draft != mask_id).long()
-                first_mask = (leading == 0).long().argmax().item()
-                if first_mask == 0 and draft[0] == mask_id:
-                    ms._prompt_len_t[slot] = 0
-                else:
-                    ms._prompt_len_t[slot] = first_mask
+        # Lazy init of prompt_len: vectorized across all decode requests.
+        # prompt_len = index of first mask token in draft block.
+        needs_init = (ms._prompt_len_t[slots] == 0) & ms._draft_block_valid[slots]
+        if needs_init.any():
+            is_non_mask = (batch_draft != mask_id).long()
+            first_mask_pos = (is_non_mask == 0).long().argmax(dim=-1)
+            starts_with_mask = batch_draft[:, 0] == mask_id
+            computed_lens = torch.where(starts_with_mask, 0, first_mask_pos).int()
+            ms._prompt_len_t[slots] = torch.where(
+                needs_init, computed_lens, ms._prompt_len_t[slots]
+            )
 
         updated, all_done, _ = self._remask_fn(
             logits=batch_logits,
             input_draft=batch_draft,
             mask_token_id=mask_id,
             threshold=self._threshold,
+            temperature=self._temperature,
+            use_float64=self._use_float64,
         )
 
         # --- Vectorized convergence on GPU ---
@@ -255,38 +295,44 @@ class DiffusionSampler:
         zeros = torch.zeros_like(committed_counts)
         num_sampled = torch.where(commit, committed_counts, zeros)
 
-        # Build sampled output — map decode-local indices to batch indices
-        num_decode = len(decode_indices)
+        # Build sampled output — vectorized with a single sync point.
         sampled = torch.full(
             (num_reqs, width), -1, dtype=torch.int64, device=self.device
         )
         full_num_sampled = torch.zeros(num_reqs, dtype=torch.int32, device=self.device)
 
-        if commit.any().item():
-            for di in range(num_decode):
-                if not commit[di].item():
-                    continue
+        decode_batch_idx = torch.tensor(
+            decode_indices, dtype=torch.long, device=self.device
+        )
+
+        # Ready commits: for each ready request, write tokens after prompt_len
+        # into sampled at the corresponding batch index.
+        # Single sync: get indices of committing requests.
+        commit_di = torch.nonzero(commit, as_tuple=False).squeeze(-1)
+        if commit_di.numel() > 0:
+            commit_di_cpu = commit_di.cpu().tolist()
+            ready_cpu = ready[commit_di].cpu().tolist()
+            prompt_lens_cpu = prompt_lens[commit_di].cpu().tolist()
+
+            for k, di in enumerate(commit_di_cpu):
                 bi = decode_indices[di]
-                if ready[di].item():
-                    n_prompt = prompt_lens[di].item()
+                if ready_cpu[k]:
+                    n_prompt = prompt_lens_cpu[k]
                     row = updated[di, n_prompt:]
-                    n = row.shape[0]
-                    sampled[bi, :n] = row
+                    sampled[bi, : row.shape[0]] = row
                 else:
                     row = updated[di]
                     non_mask = row[row != mask_id]
-                    n = non_mask.shape[0]
-                    sampled[bi, :n] = non_mask
+                    sampled[bi, : non_mask.shape[0]] = non_mask
 
-            commit_slots = slots[commit]
-            ms._denoise_step_t[commit_slots] = 0
-            ms._kv_refresh_t[commit_slots] = False
-            ms._prompt_len_t[commit_slots] = 0
+        # Reset state for committed requests (vectorized)
+        commit_slots = slots[commit]
+        ms._denoise_step_t[commit_slots] = 0
+        ms._kv_refresh_t[commit_slots] = False
+        ms._prompt_len_t[commit_slots] = 0
 
-        # Write num_sampled for decode requests at their batch positions
-        for di in range(num_decode):
-            bi = decode_indices[di]
-            full_num_sampled[bi] = num_sampled[di]
+        # Write num_sampled (vectorized)
+        full_num_sampled[decode_batch_idx] = num_sampled
 
         # Update persistent draft block for decode requests
         ms._draft_block[slots] = torch.where(

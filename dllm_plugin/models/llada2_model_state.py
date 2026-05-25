@@ -71,6 +71,10 @@ class LLaDA2ModelState(ModelState):
             diff_cfg.max_denoise_steps if diff_cfg else 2 * DRAFT_SIZE
         )
         self._slot_width = diff_cfg.num_speculative_tokens if diff_cfg else DRAFT_SIZE
+        self._temperature = getattr(diff_cfg, "temperature", 0.0) if diff_cfg else 0.0
+        self._use_float64 = (
+            getattr(diff_cfg, "use_float64", False) if diff_cfg else False
+        )
 
         # GPU-resident per-request state, indexed by slot.
         max_reqs = vllm_config.scheduler_config.max_num_seqs
@@ -99,6 +103,7 @@ class LLaDA2ModelState(ModelState):
         self._scheduled_spec_decode_tokens: dict[str, tuple[int, ...]] = {}
         self._pending_draft_ids: DraftTokenIds | None = None
         self._prefix_lengths: list[int] | None = None
+        self._warned_multi_req_recomp: bool = False
 
     def get_supported_generation_tasks(self) -> tuple[GenerationTask, ...]:
         return ("generate",)
@@ -177,7 +182,7 @@ class LLaDA2ModelState(ModelState):
             if self._prefix_lengths:
                 for pl in self._prefix_lengths:
                     if 0 < pl < self._draft_size:
-                        if not getattr(self, "_warned_multi_req_recomp", False):
+                        if not self._warned_multi_req_recomp:
                             self._warned_multi_req_recomp = True
                             logger.warning(
                                 "First-block recomputation requires num_reqs=1 "
@@ -268,6 +273,8 @@ class LLaDA2ModelState(ModelState):
                 threshold=self._threshold,
                 max_denoise_iters=self._max_denoise_iters,
                 slot_width=self._slot_width,
+                temperature=self._temperature,
+                use_float64=self._use_float64,
             )
         return (self._diffusion_sampler, None)
 

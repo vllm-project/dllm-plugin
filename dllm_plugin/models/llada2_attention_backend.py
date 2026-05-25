@@ -48,10 +48,14 @@ def create_llada2_bidirectional_attention_backend(
 
         @classmethod
         def get_cudagraph_support(cls, vllm_config, kv_cache_spec):
-            """UNIFORM_BATCH: the model forward is graph-captured while
-            attention metadata (virtual batch, slot remap) runs in eager
-            mode. Block diffusion decode steps have constant batch shape
-            (1 request, DRAFT_SIZE tokens) compatible with graph replay.
+            """UNIFORM_BATCH: only model.forward() is graph-captured.
+
+            ModelState hooks (before_step, prepare_inputs, prepare_attn)
+            and DiffusionSampler all run in eager mode before/after graph
+            replay.  Python dicts and torch.tensor() calls in those eager
+            hooks are acceptable.  Block diffusion decode steps have
+            constant batch shape (1 request, DRAFT_SIZE tokens) compatible
+            with graph replay.
             """
             from vllm.v1.attention.backend import AttentionCGSupport
 

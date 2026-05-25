@@ -11,7 +11,7 @@ decision agree, the implementations are functionally equivalent.
 import pytest
 import torch
 
-from dllm_plugin.sampling.diffusion_sampler import batched_remask
+from dllm_plugin.sampling.diffusion_sampler import add_gumbel_noise, batched_remask
 
 pytestmark = [
     pytest.mark.skipif(not torch.cuda.is_available(), reason="Triton requires CUDA"),
@@ -145,3 +145,53 @@ class TestTritonRemaskEquivalence:
         ref = batched_remask(logits, draft, MASK_ID, 0.99)
         tri = triton_fn(logits, draft, MASK_ID, 0.99)
         _assert_equivalent(ref, tri, "high_threshold")
+
+    def test_temperature_zero_backward_compat(self):
+        """temperature=0.0 must produce identical results to no-temp call."""
+        triton_fn = _try_import_triton()
+        logits, draft = _random_inputs(2, seed=42)
+        ref = batched_remask(logits, draft, MASK_ID, THRESHOLD)
+        ref_t0 = batched_remask(logits, draft, MASK_ID, THRESHOLD, temperature=0.0)
+        tri_t0 = triton_fn(logits, draft, MASK_ID, THRESHOLD, temperature=0.0)
+        _assert_equivalent(ref, ref_t0, "temp0_vs_default")
+        _assert_equivalent(ref, tri_t0, "temp0_triton_vs_default")
+
+    def test_temperature_positive_falls_back(self):
+        """temperature>0 on Triton wrapper must fall back to PyTorch."""
+        triton_fn = _try_import_triton()
+        logits, draft = _random_inputs(1, seed=55)
+        torch.manual_seed(123)
+        ref = batched_remask(logits, draft, MASK_ID, THRESHOLD, temperature=1.0)
+        torch.manual_seed(123)
+        tri = triton_fn(logits, draft, MASK_ID, THRESHOLD, temperature=1.0)
+        _assert_equivalent(ref, tri, "temp1_fallback")
+
+
+class TestGumbelNoise:
+    def test_zero_temperature_is_identity(self):
+        logits = torch.randn(2, BLOCK_SIZE, VOCAB_SIZE, device="cuda")
+        result = add_gumbel_noise(logits, 0.0)
+        assert result is logits
+
+    def test_nonzero_temperature_changes_argmax(self):
+        torch.manual_seed(42)
+        logits = torch.randn(1, BLOCK_SIZE, VOCAB_SIZE, device="cuda")
+        base_argmax = torch.argmax(logits, dim=-1)
+        noised = add_gumbel_noise(logits, 1.0)
+        noised_argmax = torch.argmax(noised.float(), dim=-1)
+        assert not torch.equal(base_argmax, noised_argmax)
+
+    def test_uses_float64(self):
+        logits = torch.randn(1, 4, 100, device="cuda")
+        result = add_gumbel_noise(logits, 0.5)
+        assert result.dtype == torch.float64
+
+    def test_clean_confidence_differs_from_noised(self):
+        """Confidence should come from clean logits, not noised."""
+        logits = torch.randn(1, BLOCK_SIZE, VOCAB_SIZE, device="cuda")
+        draft = torch.full((1, BLOCK_SIZE), MASK_ID, dtype=torch.int64, device="cuda")
+        torch.manual_seed(99)
+        d1, _, _ = batched_remask(logits, draft, MASK_ID, THRESHOLD, temperature=1.0)
+        torch.manual_seed(99)
+        d2, _, _ = batched_remask(logits, draft, MASK_ID, THRESHOLD, temperature=0.0)
+        assert not torch.equal(d1, d2)

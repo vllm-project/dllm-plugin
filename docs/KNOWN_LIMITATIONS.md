@@ -40,78 +40,42 @@ new requests in batches with `max_num_seqs > 1`.
 
 ## P0 - Critical Limitations (User-Facing Impact)
 
-### 1. MoE Router Numerical Precision (FP32 Default, BF16 Opt-In)
+### 1. MoE Router Numerical Precision
 
-**Status:** Phase 7 defaults to FP32 router (safe) with BF16 experimental opt-in via `VLLM_LLADA2_BF16_ROUTER=1`.
+**Status:** Resolved. MoE routing is now delegated to vLLM's `FusedMoE`,
+which handles router precision internally (FP32 by default, following
+DeepSeek V3 and Qwen2-MoE patterns).
 
-**Default Behavior (FP32 Router):**
-- Router computation uses FP32 precision following DeepSeek V3 and Qwen2-MoE patterns
-- Sigmoid activation computed in FP32 then cast back to input dtype
-- Validated pattern from other vLLM MoE models
+The previous `VLLM_LLADA2_BF16_ROUTER` env var has been removed — it was
+specific to the manual routing implementation that was replaced by FusedMoE
+delegation. FusedMoE uses `scoring_func="sigmoid"` with FP32 precision for
+the gate computation, matching the validated pattern from other vLLM MoE
+models.
 
-**Experimental BF16 Mode:**
-Set `VLLM_LLADA2_BF16_ROUTER=1` to use BF16 router (faster but unvalidated):
-- Router computation uses same dtype as hidden_states (typically BF16)
-- Potential risks:
-  - Expert selection bias if sigmoid saturates in low precision
-  - Routing entropy loss if scores collapse or lose precision  
-  - Silent correctness degradation (no NaN/inf failure mode)
-- Logs warning at first use
-
-**Why BF16 is unvalidated:**
-- No comparison against FP32 router baseline in production workloads
-- No validation against HuggingFace reference implementation
-- Sigmoid (vs softmax) stability in BF16 is untested for group-limited routing
-
-**Comparison to other models:**
-- DeepSeek V3: FP32 router required (vllm PR #14027) due to softmax precision issues
-- Qwen2-MoE: FP32 gating (vllm/models/qwen2_moe.py:167)
-- LLaDA2.0: FP32 default (this implementation), BF16 experimental
-
-**Validation Plan (Phase 9, issue #39):**
-1. Compare BF16 vs FP32 router expert selection distributions
-2. Measure KL divergence between BF16 and FP32 routing decisions  
-3. Validate against SGlang or HuggingFace reference (if available)
-4. Run lm-eval benchmarks to detect quality degradation
-
-**Impact:** 
-- FP32 default: Safe, validated pattern, slight compute overhead
-- BF16 experimental: Faster but may produce subtly incorrect outputs due to expert mis-routing
-
-**Recommendation:** Use default FP32 for production. Only enable BF16 for experimentation with careful validation.
-
-**Tracking:** Issue #39 (Phase 9 numerical validation will determine if BF16 is safe)
+**Tracking:** Issue #42 criterion resolved by FusedMoE delegation
 
 ---
 
-### 2. CUDAGraph Optimization Disabled (Issue #40)
+### 2. CUDAGraph Support (UNIFORM_BATCH mode)
 
-**Status:** CUDAGraph support explicitly disabled in Phase 7 MVP.
+**Status:** CUDAGraph is supported via `UNIFORM_BATCH` mode. The model
+forward pass is graph-captured; all ModelState hooks (`before_step()`,
+`prepare_inputs()`, `prepare_attn()`) and `DiffusionSampler` run in eager
+mode before/after graph replay.
 
-**Reason:** LLaDA2.0's dual-chunk attention creates runtime-dependent metadata (heterogeneous prefix lengths), which breaks CUDAGraph's static graph assumption.
+Block diffusion decode steps have constant batch shape (1 request, 32
+tokens), which is compatible with graph replay. Python dicts and
+`torch.tensor()` calls in eager hooks do not break graph capture.
 
-**Performance Impact:** ~10-15% higher inter-token latency (ITL) vs CUDAGraph-enabled models:
-- Most vLLM models achieve 10-30% ITL reduction via CUDAGraph
-- LLaDA2.0 currently recreates attention metadata on every forward pass
-- Decode phase could benefit most from static CUDAGraph optimization
-
-**Why disabled:**
-1. Forward-time metadata creation has dynamic shapes (per-request prefix lengths)
-2. CUDAGraph requires static metadata and static shapes
-3. Upstream chunked_local_attention also disables CUDAGraph for similar reasons
-
-**Comparison to other models:**
-- Mixtral: ✅ CUDAGraph supported
-- Qwen2-MoE: ✅ CUDAGraph supported
-- DeepSeek V3: ✅ CUDAGraph supported
-- LLaDA2.0: ❌ Disabled due to virtual batch metadata
-
-**Investigation Plan (Post-MVP):**
-1. Explore build-time metadata approach (vs current forward-time)
-2. Evaluate static metadata for decode phase (prefix lengths fixed after prefill)
-3. Consider two-path optimization: CUDAGraph for decode, dynamic for prefill
-
-**Workaround:** Use torch.compile (if beneficial) or accept ITL overhead.
+**`@support_torch_compile` removal:** The `@support_torch_compile` decorator
+was intentionally removed from `LLaDA2ForCausalLM` because block diffusion
+requires variable attention metadata per step (slot_mapping remap, seq_lens
+override, prefix_lengths) which is incompatible with full `torch.compile`
+graph capture. Phase 8 A/B benchmarks showed no measurable performance
+benefit. This is aligned with upstream vLLM direction. For reference, dInfer
+applies `torch.compile` to `model.forward` and `get_transfer_index_threshold`
+separately (`serving.py:370`, `parallel_strategy.py:353`); the plugin's
+`UNIFORM_BATCH` CUDAGraph approach is the vLLM-native equivalent.
 
 **Long-term Fix:** Tracked in issue #40 for Phase 8.4+ optimization.
 
