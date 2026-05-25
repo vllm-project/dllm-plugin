@@ -14,9 +14,8 @@ from dllm_plugin.scheduler import DllmScheduler
 from dllm_plugin.worker import DllmWorker
 
 # Do **not** import ``runtime_scheduler`` / ``runtime_worker`` at package import time.
-# Their top-level ``vllm`` imports must run only after submodules such as
-# ``dllm_plugin.gpu_model_runner`` have finished loading; eager imports here
-# caused circular import failures for GPU integration tests.
+# Their top-level ``vllm`` imports must run only after submodules have finished
+# loading; eager imports here caused circular import failures.
 
 
 def __getattr__(name: str):
@@ -75,12 +74,9 @@ def register_dllm() -> None:
     DEBUG with ``exc_info`` and returns. (``find_spec`` can succeed when a full
     ``import vllm`` would still fail.)
 
-    When ``VLLM_DLLM_APPLY_ENGINE_CORE_DRAFT_HOOK`` is truthy, calls
-    ``apply_engine_core_draft_hook_patch_if_needed()`` after registration (see
-    ``dllm_plugin.engine_core_draft_hook``). The skip env
-    ``VLLM_DLLM_SKIP_ENGINE_CORE_DRAFT_HOOK_PATCH`` is enforced **inside** that
-    helper (no-op), not by omitting the call—so with both envs set, ``apply_*``
-    still runs and returns without patching.
+    When running against the vLLM fork (dllm-fork branch), no runtime patches
+    are needed — the fork handles chunked prefill, prefix caching, the draft
+    hook gate, and non-causal attention natively.
     """
     _logger.debug("dLLM plugin: register_dllm() called")
 
@@ -171,16 +167,6 @@ def register_dllm() -> None:
             "dLLM plugin: architecture %r already registered, skipping",
             DLLM_MOCK_STACK_MODEL_ID,
         )
-
-    from dllm_plugin.config import DLLM_APPLY_ENGINE_CORE_DRAFT_HOOK_ENV_VAR
-
-    _apply_raw = os.environ.get(DLLM_APPLY_ENGINE_CORE_DRAFT_HOOK_ENV_VAR, "")
-    if _apply_raw.strip().lower() in {"1", "true", "yes", "on"}:
-        from dllm_plugin.engine_core_draft_hook import (
-            apply_engine_core_draft_hook_patch_if_needed,
-        )
-
-        apply_engine_core_draft_hook_patch_if_needed()
 
 
 __all__ = [

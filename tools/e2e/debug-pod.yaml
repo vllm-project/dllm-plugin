@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mrv2-debug
+  labels:
+    app: dllm-plugin
+    test: mrv2-debug
+spec:
+  activeDeadlineSeconds: 7200
+  restartPolicy: Never
+  nodeSelector:
+    cloud.google.com/gke-accelerator: nvidia-tesla-a100
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+    - key: jounce.io/nodetype
+      operator: Equal
+      value: A100-40
+      effect: NoSchedule
+  containers:
+    - name: debug
+      image: vllm/vllm-openai:v0.20.2
+      imagePullPolicy: IfNotPresent
+      resources:
+        limits:
+          nvidia.com/gpu: 1
+        requests:
+          cpu: "8"
+          memory: 64Gi
+          ephemeral-storage: 80Gi
+          nvidia.com/gpu: 1
+      env:
+        - name: VLLM_PLUGINS
+          value: dllm
+        - name: VLLM_USE_V2_MODEL_RUNNER
+          value: "1"
+        - name: VLLM_ENABLE_V1_MULTIPROCESSING
+          value: "0"
+        - name: HF_HOME
+          value: /tmp/hf_cache
+      command: ["sleep", "7200"]

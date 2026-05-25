@@ -67,13 +67,14 @@ markers = [
     "dllm_engine_patch: CPU tests for EngineCore PR #36391 shim (requires vLLM extra).",
     "dllm_gpu_integration: GPU behavioral tests for dLLM stack (issue #35).",
     "dllm_gpu_benchmark: GPU benchmark tests for LLaDA2.0 performance (requires --run-benchmarks).",
+    "dllm_numerical_validation: Phase 9.1 numerical accuracy validation tests (GPU required, issue #42).",
     "real_model_required: Tests requiring real HuggingFace model download (Phase 7 evidence).",
 ]
 
 [tool.ruff]
 line-length = 88
 target-version = "py310"
-extend-exclude = [".venv", "venv", "build", "dist"]
+extend-exclude = [".venv", "venv", "build", "dist", "vllm_upstream_reference"]
 
 [tool.ruff.lint]
 select = [
@@ -100,4 +101,4 @@ docstring-code-format = true
 [tool.ty.analysis]
 # Dev/CI default sync omits ``torch``/``vllm``/``transformers``; imports are runtime-gated or skipped in tests.
 # ``guidellm`` is optional for benchmarking (tools/k8s/).
-allowed-unresolved-imports = ["numpy.**", "torch.**", "vllm.**", "huggingface_hub.**", "transformers.**", "requests.**", "guidellm.**"]
+allowed-unresolved-imports = ["numpy.**", "torch.**", "vllm.**", "huggingface_hub.**", "transformers.**", "requests.**", "guidellm.**", "dinfer.**", "safetensors.**", "triton.**", "uvicorn.**", "fastapi.**", "pydantic.**"]

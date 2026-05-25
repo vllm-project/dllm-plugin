@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from dllm_plugin.config import DRAFT_SIZE, LLADA2_DEFAULT_MASK_TOKEN_ID
+from dllm_plugin.config import DRAFT_SIZE
 from dllm_plugin.remasking import (
     Llada2DefaultRemaskingPolicy,
     RemaskStepResult,
@@ -26,7 +26,7 @@ from dllm_plugin.remasking import (
 
 
 def _draft_all_mask() -> tuple[int, ...]:
-    return (LLADA2_DEFAULT_MASK_TOKEN_ID,) * DRAFT_SIZE
+    return (1,) * DRAFT_SIZE
 
 
 def _mock_stub_row(*, vocab_size: int = 256) -> list[float]:
@@ -101,14 +101,17 @@ def test_mock_shaped_logits_terminal_matches_direct_policy_apply(
 ) -> None:
     draft = _draft_all_mask()
     logits = _mock_logits(vocab_size=256)
+    _cfg = {"mask_token_id": 1, "commit_confidence_threshold": 0.01}
     direct = llada2_policy.apply(
         input_draft=draft,
         logits=logits,
+        remasking_config=_cfg,
     )
     via = remask_after_block_forward(
         input_draft=draft,
         logits=logits,
         policy=llada2_policy,
+        remasking_config=_cfg,
     )
     validate_remask_step_result(via)
     assert via == direct
@@ -131,7 +134,11 @@ def test_remasking_config_forwarded_to_policy(
 ) -> None:
     draft = _draft_all_mask()
     logits = _mock_logits()
-    cfg = {"num_transfer": 1}
+    cfg: dict[str, object] = {
+        "num_transfer": 1,
+        "mask_token_id": 1,
+        "commit_confidence_threshold": 0.01,
+    }
     direct = llada2_policy.apply(
         input_draft=draft,
         logits=logits,
@@ -155,15 +162,18 @@ def test_torch_tensor_logits_matches_list_path(
     logits_t = torch.zeros(DRAFT_SIZE, vocab, dtype=torch.float32)
     logits_t[:, 0] = 1.0
     logits_list = _mock_logits(vocab_size=vocab)
+    _cfg = {"mask_token_id": 1, "commit_confidence_threshold": 0.01}
     out_t = remask_after_block_forward(
         input_draft=draft,
         logits=logits_t,
         policy=llada2_policy,
+        remasking_config=_cfg,
     )
     out_list = remask_after_block_forward(
         input_draft=draft,
         logits=logits_list,
         policy=llada2_policy,
+        remasking_config=_cfg,
     )
     assert out_t == out_list
 

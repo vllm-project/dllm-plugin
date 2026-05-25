@@ -244,11 +244,13 @@ class Llada2DefaultRemaskingPolicy:
             next_tokens[i] = token_ids[i]
 
         if mask_token_id not in next_tokens:
+            # Block fully resolved — commit all 32 tokens at once
             result = RemaskStepResult(
                 committed_token_ids=tuple(next_tokens),
                 next_input_block=(mask_token_id,) * DRAFT_SIZE,
             )
         else:
+            # Masks remain — Commit-0: return empty committed, iterate
             result = RemaskStepResult(
                 committed_token_ids=(),
                 next_input_block=tuple(next_tokens),

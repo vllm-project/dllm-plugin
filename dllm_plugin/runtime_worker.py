@@ -282,9 +282,6 @@ class DllmRuntimeWorker(VllmGPUWorker):
             )
         super().__init__(*args, **kwargs)
         assert_compatible_stack(self.vllm_config, caller="DllmRuntimeWorker.__init__")
-        # Align with ``DllmWorker`` / ``is_v2_model_runner_enabled()`` (env), so tests
-        # that monkeypatch ``VLLM_USE_V2_MODEL_RUNNER`` get ``ValueError`` from the
-        # assert below instead of ``RuntimeError`` from ``DllmWorker``.
         effective_v2 = bool(self.use_v2_model_runner) and is_v2_model_runner_enabled()
         assert_runtime_worker_v2_model_runner(
             use_v2_model_runner=effective_v2,
@@ -292,48 +289,25 @@ class DllmRuntimeWorker(VllmGPUWorker):
         )
         self._dllm_helper = DllmWorker(require_v2_model_runner=effective_v2)
 
-    @instrument(span_name="Init device")
-    def init_device(self) -> None:
-        """Install :class:`~dllm_plugin.gpu_model_runner.DllmGPUModelRunner` for v2."""
-        super().init_device()
-        if getattr(self, "use_v2_model_runner", False):
-            from dllm_plugin.gpu_model_runner import DllmGPUModelRunner
-
-            self.model_runner = DllmGPUModelRunner(self.vllm_config, self.device)
-
     def take_draft_token_ids(self) -> DraftTokenIds | None:
-        """Prefer dLLM runner hook ``take_dllm_draft_token_ids`` when present.
-
-        Upstream spec decode uses ``model_runner.take_draft_token_ids``; dLLM blocks use
-        runner ``take_dllm_draft_token_ids`` when implemented (see gpu_model_runner).
-        """
-        mr = self.model_runner
-        take_dllm = getattr(mr, "take_dllm_draft_token_ids", None)
-        if callable(take_dllm):
-            draft_token_ids = take_dllm()
-            if draft_token_ids is not None:
-                for req_id, next_block in zip(
-                    draft_token_ids.req_ids,
-                    draft_token_ids.draft_token_ids,
-                    strict=True,
-                ):
-                    self._dllm_helper.take_draft_token_ids(
-                        DllmWorkerStep(
-                            request_id=req_id,
-                            sampled_token_ids=(),
-                            next_input_block=tuple(next_block),
-                        ),
-                    )
-                return draft_token_ids
+        """Delegate to model_runner which checks ModelState.take_draft_token_ids()."""
         draft_token_ids = super().take_draft_token_ids()
+        if draft_token_ids is not None:
+            for req_id, next_block in zip(
+                draft_token_ids.req_ids,
+                draft_token_ids.draft_token_ids,
+                strict=True,
+            ):
+                self._dllm_helper.take_draft_token_ids(
+                    DllmWorkerStep(
+                        request_id=req_id,
+                        sampled_token_ids=(),
+                        next_input_block=tuple(next_block),
+                    ),
+                )
         return draft_token_ids
 
 
 __all__ = [
     "DllmRuntimeWorker",
-    "build_mock_model_block_logits",
-    "resolve_runtime_block_logits",
-    "run_block_contract_from_model_output",
-    "validate_runtime_draft_handoff_coverage",
-    "validate_runtime_input_draft",
 ]

@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: Apache-2.0
+# Phase 9.1 Numerical Validation configuration for A100-40GB deployment
+# Runs layer-by-layer numerical correctness validation tests
+#
+# Usage:
+#   helm install llada2-numerical-validation tools/helm/dllm-plugin-gpu-test \
+#     -f tools/helm/dllm-plugin-gpu-test/values-numerical-validation-a100.yaml
+
+job:
+  ttlSecondsAfterFinished: 7200  # Keep results for 2 hours
+  backoffLimit: 0
+
+image:
+  repository: pytorch/pytorch
+  tag: 2.6.0-cuda12.4-cudnn9-devel
+  pullPolicy: IfNotPresent
+
+git:
+  repoUrl: https://github.com/vllm-project/dllm-plugin.git
+  branch: main  # Use main branch
+
+gpu:
+  count: 1
+
+# Numerical validation tests (Phase 2 Basic Validation)
+tests:
+  runServeHttpSmoke: false
+  pytestPaths:
+    # Tolerance framework validation (should pass on any platform)
+    - tests/test_numerical_utils.py
+    # Phase 9.1 numerical validation tests (GPU required)
+    # Start with E2E tests, then embedding, then LM head
+    - tests/test_llada2_numerical_validation.py::TestE2EValidation::test_e2e_single_token
+    - tests/test_llada2_numerical_validation.py::TestE2EValidation::test_e2e_short_sequence
+    - tests/test_llada2_numerical_validation.py::TestE2EValidation::test_e2e_full_block
+    - tests/test_llada2_numerical_validation.py::TestE2EValidation::test_e2e_multi_block
+    - tests/test_llada2_numerical_validation.py::TestEmbeddingValidation::test_embedding_exact_match
+    - tests/test_llada2_numerical_validation.py::TestLMHeadValidation::test_lm_head_logits
+  pytestArgs: "-v -s --tb=short"  # Verbose, no capture, short traceback
+
+# A100-40GB node pool configuration
+scheduling:
+  nodeSelector:
+    cloud.google.com/gke-accelerator: nvidia-tesla-a100
+  extraTolerations:
+    - key: jounce.io/nodetype
+      operator: Equal
+      value: A100-40
+      effect: NoSchedule
+
+resources:
+  cpu: "8"
+  memory: 64Gi
+  ephemeralStorage: 80Gi
+
+# Numerical validation test settings
+testEnv:
+  DLLM_TEST_GPU_MEMORY_UTILIZATION: "0.9"
+  # Enable detailed error output
+  PYTEST_CURRENT_TEST: ""
+  # Disable CUDA launch blocking for faster execution (deterministic anyway)
+  CUDA_LAUNCH_BLOCKING: "0"

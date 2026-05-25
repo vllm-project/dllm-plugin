@@ -27,7 +27,7 @@ class TestGPUCapabilities:
     """Test GPUCapabilities dataclass methods."""
 
     def test_a100_capabilities(self) -> None:
-        """A100 (8.0) supports CUTLASS and torch.compile, but not H100+ features."""
+        """A100 (8.0) supports CUTLASS but not H100+ features."""
         gpu = GPUCapabilities(
             compute_capability=(8, 0),
             device_name="NVIDIA A100-SXM4-40GB",
@@ -35,7 +35,7 @@ class TestGPUCapabilities:
         )
 
         assert gpu.supports_cutlass_moe() is True
-        assert gpu.supports_torch_compile() is True
+
         assert gpu.supports_flashinfer_fused_topk() is False
         assert gpu.supports_fp8_efficient() is False
         assert gpu.supports_trtllm_moe() is False
@@ -50,7 +50,7 @@ class TestGPUCapabilities:
         )
 
         assert gpu.supports_cutlass_moe() is True
-        assert gpu.supports_torch_compile() is True
+
         assert gpu.supports_flashinfer_fused_topk() is True
         assert gpu.supports_fp8_efficient() is True
         assert gpu.supports_trtllm_moe() is True
@@ -65,21 +65,20 @@ class TestGPUCapabilities:
         )
 
         assert gpu.supports_cutlass_moe() is True
-        assert gpu.supports_torch_compile() is True
+
         assert gpu.supports_flashinfer_fused_topk() is True
         assert gpu.supports_fp8_efficient() is True
         assert gpu.supports_trtllm_moe() is True
         assert gpu.recommended_moe_backend() == "trtllm"
 
     def test_v100_capabilities(self) -> None:
-        """V100 (7.0) supports torch.compile but not Ampere+ features."""
+        """V100 (7.0) does not support Ampere+ features."""
         gpu = GPUCapabilities(
             compute_capability=(7, 0),
             device_name="Tesla V100-SXM2-16GB",
             total_memory_gb=16.0,
         )
 
-        assert gpu.supports_torch_compile() is True
         assert gpu.supports_cutlass_moe() is False
         assert gpu.supports_flashinfer_fused_topk() is False
         assert gpu.supports_fp8_efficient() is False
@@ -87,14 +86,13 @@ class TestGPUCapabilities:
         assert gpu.recommended_moe_backend() == "triton"
 
     def test_t4_capabilities(self) -> None:
-        """T4 (7.5) supports torch.compile but not Ampere+ features."""
+        """T4 (7.5) does not support Ampere+ features."""
         gpu = GPUCapabilities(
             compute_capability=(7, 5),
             device_name="Tesla T4",
             total_memory_gb=16.0,
         )
 
-        assert gpu.supports_torch_compile() is True
         assert gpu.supports_cutlass_moe() is False
         assert gpu.supports_flashinfer_fused_topk() is False
         assert gpu.supports_fp8_efficient() is False

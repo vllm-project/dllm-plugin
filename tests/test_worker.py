@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from dllm_plugin.config import DRAFT_SIZE, LLADA2_DEFAULT_MASK_TOKEN_ID
+from dllm_plugin.config import DRAFT_SIZE
 from dllm_plugin.remasking import Llada2DefaultRemaskingPolicy, RemaskStepResult
 from dllm_plugin.worker import (
     DllmWorker,
@@ -19,7 +19,7 @@ from dllm_plugin.worker import (
 
 
 def _draft_all_mask() -> tuple[int, ...]:
-    return (LLADA2_DEFAULT_MASK_TOKEN_ID,) * DRAFT_SIZE
+    return (1,) * DRAFT_SIZE
 
 
 def _mock_logits(*, vocab_size: int = 128) -> list[list[float]]:
@@ -46,7 +46,7 @@ class _BadBlockPolicy:
         del input_draft, logits, remasking_config
         return RemaskStepResult(
             committed_token_ids=(),
-            next_input_block=(LLADA2_DEFAULT_MASK_TOKEN_ID,),
+            next_input_block=(1,),
         )
 
 
@@ -77,13 +77,17 @@ def test_worker_one_block_flow_maps_to_scheduler_contract(
         input_draft=_draft_all_mask(),
         logits=_mock_logits(),
         policy=policy,
-        remasking_config={"num_transfer": DRAFT_SIZE},
+        remasking_config={
+            "num_transfer": DRAFT_SIZE,
+            "mask_token_id": 1,
+            "commit_confidence_threshold": 0.01,
+        },
     )
 
     assert step.request_id == "r1"
     assert len(step.sampled_token_ids) == DRAFT_SIZE
     assert len(step.next_input_block) == DRAFT_SIZE
-    assert step.next_input_block == (LLADA2_DEFAULT_MASK_TOKEN_ID,) * DRAFT_SIZE
+    assert step.next_input_block == (1,) * DRAFT_SIZE
     assert worker.take_draft_token_ids(step) == step.next_input_block
 
     sched_result = worker.as_scheduler_result(step)

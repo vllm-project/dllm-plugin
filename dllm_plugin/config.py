@@ -35,11 +35,7 @@ def _read_draft_size() -> int:
 #: ``VLLM_DLLM_DRAFT_SIZE`` so scheduler/worker/remasking share one value.
 DRAFT_SIZE: Final[int] = _read_draft_size()
 
-#: Primary registered architecture key for the real LLaDA2.0 vLLM model module
-#: (HF mapping). Until Phase 7 (#12), registration points at the **mock** class
-#: (see ``docs/MOCK_STACK_MODEL.md``); HF configs using this name get stub logits.
-#: Prefer ``DLLM_MOCK_STACK_MODEL_ID`` when you want an explicit test-only id.
-#: Exact registry string may be refined when ``register()`` lands (issue #5).
+#: Registered architecture key for the LLaDA2.0 vLLM model module (HF mapping).
 LLADA2_ARCHITECTURE_NAME: Final[str] = "LLaDA2ForCausalLM"
 
 #: HuggingFace architecture name used by inclusionAI/LLaDA2.0-mini model config.
@@ -99,7 +95,7 @@ def resolve_strict_stack_validation(explicit: bool | None) -> bool:
 
 #: Placeholder **mask** token id for :mod:`~dllm_plugin.remasking.llada2_default`
 #: ``next_input_block`` remasked positions until real HF config lands (Phase 7 / #12).
-LLADA2_DEFAULT_MASK_TOKEN_ID: Final[int] = 1
+LLADA2_DEFAULT_MASK_TOKEN_ID: Final[int] = 156895
 
 #: Default number of denoise steps used to build the per-step **transfer count**
 #: schedule (``block_len // steps`` layout). Matches configured ``DRAFT_SIZE`` for
@@ -110,7 +106,15 @@ LLADA2_DEFAULT_DENOISE_STEPS: Final[int] = DRAFT_SIZE
 #: **commit** that position (issue #7). Tuned so the Phase 2 mock stub logits
 #: (zeros + ``1.0`` at index ``0``, ``docs/MOCK_STACK_MODEL.md``) commit under
 #: default settings for stack tests.
-LLADA2_DEFAULT_COMMIT_CONFIDENCE_THRESHOLD: Final[float] = 0.01
+LLADA2_DEFAULT_COMMIT_CONFIDENCE_THRESHOLD: Final[float] = 0.9
+
+#: Gumbel-max temperature for stochastic sampling.  ``0.0`` = deterministic
+#: argmax (dInfer LLaDA2.0 default).  ``> 0`` enables Gumbel-max sampling
+#: with float64 precision per arXiv:2409.02908.
+LLADA2_DEFAULT_TEMPERATURE: Final[float] = 0.0
+
+#: Use float64 precision for softmax confidence computation.
+LLADA2_DEFAULT_USE_FLOAT64: Final[bool] = False
 
 # Phase 7: Real LLaDA2.0 model configuration (issue #12)
 

@@ -78,6 +78,10 @@ def test_runtime_contract_progress_with_default_policy() -> None:
         request_id="r1",
         input_draft=input_draft,
         logits=logits,
+        remasking_config={
+            "mask_token_id": 1,
+            "commit_confidence_threshold": 0.01,
+        },
     )
     assert len(step.sampled_token_ids) > 0
     assert len(step.next_input_block) == DRAFT_SIZE

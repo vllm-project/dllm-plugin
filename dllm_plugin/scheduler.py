@@ -28,6 +28,7 @@ class DllmRequestState:
 
     request_id: str
     num_computed_tokens: int = 0
+    num_prompt_tokens: int = 0
     spec_token_ids: tuple[int, ...] | None = None
 
 

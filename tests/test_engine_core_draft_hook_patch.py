@@ -143,6 +143,14 @@ def test_register_dllm_applies_runtime_patch_when_apply_env_opt_in(
     if not engine_core_draft_hook_patch_needed():
         pytest.skip("installed vLLM already matches PR #36391 post_step layout")
 
+    # Check if register_dllm still applies the patch (removed when using fork)
+    from dllm_plugin import register_dllm as _rd
+
+    if not hasattr(_rd, "_apply_engine_core_draft_hook"):
+        pytest.skip(
+            "register_dllm no longer applies engine core patch (fork handles it)"
+        )
+
     orig_post = EngineCore.post_step
     orig_step = EngineCore.step_with_batch_queue
     try:

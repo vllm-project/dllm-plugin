@@ -36,3 +36,30 @@ benchmarks.json
 values.yaml
 PR38_REVIEW.md
 PR38_CRITICAL_REVIEW.md
+
+# Claude Code
+.claude/
+
+# Investigation artifacts (repo root only — leading / prevents matching in subdirs)
+/investigation_captures/
+/validation_outputs_hf/
+/validation_results/
+/*_RESULTS.md
+/*_ANALYSIS.md
+/*_COMPARISON*.md
+/*_VALIDATION*.md
+/*_INVESTIGATION*.md
+/*_ROOT_CAUSE*.md
+/*_BUG*.md
+/*_STATUS*.md
+/*_FIX*.md
+/*_EVIDENCE*.md
+/*_FINDINGS*.md
+/*_SETUP.md
+/DIVERGENCE_ISOLATED.md
+/NEXT_STEPS.md
+/NUMERICAL_EQUIVALENCE_CONFIG.yaml
+/IMPLEMENTATION_SUMMARY.md
+/SOFTMAX_NORMALIZATION_FIX.md
+tools/investigation/
+vllm_upstream_reference/

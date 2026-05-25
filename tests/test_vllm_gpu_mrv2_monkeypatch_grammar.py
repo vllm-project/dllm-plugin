@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""GPU integration: monkeypatch ``GPUModelRunner`` to ``DllmGPUModelRunner`` + regex SO.
+"""GPU integration: LLaDA2ModelState via get_model_state_cls() + regex SO.
 
 Intended for Helm GPU CI (see ``tools/helm/dllm-plugin-gpu-test``).
 On CPU-only runners tests skip.
@@ -27,27 +27,22 @@ def mock_llada2_model_dir() -> Path:
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA GPU")
-def test_gpu_injects_dllm_mrv2_via_monkeypatch_stock_worker(
+def test_gpu_model_state_discovery_via_stock_worker(
     monkeypatch: pytest.MonkeyPatch,
     mock_llada2_model_dir: Path,
 ) -> None:
-    """Patch ``GPUModelRunner`` before worker init; use stock ``Worker``.
+    """Stock Worker discovers LLaDA2ModelState via get_model_state_cls().
 
-    Disables strict stack validation so ``DllmRuntimeScheduler`` pairs with
-    vLLM's ``GpuWorker`` (plan monkeypatch recipe).
+    Disables strict stack validation so stock Worker pairs with
+    DllmRuntimeScheduler.
     """
-    import vllm.v1.worker.gpu.model_runner as gpu_mr
     from vllm import LLM, SamplingParams
     from vllm.inputs import TokensPrompt
-
-    from dllm_plugin.gpu_model_runner import DllmGPUModelRunner
 
     monkeypatch.setenv("VLLM_PLUGINS", "dllm")
     monkeypatch.setenv("VLLM_USE_V2_MODEL_RUNNER", "1")
     monkeypatch.setenv("VLLM_ENABLE_V1_MULTIPROCESSING", "0")
     monkeypatch.setenv("VLLM_DLLM_STRICT_STACK_VALIDATION", "0")
-
-    monkeypatch.setattr(gpu_mr, "GPUModelRunner", DllmGPUModelRunner)
 
     llm = LLM(
         model=str(mock_llada2_model_dir),
@@ -66,7 +61,7 @@ def test_gpu_injects_dllm_mrv2_via_monkeypatch_stock_worker(
     )
 
     mr = llm.llm_engine.model_executor.driver_worker.worker.model_runner
-    assert type(mr).__name__ == "DllmGPUModelRunner"
+    assert type(mr.model_state).__name__ == "LLaDA2ModelState"
 
     outputs = llm.generate(
         [TokensPrompt(prompt_token_ids=[1, 2, 3, 4])],
@@ -137,10 +132,6 @@ def test_gpu_runtime_adapters_strict_stack_regex_structured_output(
     mock_llada2_model_dir: Path,
 ) -> None:
     """Full runtime adapters + regex SO with strict stack validation (default on).
-
-    Unlike :func:`test_gpu_injects_dllm_mrv2_via_monkeypatch_stock_worker`, this does
-    not set ``VLLM_DLLM_STRICT_STACK_VALIDATION=0``. Scheduler/worker use dotted FQCNs
-    (not ``dllm_plugin.Scheduler`` / ``dllm_plugin.Worker`` aliases).
 
     Uses ``VLLM_DLLM_SKIP_FIRST_BLOCK_SEED=1`` for the same grammar-bitmask sizing
     rationale as :func:`test_gpu_dllm_stack_structured_output_regex_grammar`.

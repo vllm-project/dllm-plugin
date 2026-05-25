@@ -9,7 +9,6 @@ import pytest
 from dllm_plugin.config import (
     DRAFT_SIZE,
     LLADA2_DEFAULT_COMMIT_CONFIDENCE_THRESHOLD,
-    LLADA2_DEFAULT_MASK_TOKEN_ID,
 )
 from dllm_plugin.remasking import (
     Llada2DefaultRemaskingPolicy,
@@ -17,9 +16,17 @@ from dllm_plugin.remasking import (
     validate_remask_step_result,
 )
 
+# Unit tests use a small mask token ID that fits in small vocab sizes.
+# Production uses 156895 (LLaDA2's <|mask|> token).
+_TEST_MASK_ID = 1
+_TEST_CFG: dict[str, object] = {
+    "mask_token_id": _TEST_MASK_ID,
+    "commit_confidence_threshold": 0.01,
+}
+
 
 def _draft_all_mask() -> tuple[int, ...]:
-    return (LLADA2_DEFAULT_MASK_TOKEN_ID,) * DRAFT_SIZE
+    return (_TEST_MASK_ID,) * DRAFT_SIZE
 
 
 def _mock_stub_row(*, vocab_size: int = 256) -> list[float]:
@@ -42,10 +49,12 @@ def test_mock_shaped_logits_all_mask_terminal() -> None:
     """Stub logits: all masks high-confidence; one step clears the block."""
     policy = Llada2DefaultRemaskingPolicy()
     logits = _mock_logits(vocab_size=256)
-    out = policy.apply(input_draft=_draft_all_mask(), logits=logits)
+    out = policy.apply(
+        input_draft=_draft_all_mask(), logits=logits, remasking_config=_TEST_CFG
+    )
     validate_remask_step_result(out)
     assert out.committed_token_ids == (0,) * DRAFT_SIZE
-    assert out.next_input_block == (LLADA2_DEFAULT_MASK_TOKEN_ID,) * DRAFT_SIZE
+    assert out.next_input_block == (_TEST_MASK_ID,) * DRAFT_SIZE
 
 
 def test_uniform_logits_topk_one_transfer_option_a() -> None:
@@ -53,10 +62,12 @@ def test_uniform_logits_topk_one_transfer_option_a() -> None:
     policy = Llada2DefaultRemaskingPolicy()
     row = [0.0] * 128
     logits = [list(row) for _ in range(DRAFT_SIZE)]
-    out = policy.apply(input_draft=_draft_all_mask(), logits=logits)
+    out = policy.apply(
+        input_draft=_draft_all_mask(), logits=logits, remasking_config=_TEST_CFG
+    )
     validate_remask_step_result(out)
     assert out.committed_token_ids == ()
-    expected = [LLADA2_DEFAULT_MASK_TOKEN_ID] * DRAFT_SIZE
+    expected = [_TEST_MASK_ID] * DRAFT_SIZE
     expected[0] = 0
     assert out.next_input_block == tuple(expected)
 
@@ -69,10 +80,10 @@ def test_logit_tie_breaks_to_smallest_index_topk() -> None:
     out = policy.apply(
         input_draft=_draft_all_mask(),
         logits=logits,
-        remasking_config={"commit_confidence_threshold": 0.99},
+        remasking_config={"mask_token_id": 1, "commit_confidence_threshold": 0.99},
     )
     assert out.committed_token_ids == ()
-    expected = [LLADA2_DEFAULT_MASK_TOKEN_ID] * DRAFT_SIZE
+    expected = [_TEST_MASK_ID] * DRAFT_SIZE
     expected[0] = 0
     assert out.next_input_block == tuple(expected)
 
@@ -81,7 +92,7 @@ def test_preserve_decoded_positions_only_masked_transfer() -> None:
     """Literal tokens stay fixed; only mask slots use logits-driven transfers."""
     policy = Llada2DefaultRemaskingPolicy()
     prefix = (42,) * (DRAFT_SIZE // 2)
-    suffix_masks = (LLADA2_DEFAULT_MASK_TOKEN_ID,) * (DRAFT_SIZE // 2)
+    suffix_masks = (_TEST_MASK_ID,) * (DRAFT_SIZE // 2)
     draft = prefix + suffix_masks
     row_low = [0.0] * 128
     row_high = [0.0] * 128
@@ -97,7 +108,7 @@ def test_preserve_decoded_positions_only_masked_transfer() -> None:
     out = policy.apply(
         input_draft=draft,
         logits=logits,
-        remasking_config={"commit_confidence_threshold": 0.15},
+        remasking_config={"mask_token_id": 1, "commit_confidence_threshold": 0.15},
     )
     assert out.committed_token_ids == ()
     next_list = list(out.next_input_block)
@@ -105,20 +116,20 @@ def test_preserve_decoded_positions_only_masked_transfer() -> None:
     for i in range(DRAFT_SIZE // 2, DRAFT_SIZE // 2 + DRAFT_SIZE // 4):
         assert next_list[i] == 3
     for i in range(DRAFT_SIZE // 2 + DRAFT_SIZE // 4, DRAFT_SIZE):
-        assert next_list[i] == LLADA2_DEFAULT_MASK_TOKEN_ID
+        assert next_list[i] == _TEST_MASK_ID
 
 
 def test_terminal_input_already_unmasked() -> None:
     """No mask in input: full block commit and all-mask next draft."""
     policy = Llada2DefaultRemaskingPolicy()
-    # Avoid token id ``LLADA2_DEFAULT_MASK_TOKEN_ID`` in the draft (e.g. ``1``).
+    # Avoid token id ``_TEST_MASK_ID`` in the draft (e.g. ``1``).
     draft = tuple(i * 2 for i in range(DRAFT_SIZE))
     # vocab_size must be > max(draft) = 2 * (DRAFT_SIZE - 1) = 62
     logits = _mock_logits(vocab_size=64)
-    out = policy.apply(input_draft=draft, logits=logits)
+    out = policy.apply(input_draft=draft, logits=logits, remasking_config=_TEST_CFG)
     validate_remask_step_result(out)
     assert out.committed_token_ids == draft
-    assert out.next_input_block == (LLADA2_DEFAULT_MASK_TOKEN_ID,) * DRAFT_SIZE
+    assert out.next_input_block == (_TEST_MASK_ID,) * DRAFT_SIZE
 
 
 def test_high_confidence_flood_transfers_all_above_threshold() -> None:
@@ -132,6 +143,7 @@ def test_high_confidence_flood_transfers_all_above_threshold() -> None:
         input_draft=_draft_all_mask(),
         logits=logits,
         remasking_config={
+            "mask_token_id": 1,
             "commit_confidence_threshold": 0.15,
             "num_transfer": 2,
         },
@@ -140,7 +152,7 @@ def test_high_confidence_flood_transfers_all_above_threshold() -> None:
     for i in range(5):
         assert out.next_input_block[i] == 7
     for i in range(5, DRAFT_SIZE):
-        assert out.next_input_block[i] == LLADA2_DEFAULT_MASK_TOKEN_ID
+        assert out.next_input_block[i] == _TEST_MASK_ID
 
 
 def test_topk_branch_all_strictly_below_threshold() -> None:
@@ -152,12 +164,13 @@ def test_topk_branch_all_strictly_below_threshold() -> None:
         input_draft=_draft_all_mask(),
         logits=logits,
         remasking_config={
+            "mask_token_id": 1,
             "commit_confidence_threshold": 1.0,
             "num_transfer": 3,
         },
     )
     assert out.committed_token_ids == ()
-    expected = [LLADA2_DEFAULT_MASK_TOKEN_ID] * DRAFT_SIZE
+    expected = [_TEST_MASK_ID] * DRAFT_SIZE
     for i in range(3):
         expected[i] = 0
     assert out.next_input_block == tuple(expected)
@@ -171,10 +184,10 @@ def test_threshold_strict_excludes_equality() -> None:
     out = policy.apply(
         input_draft=_draft_all_mask(),
         logits=logits,
-        remasking_config={"commit_confidence_threshold": 0.125},
+        remasking_config={"mask_token_id": 1, "commit_confidence_threshold": 0.125},
     )
     assert out.committed_token_ids == ()
-    expected = [LLADA2_DEFAULT_MASK_TOKEN_ID] * DRAFT_SIZE
+    expected = [_TEST_MASK_ID] * DRAFT_SIZE
     expected[0] = 0
     assert out.next_input_block == tuple(expected)
 
@@ -184,9 +197,11 @@ def test_option_a_mid_step_empty_committed() -> None:
     policy = Llada2DefaultRemaskingPolicy()
     row = [0.0] * 128
     logits = [list(row) for _ in range(DRAFT_SIZE)]
-    out = policy.apply(input_draft=_draft_all_mask(), logits=logits)
+    out = policy.apply(
+        input_draft=_draft_all_mask(), logits=logits, remasking_config=_TEST_CFG
+    )
     assert out.committed_token_ids == ()
-    assert LLADA2_DEFAULT_MASK_TOKEN_ID in out.next_input_block
+    assert _TEST_MASK_ID in out.next_input_block
 
 
 def test_threshold_above_mock_softmax_no_terminal() -> None:
@@ -196,11 +211,11 @@ def test_threshold_above_mock_softmax_no_terminal() -> None:
     out = policy.apply(
         input_draft=_draft_all_mask(),
         logits=logits,
-        remasking_config={"commit_confidence_threshold": 0.011},
+        remasking_config={"mask_token_id": 1, "commit_confidence_threshold": 0.011},
     )
     assert out.committed_token_ids == ()
     assert out.next_input_block[0] == 0
-    assert LLADA2_DEFAULT_MASK_TOKEN_ID in out.next_input_block
+    assert _TEST_MASK_ID in out.next_input_block
 
 
 def test_custom_mask_token_id() -> None:
@@ -221,7 +236,9 @@ def test_custom_mask_token_id() -> None:
 def test_logits_none_raises() -> None:
     policy = Llada2DefaultRemaskingPolicy()
     with pytest.raises(ValueError, match="logits is required"):
-        policy.apply(input_draft=_draft_all_mask(), logits=None)
+        policy.apply(
+            input_draft=_draft_all_mask(), logits=None, remasking_config=_TEST_CFG
+        )
 
 
 def test_wrong_input_draft_length_raises() -> None:
@@ -234,14 +251,18 @@ def test_wrong_logits_first_dim_raises() -> None:
     policy = Llada2DefaultRemaskingPolicy()
     short = [_mock_stub_row() for _ in range(3)]
     with pytest.raises(ValueError, match="first dimension"):
-        policy.apply(input_draft=_draft_all_mask(), logits=short)
+        policy.apply(
+            input_draft=_draft_all_mask(), logits=short, remasking_config=_TEST_CFG
+        )
 
 
 def test_inconsistent_vocab_width_raises() -> None:
     policy = Llada2DefaultRemaskingPolicy()
     bad_logits = [[0.0, 1.0]] + [[0.0] * 8 for _ in range(DRAFT_SIZE - 1)]
     with pytest.raises(ValueError, match="inconsistent vocab"):
-        policy.apply(input_draft=_draft_all_mask(), logits=bad_logits)
+        policy.apply(
+            input_draft=_draft_all_mask(), logits=bad_logits, remasking_config=_TEST_CFG
+        )
 
 
 def test_denoise_steps_zero_raises() -> None:
@@ -250,7 +271,7 @@ def test_denoise_steps_zero_raises() -> None:
         policy.apply(
             input_draft=_draft_all_mask(),
             logits=_mock_logits(),
-            remasking_config={"denoise_steps": 0},
+            remasking_config={"mask_token_id": 1, "denoise_steps": 0},
         )
 
 
@@ -262,7 +283,11 @@ def test_torch_tensor_logits_matches_nested_list() -> None:
     torch = pytest.importorskip("torch")
     policy = Llada2DefaultRemaskingPolicy()
     rows = _mock_logits(vocab_size=16)
-    list_out = policy.apply(input_draft=_draft_all_mask(), logits=rows)
+    list_out = policy.apply(
+        input_draft=_draft_all_mask(), logits=rows, remasking_config=_TEST_CFG
+    )
     tensor = torch.tensor(rows, dtype=torch.float32)
-    tensor_out = policy.apply(input_draft=_draft_all_mask(), logits=tensor)
+    tensor_out = policy.apply(
+        input_draft=_draft_all_mask(), logits=tensor, remasking_config=_TEST_CFG
+    )
     assert list_out == tensor_out

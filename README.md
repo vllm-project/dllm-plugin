@@ -40,17 +40,21 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for pre-commit, CI parity, and contributi
 
 **PyPI vs Python package:** install the distribution as **`vllm-dllm-plugin`** (`pip install vllm-dllm-plugin` / `uv add vllm-dllm-plugin`). Import and CLI class paths use the **`dllm_plugin`** package name.
 
+**Fork requirement:** Production use requires the [`dllm-fork-coherent`](https://github.com/AlonKellner-RedHat/vllm/tree/dllm-fork-coherent) branch of vLLM, which adds non-causal attention support (`use_non_causal` for FlashInfer), draft token GPU buffer writes, and slot mapping remap for first-block recomputation. The base v0.20.2 release will produce incorrect (causal) attention for diffusion models.
+
 **Quick start:**
 
 ```bash
 export VLLM_PLUGINS=dllm  # Entry point name is "dllm" (not "dllm_plugin")
 export VLLM_USE_V2_MODEL_RUNNER=1
-export VLLM_ENABLE_V1_MULTIPROCESSING=0
+export PYTHONPATH=/path/to/vllm-fork:$PYTHONPATH
 
 vllm serve inclusionAI/LLaDA2.0-mini \
   --max-model-len 2048 \
   --max-num-seqs 32 \
   --trust-remote-code \
+  --enforce-eager \
+  --no-async-scheduling \
   --scheduler-cls dllm_plugin.runtime_scheduler.DllmRuntimeScheduler \
   --worker-cls dllm_plugin.runtime_worker.DllmRuntimeWorker
 ```
@@ -62,9 +66,8 @@ vllm serve inclusionAI/LLaDA2.0-mini \
 **Known Limitations:**
 - ✅ **Tensor Parallelism (TP)** - TP=1/2/4/8 validated, recommended for models >70B (TP overhead exceeds benefits for small models like LLaDA2.0-mini, see [TP2_BENCHMARK_RESULTS.md](docs/TP2_BENCHMARK_RESULTS.md))
 - ❌ Pipeline parallelism (PP > 1) not supported
-- ❌ CUDAGraph optimization disabled (~10-15% ITL impact)
-- ⚠️ MoE router precision defaults to FP32 (BF16 experimental via `VLLM_LLADA2_BF16_ROUTER=1`)
-- ⚠️ torch.compile shows no performance benefit for mini model + single-request workload
+- ✅ CUDAGraph supported via UNIFORM_BATCH mode (model forward graph-captured, hooks run eagerly)
+- ✅ MoE routing delegated to FusedMoE (FP32 precision by default)
 
 See [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) for complete details and tracking issues.
 
